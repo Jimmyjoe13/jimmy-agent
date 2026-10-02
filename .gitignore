@@ -19,6 +19,7 @@ dist-ssr/
 
 # ── Tauri ──────────────────────────────────────────────────────────────────
 /desktop/src-tauri/gen/
+/desktop/dist/
 /desktop/src-tauri/target/
 
 # ── Godot ──────────────────────────────────────────────────────────────────
@@ -32,6 +33,8 @@ dist-ssr/
 /data/jimmy.db
 /data/jimmy.db-shm
 /data/jimmy.db-wal
+/data/config.json
+/data/permissions.json
 /data/audio/
 /data/logs/
 /data/runtime/
