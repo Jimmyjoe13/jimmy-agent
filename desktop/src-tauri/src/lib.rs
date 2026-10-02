@@ -1,0 +1,167 @@
+//! Application de bureau Jimmy.
+//!
+//! Rôle de ce binaire : assembler la fenêtre, le pont HTTP et le crate
+//! `jimmy-agent`, puis exposer des commandes fines à l'interface. Toute la
+//! logique reste dans le crate agent, ce qui la rend testable sans fenêtre.
+
+mod bridge;
+mod commands;
+
+use std::sync::Arc;
+
+use jimmy_agent::config::Secrets;
+use jimmy_agent::paths::{load_dotenv, Paths};
+use jimmy_agent::voice::VoiceRuntime;
+use tauri::{Manager, WebviewWindow};
+
+/// État partagé entre les commandes Tauri.
+///
+/// `Clone` est exigé par `axum`, qui clone l'état à chaque requête du pont.
+#[derive(Clone)]
+pub struct AppState {
+    pub app: Arc<jimmy_agent::App>,
+    pub app_handle: tauri::AppHandle,
+    /// Fenêtre principale, si elle existe au moment de la commande.
+    pub window: Option<WebviewWindow>,
+}
+
+/// Point d'entrée de la fenêtre principale.
+///
+/// La fenêtre démarre **cachée** : Jimmy doit apparaître comme un personnage
+/// sur le bureau, pas comme une fenêtre qui clignote. C'est l'avatar Godot qui
+/// attire l'attention ; la fenêtre complète n'apparaît que lorsque l'utilisateur
+/// le demande (clic sur l'avatar, ou bouton de la bulle).
+#[tauri::command]
+fn show_main(state: tauri::State<'_, AppState>) {
+    if let Some(window) = &state.window {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+pub fn run() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let paths = Paths::discover().expect("chemins Jimmy introuvables");
+
+    // Le `.env` est chargé avant tout : les secrets doivent exister avant la
+    // construction de l'application, sinon les clients tourneraient à vide. Les
+    // valeurs déjà présentes dans l'environnement gagnent.
+    let dotenv = if paths.dev {
+        paths.app.join(".env")
+    } else {
+        paths.data.join(".env")
+    };
+    if let Err(error) = load_dotenv(&dotenv) {
+        log::warn!("[config] .env illisible : {error}");
+    } else if !dotenv.is_file() {
+        log::info!("[config] aucun .env — fonctionnement limité (voir .env.example)");
+    }
+    let secrets = Secrets::from_env();
+    let missing = jimmy_agent::config::missing_secrets(&secrets);
+    if !missing.is_empty() {
+        log::warn!("[config] secrets manquants : {}", missing.join(", "));
+    }
+
+    let app = match jimmy_agent::App::new(paths, secrets) {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("Jimmy n'a pas pu démarrer : {error}");
+            std::process::exit(1);
+        }
+    };
+
+    tauri::Builder::default()
+            .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }))
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))
+            .setup(move |handle| {
+                let app_handle = handle.app_handle().clone();
+                let settings = app.settings();
+
+                let state = AppState {
+                    app: app.clone(),
+                    app_handle: app_handle.clone(),
+                    window: handle.get_webview_window("main"),
+                };
+                let bridge_state = state.clone();
+
+                // Le pont HTTP démarre avant la fenêtre : Godot peut ainsi
+                // appeler dès son premier clic.
+                if let Err(error) = tauri::async_runtime::block_on(bridge::start(
+                    bridge_state,
+                    &settings.avatar.bridge_host,
+                    settings.avatar.bridge_port,
+                )) {
+                    log::warn!("[bridge] {error}");
+                }
+
+                handle.manage(state);
+                handle.manage(Arc::new(VoiceRuntime::new(settings.voice.input_sample_rate)));
+
+                if !settings.ui.first_run_done {
+                    // Premier lancement : on montre l'interface pour l'onboarding.
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.show();
+                    }
+                }
+
+                // Fermer la fenêtre ne doit pas tuer Jimmy : il reste vivant
+                // sur le bureau avec son avatar.
+                let hide_handle = app_handle.clone();
+                if let Some(window) = handle.get_webview_window("main") {
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            let _ = hide_handle.get_webview_window("main").map(|w| w.hide());
+                        }
+                    });
+                }
+                Ok(())
+            })
+            .invoke_handler(tauri::generate_handler![
+                commands::bootstrap,
+                commands::status,
+                commands::chat,
+                commands::sessions,
+                commands::session_messages,
+                commands::delete_session,
+                commands::get_settings,
+                commands::save_settings,
+                commands::list_models,
+                commands::complete_onboarding,
+                commands::set_startup,
+                commands::get_permissions,
+                commands::save_permissions,
+                commands::memory_list,
+                commands::memory_forget,
+                commands::skills_list,
+                commands::skill_read,
+                commands::tts_preview,
+                commands::voice_devices,
+                commands::voice_start,
+                commands::voice_stop,
+                commands::stt_transcribe,
+                commands::avatar_start,
+                commands::avatar_stop,
+                commands::avatar_state,
+                commands::avatar_say,
+                commands::avatar_quality,
+                commands::wake_word_test,
+                commands::wake_word_strip,
+                commands::doctor,
+                commands::paths_info,
+                commands::reload_secrets,
+                commands::check_update,
+                show_main,
+            ])
+            .run(tauri::generate_context!())
+            .expect("échec du démarrage de la fenêtre Jimmy");
+}

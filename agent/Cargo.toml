@@ -1,0 +1,26 @@
+[package]
+name = "jimmy-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Cœur de Jimmy : agent, outils, mémoire, skills, MCP, providers LLM/STT/TTS."
+
+[lib]
+name = "jimmy_agent"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+cpal.workspace = true
+hound.workspace = true

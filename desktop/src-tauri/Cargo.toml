@@ -1,0 +1,32 @@
+[package]
+name = "jimmy-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Application de bureau Jimmy (Tauri)."
+
+[lib]
+name = "jimmy_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "jimmy"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+jimmy-agent.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+tokio.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+env_logger.workspace = true

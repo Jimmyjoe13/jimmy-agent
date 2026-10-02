@@ -1,0 +1,46 @@
+# ── Secrets ────────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ── Rust / Cargo ───────────────────────────────────────────────────────────
+/target
+**/target
+*.pdb
+
+# ── Node / Frontend ───────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+
+# ── Tauri ──────────────────────────────────────────────────────────────────
+/desktop/src-tauri/gen/
+/desktop/src-tauri/target/
+
+# ── Godot ──────────────────────────────────────────────────────────────────
+# Le cache d'import Godot et les fichiers générés ne doivent pas être versionnés.
+/godot/.godot/
+/godot/.import/
+/godot/android/
+*.translation
+
+# ── Données locales de Jimmy (runtime) ────────────────────────────────────
+/data/jimmy.db
+/data/jimmy.db-shm
+/data/jimmy.db-wal
+/data/audio/
+/data/logs/
+/data/runtime/
+/data/*.log
+
+# ── Composants locaux téléchargés (whisper.cpp, modèles) ─────────────────
+/data/components/
+
+# ── Système ────────────────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+.DS_Store
