@@ -77,6 +77,12 @@ const POSES := {
 	},
 }
 
+## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
+## tête est rapprochée du col pour une silhouette plus compacte.
+const HEAD_Y := 0.30
+## Épaisseur du contour (unités monde, ~1,5 px au cadrage actuel).
+const OUTLINE_WIDTH := 0.0075
+const OUTLINE_COLOR := Color(0.16, 0.08, 0.04)
 ## Vitesse de convergence vers la posture cible (plus élevé = plus réactif).
 const POSE_SPEED := 7.0
 ## Amplitude du clignement des yeux.
@@ -101,6 +107,10 @@ var _tail: Array[Node3D] = []
 var _eyes: Array[Node3D] = []
 var _pupils: Array[Node3D] = []
 var _pose: Dictionary = {}
+## Multiplicateur de tessellation, piloté par le profil graphique (1 = low).
+var _detail := 1.0
+var _outline: StandardMaterial3D
+var _plain_cache: Dictionary = {}
 var _say_until := 0.0
 var _previous_state := ""
 
@@ -116,6 +126,26 @@ var _mat_accent: StandardMaterial3D
 func _ready() -> void:
 	_pose = (POSES[IDLE] as Dictionary).duplicate()
 	_make_materials()
+	_build_body()
+
+
+## Change la finesse du maillage et reconstruit le personnage. L'état et la
+## posture courante sont conservés : seule la géométrie est remplacée.
+func set_detail(detail: float) -> void:
+	if is_equal_approx(detail, _detail):
+		return
+	_detail = detail
+	if is_inside_tree():
+		_rebuild()
+
+
+func _rebuild() -> void:
+	if _body != null:
+		remove_child(_body)
+		_body.queue_free()
+	_tail.clear()
+	_eyes.clear()
+	_pupils.clear()
 	_build_body()
 
 
@@ -187,7 +217,7 @@ func _apply_pose(delta: float) -> void:
 	_head.rotation.x = _pose["head_pitch"] - _look_at.y * 0.22
 	_head.rotation.y = _pose["head_yaw"] + _look_at.x * 0.35
 	_head.rotation.z = _pose["head_roll"]
-	_head.position.y = 0.42 + 0.012 * breathe * bounce
+	_head.position.y = HEAD_Y + 0.012 * breathe * bounce
 
 	# Mâchoire : ouverture pendant la parole.
 	var jaw := float(_pose["jaw"])
@@ -225,30 +255,77 @@ func _apply_pose(delta: float) -> void:
 # ── Construction du personnage ───────────────────────────────────────────────
 
 func _make_materials() -> void:
+	# Contour « inverted hull » : une seconde passe, gonflée le long des
+	# normales et rendue par l'intérieur (faces avant éliminées). Seul le bord
+	# dépasse : c'est ce qui rend la silhouette lisible sur un bureau chargé.
+	_outline = StandardMaterial3D.new()
+	_outline.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_outline.cull_mode = BaseMaterial3D.CULL_FRONT
+	_outline.albedo_color = OUTLINE_COLOR
+	_outline.grow = true
+	_outline.grow_amount = OUTLINE_WIDTH
+
 	_mat_fur = _material(Color(0.80, 0.42, 0.13), 0.92)
 	_mat_cream = _material(Color(0.95, 0.89, 0.79), 0.95)
 	_mat_dark = _material(Color(0.11, 0.08, 0.07), 0.75)
-	_mat_eye = _material(Color(0.98, 0.98, 0.99), 0.35)
-	_mat_pupil = _material(Color(0.05, 0.04, 0.04), 0.30)
+	# Yeux et pupilles sans contour : à cette taille, il les noircirait.
+	_mat_eye = _material(Color(0.98, 0.98, 0.99), 0.35, false)
+	_mat_pupil = _material(Color(0.05, 0.04, 0.04), 0.30, false)
 	_mat_shirt = _material(Color(0.16, 0.36, 0.72), 0.80)
 	_mat_accent = _material(Color(0.95, 0.62, 0.16), 0.70)
 
+	# Fourrure : reflet rasant (rim) qui imite le duvet éclairé par l'arrière,
+	# et relief fin par une normal map générée (aucun fichier d'asset).
+	var fur_normal := _fur_normal_map()
+	for mat in [_mat_fur, _mat_cream]:
+		mat.rim_enabled = true
+		mat.rim = 0.35
+		mat.rim_tint = 0.6
+		mat.normal_enabled = true
+		mat.normal_texture = fur_normal
+		mat.normal_scale = 0.45
+		mat.uv1_scale = Vector3(3.0, 3.0, 1.0)
 
-func _material(color: Color, roughness: float) -> StandardMaterial3D:
+
+## Normal map de fourrure générée à partir d'un bruit : grain fin, sans
+## répétition visible grâce à `seamless`.
+func _fur_normal_map() -> NoiseTexture2D:
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 0.09
+	noise.fractal_octaves = 3
+	var tex := NoiseTexture2D.new()
+	tex.width = 256
+	tex.height = 256
+	tex.seamless = true
+	tex.as_normal_map = true
+	tex.bump_strength = 6.0
+	tex.noise = noise
+	return tex
+
+
+func _material(color: Color, roughness: float, outlined := true) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = roughness
 	mat.metallic = 0.0
 	mat.metallic_specular = 0.35
+	if outlined:
+		mat.next_pass = _outline
 	return mat
+
+
+## Nombre de segments ajusté au profil graphique.
+func _segments(base: int) -> int:
+	return int(round(base * _detail))
 
 
 func _capsule(radius: float, height: float, mat: Material) -> MeshInstance3D:
 	var mesh := CapsuleMesh.new()
 	mesh.radius = radius
 	mesh.height = maxf(height, radius * 2.05)
-	mesh.radial_segments = 16
-	mesh.rings = 6
+	mesh.radial_segments = _segments(16)
+	mesh.rings = _segments(6)
 	mesh.material = mat
 	var node := MeshInstance3D.new()
 	node.mesh = mesh
@@ -259,8 +336,8 @@ func _sphere(radius: float, mat: Material, segments: int = 20) -> MeshInstance3D
 	var mesh := SphereMesh.new()
 	mesh.radius = radius
 	mesh.height = radius * 2.0
-	mesh.radial_segments = segments
-	mesh.rings = int(max(6, segments / 2))
+	mesh.radial_segments = _segments(segments)
+	mesh.rings = _segments(int(max(6, segments / 2)))
 	mesh.material = mat
 	var node := MeshInstance3D.new()
 	node.mesh = mesh
@@ -272,12 +349,25 @@ func _cone(bottom: float, top: float, height: float, mat: Material) -> MeshInsta
 	mesh.bottom_radius = bottom
 	mesh.top_radius = top
 	mesh.height = height
-	mesh.radial_segments = 16
+	mesh.radial_segments = _segments(16)
 	mesh.rings = 4
-	mesh.material = mat
+	# Pas de contour sur les cônes : leurs arêtes vives (normales non lissées
+	# entre flanc et base) font éclater la coque gonflée en éclats visibles.
+	mesh.material = _without_outline(mat)
 	var node := MeshInstance3D.new()
 	node.mesh = mesh
 	return node
+
+
+## Variante du matériau sans passe de contour (mise en cache, partagée).
+func _without_outline(mat: Material) -> Material:
+	if mat.next_pass == null:
+		return mat
+	if not _plain_cache.has(mat):
+		var plain := mat.duplicate() as Material
+		plain.next_pass = null
+		_plain_cache[mat] = plain
+	return _plain_cache[mat]
 
 
 func _box(size: Vector3, mat: Material) -> MeshInstance3D:
@@ -356,10 +446,16 @@ func _build_torso() -> void:
 	chest.scale = Vector3(1.0, 1.0, 0.82)
 	_torso.add_child(chest)
 
-	# Ventre clair.
+	# Bassin : comble le vide entre le bas du torse et le haut des jambes.
+	var hips := _sphere(0.13, _mat_shirt, 20)
+	hips.position = Vector3(0.0, -0.03, 0.0)
+	hips.scale = Vector3(1.05, 0.72, 0.84)
+	_torso.add_child(hips)
+
+	# Ventre clair, enfoncé dans le torse plutôt que posé dessus.
 	var belly := _sphere(0.115, _mat_cream, 16)
-	belly.position = Vector3(0.0, 0.10, 0.10)
-	belly.scale = Vector3(0.9, 1.35, 0.55)
+	belly.position = Vector3(0.0, 0.10, 0.082)
+	belly.scale = Vector3(0.86, 1.30, 0.46)
 	_torso.add_child(belly)
 
 	# Col.
@@ -375,8 +471,14 @@ func _build_arms() -> void:
 	for side in [-1.0, 1.0]:
 		var arm := Node3D.new()
 		arm.name = "Arm%s" % ("L" if side < 0 else "R")
-		arm.position = Vector3(0.165 * side, 0.30, 0.0)
+		# 0,135 et non 0,165 : à hauteur d'épaule, le torse ne fait que
+		# ~0,12 de rayon, le bras flottait à côté du corps.
+		arm.position = Vector3(0.135 * side, 0.30, 0.0)
 		_torso.add_child(arm)
+
+		# Épaule (manche) : raccorde le bras au torse.
+		var shoulder := _sphere(0.058, _mat_shirt, 16)
+		arm.add_child(shoulder)
 
 		var limb := _capsule(0.045, 0.28, _mat_fur)
 		limb.position = Vector3(0.0, -0.14, 0.0)
@@ -400,13 +502,13 @@ func _build_head() -> void:
 	_torso.add_child(neck)
 
 	# Col du cou : sans cette pièce, la tête paraît détachée du buste.
-	var neck_mesh := _capsule(0.066, 0.26, _mat_fur)
-	neck_mesh.position = Vector3(0.0, 0.15, 0.0)
+	var neck_mesh := _capsule(0.066, 0.20, _mat_fur)
+	neck_mesh.position = Vector3(0.0, 0.10, 0.0)
 	neck.add_child(neck_mesh)
 
 	_head = Node3D.new()
 	_head.name = "Head"
-	_head.position = Vector3(0.0, 0.42, 0.0)
+	_head.position = Vector3(0.0, HEAD_Y, 0.0)
 	neck.add_child(_head)
 
 	# Crâne.

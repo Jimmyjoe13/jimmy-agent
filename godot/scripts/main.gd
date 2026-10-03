@@ -16,10 +16,11 @@ const SKIN_DEFAULT := "renard"
 ## coûte peu, d'où `scale_3d = 1.0` dès `medium` (0,85 rendait l'avatar flou).
 ## `ssao` : occlusion ambiante, ce qui « soude » les primitives entre elles.
 ## `shadows` : ombre de la lumière clé, projetée au sol par le capteur d'ombre.
+## `detail` : multiplicateur de tessellation des primitives du personnage.
 const QUALITY_PRESETS := {
-	"low": {"scale_3d": 0.75, "shadows": false, "msaa": Viewport.MSAA_DISABLED, "glow": false, "ssao": false},
-	"medium": {"scale_3d": 1.0, "shadows": true, "msaa": Viewport.MSAA_2X, "glow": false, "ssao": true},
-	"high": {"scale_3d": 1.0, "shadows": true, "msaa": Viewport.MSAA_4X, "glow": true, "ssao": true},
+	"low": {"scale_3d": 0.75, "shadows": false, "msaa": Viewport.MSAA_DISABLED, "glow": false, "ssao": false, "detail": 1.0},
+	"medium": {"scale_3d": 1.0, "shadows": true, "msaa": Viewport.MSAA_2X, "glow": false, "ssao": true, "detail": 1.5},
+	"high": {"scale_3d": 1.0, "shadows": true, "msaa": Viewport.MSAA_4X, "glow": true, "ssao": true, "detail": 2.0},
 }
 
 ## Taille constante : la bulle s'affiche par-dessus l'avatar, la fenêtre ne
@@ -452,6 +453,9 @@ func _apply_quality(level: String) -> void:
 		if preset["glow"]:
 			env_node.environment.glow_intensity = 0.5
 			env_node.environment.glow_bloom = 0.15
+
+	if _jimmy != null:
+		_jimmy.set_detail(preset["detail"])
 
 	Engine.max_fps = 60 if level != "low" else 30
 	print("[godot/main] profil graphique : %s" % level)
