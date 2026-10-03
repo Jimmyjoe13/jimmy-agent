@@ -493,6 +493,17 @@ L'écho du cue dure ~0,5 s ; une parole confirmée ≥ 700 ms avant l'armement
 est l'utilisateur qui enchaîne sa commande pendant la pause qui suit le nom.
 Sans cette règle, « Jimmy… (pause) dis-moi bonjour » perdait la commande.
 
+**44. Un bruit ambiant au niveau du seuil gelait la prise.**
+Journal réel : « parole détectée (niveau 0,0036, seuil 0,0035) » puis une prise
+de **19,9 s pour 250 ms de parole** : le bruit rouvre sans cesse la parole, le
+silence de fin n'arrive jamais, et Jimmy est aveugle pendant ce temps.
+Deux protections : `SpeechTracker::looks_like_noise` (au bout de 3 s, moins de
+15 % de parole confirmée → prise abandonnée) et un **seuil appris des fausses
+alertes** (`learned_floor`, relevé à 1,25 × le niveau de la fausse alerte,
+plafonné à 0,007, retombe en ~2 min). Si Jimmy réagit encore à des bruits :
+activer « Garder les 40 derniers extraits audio » (Paramètres → Écoute) et
+écouter `data/audio/debug/`.
+
 ---
 
 ## Prochaines étapes

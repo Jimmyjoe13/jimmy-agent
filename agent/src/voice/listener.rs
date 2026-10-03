@@ -89,6 +89,11 @@ impl App {
             let mut voice_session: Option<(String, Instant)> = None;
             // Bruit de fond mesuré : le seuil de parole en est un multiple.
             let mut noise_floor: f32 = 0.002;
+            // Seuil appris des fausses alertes : un bruit ambiant proche du
+            // seuil (souffle, ventilateur) déclenchait la prise sans arrêt.
+            // Chaque fausse alerte relève le seuil juste au-dessus de son
+            // niveau ; il redescend lentement (~2 min) quand la pièce se calme.
+            let mut learned_floor: f32 = 0.0;
             // Fin de la fenêtre de conversation continue, si elle est ouverte.
             let mut follow_until: Option<Instant> = None;
             phase(&events, "idle", Duration::ZERO).await;
@@ -113,13 +118,14 @@ impl App {
                     }
                 }
 
+                learned_floor *= 0.999;
                 let live = self.settings();
                 let window = runtime.take_window(onset_samples);
                 if window.is_empty() {
                     continue;
                 }
                 let level = rms(&window);
-                let threshold = vad_threshold(noise_floor, live.voice.vad_threshold);
+                let threshold = vad_threshold(noise_floor, learned_floor, live.voice.vad_threshold);
                 let voiced = voiced_fraction(&window, frame, threshold);
                 if level <= threshold || voiced < ONSET_VOICED_FRACTION {
                     // Pas de parole : le bruit de fond s'adapte (lentement).
@@ -174,6 +180,7 @@ impl App {
                 .await
                 else {
                     log::info!("[voice] fausse alerte : pas de parole confirmée");
+                    learned_floor = learn_from_false_alarm(learned_floor, level);
                     restore(&events, follow_until).await;
                     continue;
                 };
@@ -209,6 +216,7 @@ impl App {
                 );
                 if utterance.trim().is_empty() {
                     log::info!("[voice] rien d'intelligible dans cette prise (bruit)");
+                    learned_floor = learn_from_false_alarm(learned_floor, level);
                     restore(&events, follow_until).await;
                     continue;
                 }
@@ -432,6 +440,10 @@ async fn capture(
         if tracker.ended() {
             break;
         }
+        if tracker.looks_like_noise(buffer.len(), rate) {
+            log::info!("[voice] bruit ambiant (parole éparse) : prise abandonnée");
+            return None;
+        }
         // Le temps est celui de l'audio reçu, pas l'horloge.
         match tracker.speech_start() {
             None if buffer.len() > wait_samples => return None,
@@ -457,9 +469,17 @@ async fn capture(
     })
 }
 
-/// Seuil de parole : 3× le bruit de fond, entre 0,0035 et le plafond réglé.
-pub fn vad_threshold(noise_floor: f32, ceiling: f32) -> f32 {
-    (noise_floor * 3.0).clamp(0.0035, ceiling.max(0.0035))
+/// Seuil de parole : 3× le bruit de fond, ou le niveau appris des fausses
+/// alertes s'il est plus haut ; entre 0,0035 et le plafond réglé.
+pub fn vad_threshold(noise_floor: f32, learned_floor: f32, ceiling: f32) -> f32 {
+    (noise_floor * 3.0).max(learned_floor).clamp(0.0035, ceiling.max(0.0035))
+}
+
+/// Relève le seuil appris juste au-dessus du niveau d'une fausse alerte, sans
+/// jamais dépasser 0,007 : une claque de porte ne doit pas rendre Jimmy sourd
+/// à une voix douce (0,005 à 0,03 mesuré).
+fn learn_from_false_alarm(learned: f32, level: f32) -> f32 {
+    learned.max(level * 1.25).min(0.007)
 }
 
 /// Retire le « Oui ? » de Jimmy capté par le micro en tête de commande.
@@ -577,10 +597,22 @@ mod tests {
     #[test]
     fn seuil_adaptatif_borne() {
         // Micro très silencieux : plancher à 0,0035.
-        assert_eq!(vad_threshold(0.0005, 0.012), 0.0035);
+        assert_eq!(vad_threshold(0.0005, 0.0, 0.012), 0.0035);
         // Pièce bruyante : 3× le bruit de fond.
-        assert!((vad_threshold(0.002, 0.012) - 0.006).abs() < 1e-6);
+        assert!((vad_threshold(0.002, 0.0, 0.012) - 0.006).abs() < 1e-6);
         // Jamais au-dessus du plafond réglé.
-        assert_eq!(vad_threshold(0.02, 0.012), 0.012);
+        assert_eq!(vad_threshold(0.02, 0.0, 0.012), 0.012);
+    }
+
+    #[test]
+    fn le_seuil_apprend_des_fausses_alertes() {
+        // Fausse alerte à 0,0036 (seuil de 0,0035) : le seuil passe à 0,0045.
+        let learned = learn_from_false_alarm(0.0, 0.0036);
+        assert!((learned - 0.0045).abs() < 1e-6);
+        assert!(vad_threshold(0.0010, learned, 0.012) > 0.0036);
+        // Une claque (0,05) ne rend pas Jimmy sourd : plafonné à 0,007.
+        assert_eq!(learn_from_false_alarm(0.0, 0.05), 0.007);
+        // Un niveau déjà appris plus haut n'est pas abaissé.
+        assert_eq!(learn_from_false_alarm(0.006, 0.0036), 0.006);
     }
 }

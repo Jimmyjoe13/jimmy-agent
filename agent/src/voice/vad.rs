@@ -24,6 +24,13 @@ pub const FRAME_MS: usize = 50;
 /// Parole antérieure à l'armement : en dessous, c'est l'écho du « Oui ? ».
 pub const PRE_ARMED_MIN_MS: u64 = 700;
 
+/// Délai (depuis le premier son) avant de juger si c'est de la parole ou du bruit.
+pub const NOISE_CHECK_MS: u64 = 3000;
+
+/// Part minimale de parole confirmée, en millièmes du temps écoulé, pour que
+/// la prise soit de la parole (150 = 15 %).
+pub const MIN_DENSITY_PERMILLE: u64 = 150;
+
 /// Énergie RMS d'un bloc d'échantillons.
 pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
@@ -143,6 +150,21 @@ impl SpeechTracker {
     /// Durée de parole confirmée, en ms.
     pub fn voiced_ms(&self) -> u64 {
         (self.voiced_frames + if self.started() { self.pre_frames } else { 0 }) * FRAME_MS as u64
+    }
+
+    /// Vrai si la « parole » est en réalité du bruit éparse.
+    ///
+    /// Un bruit ambiant proche du seuil ne se tait jamais assez longtemps pour
+    /// clore la prise : elle durait jusqu'à la limite. Mesuré dans le journal :
+    /// 19,9 s pour 250 ms de parole confirmée (1 %), Jimmy aveugle pendant ce
+    /// temps. La parole est dense (la plupart des trames voisées entre deux
+    /// pauses) ; le bruit est clairsemé.
+    pub fn looks_like_noise(&self, buffer_len: usize, rate: u32) -> bool {
+        let Some(first) = self.speech_start() else {
+            return false;
+        };
+        let elapsed_ms = buffer_len.saturating_sub(first) as u64 * 1000 / rate.max(1) as u64;
+        elapsed_ms >= NOISE_CHECK_MS && self.voiced_ms() * 1000 < elapsed_ms * MIN_DENSITY_PERMILLE
     }
 
     /// Échantillon où la parole a commencé.
@@ -271,6 +293,39 @@ mod tests {
         let ms = clip.len() * 1000 / RATE as usize;
         // 600 ms de parole + 2 × 300 ms de marge, pas les 4,6 s d'origine.
         assert!((1100..=1350).contains(&ms), "{ms} ms");
+    }
+
+    #[test]
+    fn un_bruit_eparse_est_reconnu_comme_bruit() {
+        // Un souffle de 100 ms par seconde pendant 6 s : 10 % de densité, et
+        // jamais assez de silence pour clore la prise.
+        let mut parts = vec![tone(300, 0.001)];
+        for _ in 0..6 {
+            parts.push(tone(100, 0.02));
+            parts.push(tone(900, 0.001));
+        }
+        let audio = concat(&parts);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 1500, 0);
+        tracker.feed(&audio);
+        assert!(!tracker.ended(), "le bruit éparse ne clôt pas la prise tout seul");
+        assert!(tracker.looks_like_noise(audio.len(), RATE));
+    }
+
+    #[test]
+    fn la_parole_continue_n_est_pas_du_bruit() {
+        let audio = concat(&[tone(200, 0.001), tone(3500, 0.02)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 700, 0);
+        tracker.feed(&audio);
+        assert!(!tracker.looks_like_noise(audio.len(), RATE));
+    }
+
+    #[test]
+    fn une_phrase_avec_une_pause_n_est_pas_du_bruit() {
+        // 1 s de parole, 1,2 s de pause, 1,5 s de parole : 55 % de densité.
+        let audio = concat(&[tone(200, 0.001), tone(1000, 0.02), tone(1200, 0.001), tone(1500, 0.02)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 2000, 0);
+        tracker.feed(&audio);
+        assert!(!tracker.looks_like_noise(audio.len(), RATE));
     }
 
     #[test]
