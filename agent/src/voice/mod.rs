@@ -407,7 +407,14 @@ pub fn find_wake_prefix(transcript: &str, wake_word: &str) -> Option<usize> {
     // On accepte une interjection d'appel devant le nom : « hé Jimmy »,
     // « ok Jimmy ». Au-delà, un « Jimmy » en milieu de phrase n'est pas un
     // appel.
-    let start = if tokens.len() > 1 && CALL_WORDS.contains(&tokens[0]) { 1 } else { 0 };
+    // « C'est Jimmy » : rendu fréquent de « Hé Jimmy » (même son), deux tokens.
+    let start = if tokens.len() > 2 && tokens[0] == "c" && tokens[1] == "est" {
+        2
+    } else if tokens.len() > 1 && CALL_WORDS.contains(&tokens[0]) {
+        1
+    } else {
+        0
+    };
     let rest = &tokens[start..];
 
     let target_key = phonetic(&target);
@@ -531,11 +538,13 @@ pub fn strip_wake_word(text: &str, wake_word: &str) -> String {
             tail.push(word);
             continue;
         }
+        // Un mot de pure ponctuation (le « - » de dialogue que Whisper met en
+        // tête) ne produit aucun token : il ne doit rien consommer. Le compter
+        // pour un décalait tout, et « - Eh, Jimmy ! » donnait « Jimmy ! ».
         let produced = crate::memory::embed::normalize(word)
             .split(' ')
             .filter(|t| !t.is_empty())
-            .count()
-            .max(1);
+            .count();
         remaining = remaining.saturating_sub(produced);
     }
     // Le mot d'activation emporte la ponctuation qui le suit.
@@ -744,6 +753,11 @@ mod tests {
     fn interjection_avant_le_nom() {
         assert!(matches_wake_word("Hé Jimmy, ouvre mes notes", "jimmy"));
         assert!(matches_wake_word("et Jimmy.", "jimmy"), "« Hé » transcrit « et »");
+        assert!(matches_wake_word("C'est Jimmy.", "jimmy"), "« Hé » transcrit « c'est »");
+        // Tiret de dialogue ajouté par Whisper en tête de transcription.
+        assert_eq!(strip_wake_word("- Eh, Jimmy !", "jimmy"), "");
+        assert_eq!(strip_wake_word("- Jimmy, quelle heure est-il ?", "jimmy"), "quelle heure est-il ?");
+        assert_eq!(strip_wake_word("C'est Jimmy, dis-moi bonjour", "jimmy"), "dis-moi bonjour");
         assert_eq!(strip_wake_word("je mise, dis-moi bonjour", "jimmy"), "dis-moi bonjour");
         assert_eq!(strip_wake_word("Ok Jimmy, ouvre mes notes", "jimmy"), "ouvre mes notes");
     }

@@ -46,10 +46,12 @@ export function chatView(ctx: AppContext): HTMLElement {
     stream.querySelector(".empty")?.remove();
   }
 
-  function bubble(role: "user" | "assistant" | "error", content: string): HTMLElement {
+  function bubble(role: "user" | "assistant" | "error" | "voice", content: string): HTMLElement {
     // Le libellé (« vous » / « jimmy ») vient du CSS : l'ajouter aussi en
-    // texte l'affichait deux fois.
-    return h("div", { class: `bubble ${role}` }, h("p", {}, content));
+    // texte l'affichait deux fois. « voice » : message de l'utilisateur dit
+    // à voix haute (même place qu'un message écrit, repère micro).
+    const cls = role === "voice" ? "user voice" : role;
+    return h("div", { class: `bubble ${cls}` }, h("p", {}, content));
   }
 
   function append(node: HTMLElement) {
@@ -134,6 +136,19 @@ export function chatView(ctx: AppContext): HTMLElement {
         break;
       case "synaptiq":
         logActivity(activityLine("Synaptiq", "synaptiq", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        break;
+      case "spoken":
+        // Commande vocale : affichée comme un message de l'utilisateur, avec
+        // une bulle d'attente en dessous, comme pour un message écrit.
+        append(bubble("voice", event.text ?? ""));
+        if (!pending) {
+          pending = h(
+            "div",
+            { class: "bubble assistant pending" },
+            h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimmy réfléchit"),
+          );
+          append(pending);
+        }
         break;
       case "final":
         settle(bubble("assistant", event.text ?? ""));

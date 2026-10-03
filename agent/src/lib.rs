@@ -400,47 +400,97 @@ impl App {
         if cleaned.is_empty() {
             return;
         }
-        let speech = match self
-            .tts
-            .speak(
-                &self.secrets.openrouter_api_key,
-                &settings.tts.model,
-                &settings.tts.voice,
-                &cleaned,
-                settings.tts.chars_per_minute,
-            )
-            .await
-        {
-            Ok(speech) => speech,
-            Err(error) => {
-                log::warn!("[tts] {error}");
-                return;
-            }
+        // Phrase par phrase : la première est jouée pendant que la suivante
+        // est synthétisée. Avant, toute la réponse était synthétisée avant le
+        // premier son — plusieurs secondes de silence pour une réponse longue.
+        let parts = providers::tts::split_for_speech(&cleaned, 220);
+        log::info!("[tts] lecture de {} caractères en {} morceau(x)", cleaned.chars().count(), parts.len());
+        let estimated = providers::tts::estimate_ms(&cleaned, settings.tts.chars_per_minute);
+        let _ = self.avatar.say(text, estimated).await;
+
+        let synth = |part: String| {
+            let tts = self.tts.clone();
+            let key = self.secrets.openrouter_api_key.clone();
+            let model = settings.tts.model.clone();
+            let voice_id = settings.tts.voice.clone();
+            let cpm = settings.tts.chars_per_minute;
+            tokio::spawn(async move { tts.speak(&key, &model, &voice_id, &part, cpm).await })
         };
-        if speech.bytes.is_empty() {
-            return;
-        }
-        log::info!("[tts] lecture de {} caractères", cleaned.chars().count());
-        let _ = self.avatar.say(text, speech.estimated_ms).await;
-        let bytes = speech.bytes;
-        let rate = speech.sample_rate;
+
         self.speaking.store(true, std::sync::atomic::Ordering::Relaxed);
-        let outcome = tokio::task::spawn_blocking(move || voice::play_bytes(&bytes, rate)).await;
-        self.speaking.store(false, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(Err(error)) = outcome {
-            log::warn!("[voice] lecture impossible : {error}");
+        let started = std::time::Instant::now();
+        let mut next = parts.first().cloned().map(&synth);
+        for index in 0..parts.len() {
+            let Some(pending) = next.take() else { break };
+            let speech = match pending.await {
+                Ok(Ok(speech)) => speech,
+                Ok(Err(error)) => {
+                    log::warn!("[tts] {error}");
+                    break;
+                }
+                Err(_) => break,
+            };
+            // Synthèse du morceau suivant pendant la lecture de celui-ci.
+            next = parts.get(index + 1).cloned().map(&synth);
+            if index == 0 {
+                log::info!("[tts] premier son après {} ms", started.elapsed().as_millis());
+            }
+            if speech.bytes.is_empty() {
+                continue;
+            }
+            let bytes = speech.bytes;
+            let rate = speech.sample_rate;
+            let outcome = tokio::task::spawn_blocking(move || voice::play_bytes(&bytes, rate)).await;
+            if let Ok(Err(error)) = outcome {
+                log::warn!("[voice] lecture impossible : {error}");
+                break;
+            }
         }
+        self.speaking.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Transcrit une commande avec le modèle précis, ou le modèle du wake
     /// word si le second serveur n'est pas disponible.
+    ///
+    /// Auto-réparation : si la requête échoue (serveur arrêté, planté, ou tué
+    /// par un autre processus qui le possédait), les serveurs sont vérifiés
+    /// et relancés, puis la transcription est retentée une fois. Avant, un
+    /// serveur mort rendait l'écoute muette jusqu'au redémarrage de Jimmy.
     pub async fn transcribe_command(&self, wav: Vec<u8>) -> Result<String> {
+        match self.transcribe_command_once(wav.clone()).await {
+            Ok(text) => Ok(text),
+            Err(error) => {
+                log::warn!("[stt] commande : {error} — vérification des serveurs et nouvel essai");
+                self.ensure_stt().await?;
+                self.transcribe_command_once(wav).await
+            }
+        }
+    }
+
+    async fn transcribe_command_once(&self, wav: Vec<u8>) -> Result<String> {
         {
             let guard = self.stt_command.lock().await;
             if let Some(stt) = guard.as_ref() {
                 return stt.transcribe_wav(wav).await;
             }
         }
+        self.transcribe_wake_once(wav).await
+    }
+
+    /// Transcription rapide (fenêtre du mot d'éveil), auto-réparée comme
+    /// [`App::transcribe_command`].
+    pub async fn transcribe_wake(&self, wav: Vec<u8>) -> Result<String> {
+        match self.transcribe_wake_once(wav.clone()).await {
+            Ok(text) => Ok(text),
+            Err(error) => {
+                log::warn!("[stt] mot d'éveil : {error} — vérification des serveurs et nouvel essai");
+                self.ensure_stt().await?;
+                self.transcribe_wake_once(wav).await
+            }
+        }
+    }
+
+    async fn transcribe_wake_once(&self, wav: Vec<u8>) -> Result<String> {
         let guard = self.stt.lock().await;
         let stt = guard
             .as_ref()
@@ -468,7 +518,15 @@ impl App {
             skills: self.skills.clone(),
             synaptiq: self.synaptiq.clone(),
             registry: self.registry.clone(),
+            voice: false,
         })
+    }
+
+    /// Dépendances d'une demande vocale (voir `AgentDeps::voice`).
+    pub fn deps_voice(&self) -> Arc<core::agent::AgentDeps> {
+        let mut deps = (*self.deps()).clone();
+        deps.voice = true;
+        Arc::new(deps)
     }
 
     /// État affiché dans l'interface : ce qui est prêt, ce qui manque.

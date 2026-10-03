@@ -29,6 +29,7 @@ export interface AgentEvent {
     | "final"
     | "notice"
     | "heard"
+    | "spoken"
     | "failed";
   state?: AvatarState;
   detail?: string;

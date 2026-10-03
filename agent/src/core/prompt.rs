@@ -67,10 +67,26 @@ pub struct PromptContext<'a> {
     pub request: &'a str,
     pub memory_block: Option<String>,
     pub synaptiq_block: Option<String>,
+    /// Échange vocal (voir [`VOICE_MODE`]).
+    pub voice: bool,
 }
+
+/// Consignes ajoutées quand la demande vient du micro.
+const VOICE_MODE: &str = r#"## Échange vocal en cours
+La demande vient d'être dite à voix haute et transcrite automatiquement.
+- Réponds en une à trois phrases courtes : l'utilisateur t'écoute, il ne lit pas.
+- La transcription peut être fausse. Si la phrase est incohérente ou ne veut
+  rien dire, ne pars pas explorer : demande simplement de répéter, en une
+  phrase, en disant ce que tu as compris.
+- Pour une question simple ou une conversation, réponds directement, sans
+  outil. N'utilise des outils que si la demande l'exige vraiment.
+- C'est une conversation : tiens compte des échanges précédents de la session."#;
 
 pub fn build_system(ctx: &PromptContext<'_>) -> String {
     let mut parts: Vec<String> = vec![IDENTITY.to_string()];
+    if ctx.voice {
+        parts.push(VOICE_MODE.to_string());
+    }
 
     parts.push(format!(
         "## Contexte de la session\n- Dossier de travail par défaut : {}\n- Modèle : {}",

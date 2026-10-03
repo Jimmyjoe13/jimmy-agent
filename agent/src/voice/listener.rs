@@ -59,6 +59,10 @@ impl App {
             log::info!("[voice] écoute démarrée — mot d'activation « {} »", settings.stt.wake_word);
 
             let window_samples = (rate as f64 * wake_window.as_secs_f64()) as usize;
+            // Session vocale réutilisée tant que la conversation continue.
+            // Avant, chaque commande ouvrait une session neuve : Jimmy
+            // oubliait l'échange précédent, aucune conversation possible.
+            let mut voice_session: Option<(String, Instant)> = None;
             // Le VAD regarde le passé récent (2 pas) : sur toute la fenêtre de
             // 2,4 s, un « Jimmy » de 0,5 s était dilué sous le seuil.
             let recent_samples = (rate as f64 * hop.as_secs_f64() * 2.0) as usize;
@@ -93,6 +97,8 @@ impl App {
                 // rapide ; si Whisper traînait (machine chargée), le début de
                 // la phrase — donc « Jimmy » — en sortait et se perdait.
                 let segment_start = runtime.cursor().saturating_sub(window_samples as u64);
+                let detected_at = Instant::now();
+                log::info!("[voice] parole détectée (niveau {level:.4}, seuil {threshold:.4})");
 
                 // 1. Détection rapide (`base`, fenêtre courte) : réagir pendant
                 //    que l'utilisateur parle encore.
@@ -121,6 +127,10 @@ impl App {
                         .await
                         .unwrap_or_default();
                 let full_match = matches_wake_word(&utterance, &settings.stt.wake_word);
+                log::info!(
+                    "[voice] phrase entière en {} ms : « {utterance} » (rapide : « {early} »)",
+                    detected_at.elapsed().as_millis()
+                );
                 if !early_match && !full_match {
                     log::debug!("[voice] parole sans wake word : « {utterance} »");
                     continue;
@@ -137,45 +147,64 @@ impl App {
                     // « Oui ? », puis écoute. Le micro est purgé après le son
                     // (sa propre voix ne doit pas entrer dans la commande), et
                     // un délai de grâce laisse le temps de commencer à parler.
+                    // L'audio est gardé *depuis le début du son* : on commence
+                    // souvent à parler pendant le « Oui ? ». Avant, la purge
+                    // qui suivait le son effaçait ce début de commande
+                    // (« Comment ça va » devenait « Commence à voir »). Le
+                    // « oui » éventuellement capté est retiré du texte.
+                    let from = runtime.cursor();
                     super::cues::play(&self, super::cues::Cue::Listening).await;
-                    runtime.drain();
-                    // Signal « parle maintenant » : l'interface l'affiche, et
-                    // c'est à partir d'ici que la commande est écoutée.
+                    // Signal « parle maintenant » : l'interface l'affiche.
                     emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: "Oui ?".into() }).await;
-                    collect_utterance(&self, &runtime, runtime.cursor(), false, rate, hop, end_of_speech, AFTER_CUE_GRACE, threshold)
+                    log::info!("[voice] « Oui ? » joué, écoute de la commande");
+                    let heard = collect_utterance(&self, &runtime, from, false, rate, hop, end_of_speech, AFTER_CUE_GRACE, threshold)
                         .await
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+                    strip_cue_echo(&heard)
                 } else {
                     utterance
                 };
                 let command = strip_wake_word(&command, &settings.stt.wake_word);
                 if command.trim().is_empty() {
+                    log::info!("[voice] commande vide après le nom");
                     emit(&events, AgentEvent::Notice { message: "Je n'ai rien compris après « Jimmy ».".into() }).await;
                     emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
                     // Sinon le même « Jimmy » serait redétecté au tour suivant.
                     runtime.drain();
                     continue;
                 }
-                log::info!("[voice] commande : « {command} »");
+                log::info!(
+                    "[voice] commande : « {command} » ({} ms après la détection)",
+                    detected_at.elapsed().as_millis()
+                );
+                // Affichée dans le chat comme un message de l'utilisateur.
+                emit(&events, AgentEvent::Spoken { text: command.clone() }).await;
 
-                // 3. L'agent prend le relais, puis Jimmy répond à la voix.
-                let session = self
-                    .history
-                    .create_session("Session vocale")
-                    .unwrap_or_else(|_| String::from("vocale"));
+                // 3. L'agent prend le relais (mode vocal), puis Jimmy répond.
+                let session = match &voice_session {
+                    Some((id, last)) if last.elapsed() < VOICE_SESSION_IDLE => id.clone(),
+                    _ => self
+                        .history
+                        .create_session("Session vocale")
+                        .unwrap_or_else(|_| String::from("vocale")),
+                };
+                voice_session = Some((session.clone(), Instant::now()));
+                let agent_started = Instant::now();
                 let answer = crate::core::agent::run(
-                    self.deps(),
+                    self.deps_voice(),
                     self.settings(),
-                    session,
+                    session.clone(),
                     command.clone(),
                     self.tool_context(),
                     events.clone(),
                 )
                 .await;
+                log::info!("[voice] réponse de l'agent en {} ms", agent_started.elapsed().as_millis());
 
                 match answer {
                     Ok(answer) => {
                         self.speak(&answer.text).await;
+                        voice_session = Some((session, Instant::now()));
                         emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
                     }
                     Err(error) => {
@@ -190,6 +219,39 @@ impl App {
             }
             log::info!("[voice] écoute arrêtée");
         })
+    }
+}
+
+/// Silence au-delà duquel une nouvelle commande ouvre une nouvelle session.
+const VOICE_SESSION_IDLE: Duration = Duration::from_secs(600);
+
+/// Retire le « Oui ? » de Jimmy capté par le micro en tête de commande.
+pub fn strip_cue_echo(text: &str) -> String {
+    let trimmed = text.trim();
+    let lower = trimmed.to_lowercase();
+    for echo in ["oui ?", "oui?", "oui.", "oui,", "oui !", "oui"] {
+        if lower.starts_with(echo) {
+            let rest = &trimmed[echo.len()..];
+            // « ouïe », « ouistiti »… : seul un mot entier est un écho.
+            if echo == "oui" && rest.chars().next().is_some_and(|c| c.is_alphanumeric()) {
+                return trimmed.to_string();
+            }
+            return rest.trim_start_matches(|c: char| !c.is_alphanumeric()).to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn echo_du_oui_retire() {
+        assert_eq!(strip_cue_echo("Oui ? Comment ça va ?"), "Comment ça va ?");
+        assert_eq!(strip_cue_echo("oui, quelle heure est-il"), "quelle heure est-il");
+        assert_eq!(strip_cue_echo("Ouistiti en vue"), "Ouistiti en vue");
+        assert_eq!(strip_cue_echo("Quelle heure est-il ?"), "Quelle heure est-il ?");
     }
 }
 
@@ -281,9 +343,7 @@ async fn transcribe_samples(app: &Arc<App>, samples: &[f32], rate: u32) -> Optio
         return None;
     }
     let wav = window_to_wav(samples, rate);
-    let guard = app.stt.lock().await;
-    let stt = guard.as_ref()?;
-    match stt.transcribe_wav(wav).await {
+    match app.transcribe_wake(wav).await {
         Ok(text) => Some(text),
         Err(error) => {
             log::warn!("[voice] transcription impossible : {error}");

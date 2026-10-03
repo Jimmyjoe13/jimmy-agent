@@ -83,6 +83,9 @@ fn parse_rate(content_type: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Clonable à bas coût (le client HTTP est partagé) : la synthèse phrase par
+/// phrase lance un morceau en tâche de fond pendant la lecture du précédent.
+#[derive(Clone)]
 pub struct Tts {
     http: reqwest::Client,
     provider: TtsProvider,
@@ -239,6 +242,45 @@ pub fn prepare_for_speech(text: &str) -> String {
     cleaned.trim().to_string()
 }
 
+/// Découpe un texte en morceaux d'environ `max_chars`, aux fins de phrase
+/// (puis aux virgules si une phrase est trop longue). Chaque morceau est
+/// synthétisé séparément pour commencer à parler plus tôt.
+pub fn split_for_speech(text: &str, max_chars: usize) -> Vec<String> {
+    let mut sentences: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, '.' | '!' | '?' | '…') {
+            sentences.push(current.trim().to_string());
+            current.clear();
+        }
+    }
+    if !current.trim().is_empty() {
+        sentences.push(current.trim().to_string());
+    }
+    // Regroupe les phrases courtes, coupe les phrases trop longues.
+    let mut parts: Vec<String> = Vec::new();
+    for sentence in sentences.into_iter().filter(|s| !s.is_empty()) {
+        let pieces: Vec<String> = if sentence.chars().count() > max_chars {
+            sentence.split_inclusive(',').map(|p| p.trim().to_string()).collect()
+        } else {
+            vec![sentence]
+        };
+        for piece in pieces {
+            let count = parts.len();
+            match parts.last_mut() {
+                // La toute première phrase reste seule : elle doit partir vite.
+                Some(last) if count > 1 && last.chars().count() + piece.chars().count() < max_chars => {
+                    last.push(' ');
+                    last.push_str(&piece);
+                }
+                _ => parts.push(piece),
+            }
+        }
+    }
+    parts
+}
+
 /// Retire ce qui ne se lit pas à voix haute : blocs de code, balises
 /// Markdown (`**`, `#`, `` ` ``, puces), liens et URL. Sans cela, la synthèse
 /// prononçait « astérisque astérisque » ou des adresses entières.
@@ -379,6 +421,14 @@ struct SpeechResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoupage_par_phrases() {
+        let parts = split_for_speech("Bonjour. Il est midi. Il fait beau aujourd'hui. Tout va bien.", 40);
+        assert_eq!(parts[0], "Bonjour.", "la première phrase part seule");
+        assert!(parts.iter().all(|p| p.chars().count() <= 60), "{parts:?}");
+        assert_eq!(parts.join(" "), "Bonjour. Il est midi. Il fait beau aujourd'hui. Tout va bien.");
+    }
 
     #[test]
     fn markdown_non_lu_a_voix_haute() {

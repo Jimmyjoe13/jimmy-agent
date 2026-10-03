@@ -134,9 +134,12 @@ async function step(name, fn) {
     const lang = await p.locator(".field-row", { hasText: "Langue" }).locator("select").inputValue();
     expect(lang === "fr", `langue : ${lang}`);
     await p.locator(".view-header button", { hasText: "Enregistrer" }).click();
-    await p.waitForSelector(".toast", { timeout: 5000 });
-    const toasts = await p.$$eval(".toast", (els) => els.map((e) => e.textContent));
-    expect(toasts.some((t) => t.includes("Paramètres enregistrés")), `toasts : ${toasts.join(" | ")}`);
+    // Attendre le bon message : un toast précédent (skin) peut encore être affiché.
+    await p.waitForFunction(
+      () => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("Paramètres enregistrés")),
+      null,
+      { timeout: 10000 },
+    );
     return "toast affiché";
   });
 

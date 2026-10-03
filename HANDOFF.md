@@ -362,6 +362,23 @@ la phrase elle-même. Les tests d'écoute affichent une **référence** (clip
 entier transcrit hors écoute) et régénèrent le clip tant que le nom n'y est
 pas audible (`phrase_avec_nom`).
 
+**35. Ne jamais lancer les tests d'écoute pendant que Jimmy sert l'utilisateur.**
+Les tests démarrent leurs propres `whisper-server` (ports 8178/8179) et les
+tuent en fin de test ; un Jimmy lancé entre-temps les réutilise et devient
+muet. `ensure_stt` relance désormais un serveur mort (auto-réparation), mais
+arrêter Jimmy pendant les tests reste la règle.
+
+**36. Whisper met un tiret de dialogue en tête (« - Eh, Jimmy ! »).**
+Un mot de pure ponctuation ne doit consommer aucun token dans
+`strip_wake_word`, sinon le nom reste dans la commande et Jimmy répond « oui,
+je suis là ». Les tests d'écoute vérifient que la commande transmise ne
+contient plus le nom.
+
+**37. Une commande vocale = un échange d'une conversation.**
+La session vocale est réutilisée tant que le dernier échange date de moins de
+10 minutes (`VOICE_SESSION_IDLE`) ; avant, chaque phrase ouvrait une session
+neuve et Jimmy oubliait tout.
+
 ---
 
 ## Prochaines étapes

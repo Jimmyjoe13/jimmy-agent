@@ -25,6 +25,7 @@ use crate::providers::llm::LlmClient;
 use crate::synaptiq::SynaptiqClient;
 use crate::tools::{ToolContext, ToolRegistry};
 
+#[derive(Clone)]
 pub struct AgentDeps {
     pub llm: Arc<LlmClient>,
     pub history: Arc<History>,
@@ -32,7 +33,14 @@ pub struct AgentDeps {
     pub skills: Arc<crate::skills::SkillStore>,
     pub synaptiq: Option<Arc<SynaptiqClient>>,
     pub registry: Arc<ToolRegistry>,
+    /// Demande dite à voix haute : réponse courte, peu d'étapes, et on fait
+    /// répéter une phrase incohérente plutôt que de partir l'explorer.
+    pub voice: bool,
 }
+
+/// Budget d'étapes d'une demande vocale : l'utilisateur attend la réponse en
+/// silence, une longue exploration casse la conversation.
+const VOICE_MAX_ITERATIONS: u32 = 6;
 
 impl AgentDeps {
     pub fn tool_context(&self, settings: &Settings) -> ToolContext {
@@ -94,6 +102,7 @@ pub async fn run(
         request: &request,
         memory_block: memory_block.clone(),
         synaptiq_block,
+        voice: deps.voice,
     }))];
 
     // 2. Historique récent de la session.
@@ -108,7 +117,11 @@ pub async fn run(
         .catch();
 
     let specs = deps.registry.specs();
-    let max_iterations = settings.llm.max_iterations.max(1);
+    let max_iterations = if deps.voice {
+        settings.llm.max_iterations.clamp(1, VOICE_MAX_ITERATIONS)
+    } else {
+        settings.llm.max_iterations.max(1)
+    };
     let deadline = started + Duration::from_secs(600);
     let mut cache: HashMap<String, String> = HashMap::new();
     let mut tools_used: Vec<String> = Vec::new();

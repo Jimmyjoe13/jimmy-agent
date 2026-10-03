@@ -510,6 +510,11 @@ textarea:focus {
   content: "vous";
 }
 
+/* Message de l'utilisateur dit à voix haute. */
+.bubble.user.voice::before {
+  content: "vous · à voix haute";
+}
+
 .bubble.assistant::before {
   content: "jimmy";
 }

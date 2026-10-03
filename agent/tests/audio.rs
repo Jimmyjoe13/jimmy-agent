@@ -411,6 +411,7 @@ async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32
 
     let mut reveil = false;
     let mut reponse = String::new();
+    let mut commande = String::new();
     let limite = tokio::time::Instant::now() + std::time::Duration::from_secs(150);
     while let Ok(Some(event)) = tokio::time::timeout_at(limite, rx.recv()).await {
         match &event {
@@ -425,6 +426,10 @@ async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32
                 }
             }
             AgentEvent::Notice { message } => println!("avis : {message}"),
+            AgentEvent::Spoken { text } => {
+                println!("commande affichée : « {text} »");
+                commande = text.clone();
+            }
             AgentEvent::ToolStart { name, arguments, .. } => println!("outil : {name} {arguments}"),
             AgentEvent::ToolEnd { name, ok, duration_ms, summary, .. } => {
                 println!("outil fini : {name} ok={ok} {duration_ms} ms — {}", summary.chars().take(80).collect::<String>())
@@ -448,6 +453,12 @@ async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32
             let _ = app.history.delete_session(&s.id);
         }
     }
+    // La commande transmise à l'agent ne doit plus contenir le nom : sinon
+    // Jimmy répond « oui, je suis là » au lieu de traiter la demande.
+    assert!(
+        !jimmy_agent::voice::matches_wake_word(&commande, "jimmy"),
+        "le nom est resté dans la commande : « {commande} »"
+    );
     (reveil, reponse)
 }
 
@@ -490,4 +501,37 @@ async fn ecoute_nom_seul_puis_commande() {
     let (reveil, reponse) = faire_ecouter(&app, flux, Some(commande)).await;
     assert!(reveil, "le mot d'éveil n'a pas été reconnu");
     assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu après « Oui ? »");
+}
+
+/// Auto-réparation : les serveurs whisper sont tués en pleine session (cas
+/// réel : un autre processus qui les possédait s'est arrêté). La transcription
+/// suivante doit les relancer et réussir, au lieu d'échouer pour toujours.
+#[tokio::test]
+#[ignore = "démarre et tue des whisper-server, consulte Fish Audio"]
+async fn stt_se_repare_apres_arret_du_serveur() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let clip = phrase_16k(&app, "Bonjour, ceci est un essai.", 0.05).await;
+    let wav = jimmy_agent::voice::window_to_wav(&clip, 16_000);
+
+    // Arrêt brutal de tous les serveurs, hors du contrôle de Jimmy.
+    let _ = std::process::Command::new("taskkill")
+        .args(["/IM", "whisper-server.exe", "/F"])
+        .output();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let texte = app.transcribe_command(wav.clone()).await.expect("la transcription doit se réparer");
+    println!("commande après réparation : « {texte} »");
+    assert!(!texte.trim().is_empty());
+    let texte = app.transcribe_wake(wav).await.expect("le mot d'éveil aussi");
+    println!("mot d'éveil après réparation : « {texte} »");
+
+    for verrou in [&app.stt_command, &app.stt] {
+        let mut garde = verrou.lock().await;
+        if let Some(stt) = garde.as_mut() {
+            stt.shutdown().await;
+        }
+    }
 }
