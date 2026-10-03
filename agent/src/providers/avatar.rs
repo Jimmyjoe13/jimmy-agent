@@ -10,6 +10,14 @@ use std::time::Duration;
 use crate::core::types::AvatarState;
 use crate::error::Result;
 
+/// Skins disponibles (identifiant, libellé). Les palettes vivent dans
+/// `godot/scripts/jimmy.gd` (`SKINS`) : garder les deux listes alignées.
+pub const SKINS: &[(&str, &str)] = &[
+    ("renard", "Renard roux"),
+    ("arctique", "Renard arctique"),
+    ("fennec", "Fennec"),
+];
+
 #[derive(Debug, Clone)]
 pub struct AvatarClient {
     http: reqwest::Client,
@@ -73,6 +81,7 @@ impl AvatarClient {
         self.post("/quality", serde_json::json!({ "level": level })).await
     }
 
+    /// Change le skin de l'avatar ; Godot reconstruit le personnage.
     pub async fn set_skin(&self, skin: &str) -> bool {
         self.post("/skin", serde_json::json!({ "skin": skin })).await
     }

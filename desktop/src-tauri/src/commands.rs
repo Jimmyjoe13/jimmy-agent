@@ -175,7 +175,18 @@ pub async fn get_settings(state: State<'_, AppState>) -> std::result::Result<Set
 
 #[tauri::command]
 pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> std::result::Result<(), String> {
-    state.app.save_settings(settings).map_err(err)
+    let app = state.app.clone();
+    let before = app.settings();
+    app.save_settings(settings.clone()).map_err(err)?;
+    // Les réglages d'avatar s'appliquent à chaud : sans cela, changer la
+    // qualité ou le skin dans Paramètres n'avait d'effet qu'au relancement.
+    if before.avatar.quality != settings.avatar.quality {
+        app.avatar.set_quality(&settings.avatar.quality).await;
+    }
+    if before.avatar.skin != settings.avatar.skin {
+        app.avatar.set_skin(&settings.avatar.skin).await;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -432,6 +443,19 @@ pub async fn avatar_quality(state: State<'_, AppState>, level: String) -> std::r
     settings.avatar.quality = level.clone();
     app.save_settings(settings).map_err(err)?;
     app.avatar.set_quality(&level).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn avatar_skin(state: State<'_, AppState>, skin: String) -> std::result::Result<(), String> {
+    if !jimmy_agent::providers::avatar::SKINS.iter().any(|(id, _)| *id == skin) {
+        return Err(format!("skin inconnu : {skin}"));
+    }
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    settings.avatar.skin = skin.clone();
+    app.save_settings(settings).map_err(err)?;
+    app.avatar.set_skin(&skin).await;
     Ok(())
 }
 

@@ -77,6 +77,28 @@ const POSES := {
 	},
 }
 
+## Skins : une palette + quelques paramètres de forme. Ajouter un skin =
+## ajouter une entrée ici (et son libellé dans `providers::avatar::SKINS`,
+## côté Rust, pour l'interface). `ear_scale` agrandit les oreilles.
+const SKINS := {
+	"renard": {
+		"fur": Color(0.80, 0.42, 0.13), "cream": Color(0.95, 0.89, 0.79),
+		"dark": Color(0.11, 0.08, 0.07), "shirt": Color(0.16, 0.36, 0.72),
+		"accent": Color(0.95, 0.62, 0.16), "ear_scale": 1.0,
+	},
+	"arctique": {
+		"fur": Color(0.86, 0.88, 0.92), "cream": Color(0.99, 0.99, 1.0),
+		"dark": Color(0.18, 0.20, 0.26), "shirt": Color(0.08, 0.46, 0.50),
+		"accent": Color(0.36, 0.74, 0.94), "ear_scale": 0.9,
+	},
+	"fennec": {
+		"fur": Color(0.87, 0.70, 0.47), "cream": Color(0.97, 0.92, 0.82),
+		"dark": Color(0.28, 0.18, 0.12), "shirt": Color(0.22, 0.46, 0.28),
+		"accent": Color(0.93, 0.78, 0.30), "ear_scale": 1.55,
+	},
+}
+const SKIN_DEFAULT := "renard"
+
 ## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
 ## tête est rapprochée du col pour une silhouette plus compacte.
 const HEAD_Y := 0.30
@@ -89,6 +111,8 @@ const POSE_SPEED := 7.0
 const BLINK_PERIOD := 4.2
 
 var state: String = IDLE
+## Skin courant. Positionné avant l'entrée dans l'arbre, ou via `set_skin`.
+var skin: String = SKIN_DEFAULT
 var _t := 0.0
 var _blink_t := 0.0
 var _blink := 0.0
@@ -137,6 +161,20 @@ func set_detail(detail: float) -> void:
 	_detail = detail
 	if is_inside_tree():
 		_rebuild()
+
+
+## Change de skin : nouveaux matériaux, puis reconstruction du personnage.
+## Renvoie `false` (et ne change rien) si le skin est inconnu.
+func set_skin(name: String) -> bool:
+	if not SKINS.has(name):
+		return false
+	if name == skin:
+		return true
+	skin = name
+	if is_inside_tree():
+		_make_materials()
+		_rebuild()
+	return true
 
 
 func _rebuild() -> void:
@@ -265,14 +303,18 @@ func _make_materials() -> void:
 	_outline.grow = true
 	_outline.grow_amount = OUTLINE_WIDTH
 
-	_mat_fur = _material(Color(0.80, 0.42, 0.13), 0.92)
-	_mat_cream = _material(Color(0.95, 0.89, 0.79), 0.95)
-	_mat_dark = _material(Color(0.11, 0.08, 0.07), 0.75)
+	var palette: Dictionary = SKINS.get(skin, SKINS[SKIN_DEFAULT])
+	# Les variantes sans contour dérivent des matériaux : à régénérer aussi.
+	_plain_cache.clear()
+
+	_mat_fur = _material(palette["fur"], 0.92)
+	_mat_cream = _material(palette["cream"], 0.95)
+	_mat_dark = _material(palette["dark"], 0.75)
 	# Yeux et pupilles sans contour : à cette taille, il les noircirait.
 	_mat_eye = _material(Color(0.98, 0.98, 0.99), 0.35, false)
 	_mat_pupil = _material(Color(0.05, 0.04, 0.04), 0.30, false)
-	_mat_shirt = _material(Color(0.16, 0.36, 0.72), 0.80)
-	_mat_accent = _material(Color(0.95, 0.62, 0.16), 0.70)
+	_mat_shirt = _material(palette["shirt"], 0.80)
+	_mat_accent = _material(palette["accent"], 0.70)
 
 	# Fourrure : reflet rasant (rim) qui imite le duvet éclairé par l'arrière,
 	# et relief fin par une normal map générée (aucun fichier d'asset).
@@ -553,6 +595,7 @@ func _build_ears() -> void:
 		var ear := Node3D.new()
 		ear.name = "Ear%s" % ("L" if side < 0 else "R")
 		ear.position = Vector3(0.076 * side, 0.118, -0.005)
+		ear.scale = Vector3.ONE * float(SKINS.get(skin, SKINS[SKIN_DEFAULT])["ear_scale"])
 		_head.add_child(ear)
 
 		var outer := _cone(0.050, 0.004, 0.145, _mat_fur)

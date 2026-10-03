@@ -1,6 +1,6 @@
 /** Vues Mémoire, Skills, Skin et Diagnostic. */
 import { api, type DoctorReport, type Memory, type Skill } from "../api";
-import { formatTime, guard, h, mount, toast } from "../ui";
+import { attempt, formatTime, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { card } from "./settings";
 
@@ -155,8 +155,28 @@ export function skillsView(): HTMLElement {
   return container;
 }
 
-/** Skin : le premier skin est un renard humanoïde ; d'autres pourront suivre. */
+/** Skin : choix de l'apparence de Jimmy, appliqué à chaud par Godot. */
 export function skinView(ctx: AppContext): HTMLElement {
+  const skinButtons = h(
+    "div",
+    { class: "row" },
+    ...ctx.status.avatar.skins.map((skin) =>
+      h(
+        "button",
+        {
+          class: ctx.status.avatar.skin === skin.id ? "primary" : "ghost",
+          onclick: async () => {
+            // `attempt` et non `guard` : la commande ne renvoie rien (piège 13).
+            if (!(await attempt(() => api.avatarSkin(skin.id), "skin"))) return;
+            await ctx.refreshStatus();
+            toast(`Skin « ${skin.label} » appliqué`);
+          },
+        },
+        skin.label,
+      ),
+    ),
+  );
+
   const qualityButtons = h(
     "div",
     { class: "row" },
@@ -182,7 +202,7 @@ export function skinView(ctx: AppContext): HTMLElement {
     h("header", { class: "view-header" }, h("h2", {}, "Skin")),
     card(
       "Skin actif",
-      h("p", {}, h("strong", {}, "Renard humanoïde"), " — skin de base de la V1."),
+      skinButtons,
       h(
         "p",
         { class: "note" },

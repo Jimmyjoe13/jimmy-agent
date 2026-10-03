@@ -10,7 +10,7 @@ extends Node
 ## Aucune logique d'agent ici : Godot ne sait rien du LLM, de la mémoire ou des
 ## outils. Il ne fait qu'exécuter des ordres d'animation.
 
-const SKIN_DEFAULT := "renard"
+const SKIN_DEFAULT := Jimmy.SKIN_DEFAULT
 
 ## Profils graphiques. La fenêtre fait 560×620 : le rendu à pleine résolution
 ## coûte peu, d'où `scale_3d = 1.0` dès `medium` (0,85 rendait l'avatar flou).
@@ -169,6 +169,9 @@ func _build_scene() -> void:
 
 	_jimmy = Jimmy.new()
 	_jimmy.name = "Jimmy"
+	if not _jimmy.set_skin(skin):
+		push_warning("[godot/main] skin inconnu : %s (repli sur %s)" % [skin, SKIN_DEFAULT])
+		skin = SKIN_DEFAULT
 	add_child(_jimmy)
 
 	_build_ground()
@@ -340,9 +343,11 @@ func _on_http_request(method: String, path: String, body: Dictionary) -> void:
 			_apply_quality(str(body.get("level", "medium")).to_lower())
 		"/skin":
 			var wanted := str(body.get("skin", SKIN_DEFAULT))
-			if wanted != skin:
+			if _jimmy.set_skin(wanted):
 				skin = wanted
-				print("[godot/main] skin demandé : %s (V1 : seul « renard » est implémenté)" % skin)
+				print("[godot/main] skin appliqué : %s" % skin)
+			else:
+				print("[godot/main] skin inconnu : %s (on garde %s)" % [wanted, skin])
 		"/position":
 			DisplayServer.window_set_position(Vector2i(int(body.get("x", 0)), int(body.get("y", 0))))
 		"/hide":

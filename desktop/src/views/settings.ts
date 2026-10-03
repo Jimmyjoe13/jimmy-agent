@@ -57,7 +57,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
     qualitySelect.value = settings.avatar.quality;
 
     mount(skinSelect);
-    skinSelect.append(h("option", { value: "renard" }, "Renard (skin de base)"));
+    for (const skin of ctx.status.avatar.skins) {
+      skinSelect.append(h("option", { value: skin.id }, skin.label));
+    }
     skinSelect.value = settings.avatar.skin;
 
     mount(startupSelect);

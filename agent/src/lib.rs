@@ -207,6 +207,7 @@ impl App {
         for _ in 0..40 {
             if avatar.is_up().await {
                 avatar.set_quality(&settings.avatar.quality).await;
+                // Le skin est déjà passé en argument (`--skin`) : rien à renvoyer.
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -299,6 +300,9 @@ impl App {
             "avatar": {
                 "enabled": settings.avatar.enabled,
                 "skin": settings.avatar.skin,
+                "skins": providers::avatar::SKINS.iter().map(|(id, label)| serde_json::json!({
+                    "id": id, "label": label
+                })).collect::<Vec<_>>(),
                 "quality": settings.avatar.quality,
                 "host": settings.avatar.host,
                 "port": settings.avatar.port,

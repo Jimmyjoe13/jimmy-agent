@@ -65,6 +65,7 @@ export interface Status {
   avatar: {
     enabled: boolean;
     skin: string;
+    skins: { id: string; label: string }[];
     quality: string;
     host: string;
     port: number;
@@ -281,6 +282,7 @@ export const api = {
     invoke<void>("avatar_state", { avatarState, detail }),
   avatarSay: (text: string) => invoke<void>("avatar_say", { text }),
   avatarQuality: (level: string) => invoke<void>("avatar_quality", { level }),
+  avatarSkin: (skin: string) => invoke<void>("avatar_skin", { skin }),
   wakeWordTest: (transcript: string, wakeWord: string) =>
     invoke<boolean>("wake_word_test", { transcript, wakeWord }),
   wakeWordStrip: (transcript: string, wakeWord: string) =>
