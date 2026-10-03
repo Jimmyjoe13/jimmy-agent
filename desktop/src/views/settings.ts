@@ -1,6 +1,6 @@
 /** Vue Paramètres : modèle, voix, permissions, démarrage, diagnostic. */
 import { api, type Settings, type StartupMode } from "../api";
-import { guard, h, mount, toast } from "../ui";
+import { attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 
 export function settingsView(ctx: AppContext): HTMLElement {
@@ -148,7 +148,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
             {
               class: "ghost",
               onclick: async () => {
-                await guard(() => api.avatarStart(), "avatar");
+                // Sans ce test, l'échec affichait « Avatar démarré » juste
+                // après le message d'erreur.
+                if (!(await attempt(() => api.avatarStart(), "avatar"))) return;
                 await ctx.refreshStatus();
                 toast("Avatar démarré");
               },

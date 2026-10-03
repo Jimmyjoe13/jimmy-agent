@@ -100,6 +100,27 @@ export async function guard<T>(action: () => Promise<T>, label = "action"): Prom
   }
 }
 
+/**
+ * Comme `guard`, mais ne renvoie que la réussite.
+ *
+ * À utiliser dès que l'action retourne `void` : `guard` renvoie alors
+ * `undefined` **dans les deux cas**, impossible à distinguer. C'est ce qui
+ * faisait échouer le bouton d'enregistrement et l'activation de l'écoute —
+ * l'action avait réussi, mais le code lisait l'échec.
+ */
+export async function attempt(
+  action: () => Promise<unknown>,
+  label = "action",
+): Promise<boolean> {
+  try {
+    await action();
+    return true;
+  } catch (error) {
+    toast(`${label} : ${String(error)}`, "error");
+    return false;
+  }
+}
+
 export function formatTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";

@@ -326,7 +326,8 @@ pub async fn tts_preview(
         .await
         .map_err(err)?;
     let bytes = speech.bytes.clone();
-    jimmy_agent::voice::play_bytes(&bytes).map_err(err)?;
+    let rate = speech.sample_rate;
+    jimmy_agent::voice::play_bytes(&bytes, rate).map_err(err)?;
     Ok(serde_json::json!({ "bytes": speech.bytes.len(), "durationMs": speech.estimated_ms }))
 }
 

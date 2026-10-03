@@ -7,12 +7,48 @@
  */
 import { api } from "../api";
 import { Recorder } from "../audio";
-import { guard, h, mount, toast } from "../ui";
+import { attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 
 export function voiceView(ctx: AppContext): HTMLElement {
   const recorder = new Recorder();
   let meterTimer = 0;
+  let listening = false;
+
+  const listenState = h("span", { class: "listen-state off" }, "arrêtée");
+  const listenButton = h(
+    "button",
+    { class: "primary", onclick: () => void toggleListening() },
+    "Activer l'écoute",
+  );
+
+  async function toggleListening() {
+    if (listening) {
+      await attempt(() => api.voiceStop(), "arrêt de l'écoute");
+      listening = false;
+      listenButton.textContent = "Activer l'écoute";
+      listenButton.className = "primary";
+      listenState.textContent = "arrêtée";
+      listenState.className = "listen-state off";
+      return;
+    }
+    listenButton.setAttribute("disabled", "");
+    listenButton.textContent = "Démarrage…";
+    // `attempt` et non `guard` : la commande ne retourne rien, donc `undefined`
+    // ne dit rien du résultat.
+    const ok = await attempt(() => api.voiceStart(), "démarrage de l'écoute");
+    listenButton.removeAttribute("disabled");
+    if (!ok) {
+      listenButton.textContent = "Activer l'écoute";
+      return;
+    }
+    listening = true;
+    listenButton.textContent = "Désactiver l'écoute";
+    listenButton.className = "ghost";
+    listenState.textContent = "active";
+    listenState.className = "listen-state on";
+    void ctx.refreshStatus();
+  }
 
   const meter = h("div", { class: "meter" }, h("div", { class: "meter-fill" }));
   const transcript = h("div", { class: "transcript" }, "Aucune transcription.");
@@ -29,7 +65,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
 
   async function toggleRecording() {
     if (!recorder.active) {
-      const started = await guard(() => recorder.start(), "micro");
+      const started = await attempt(() => recorder.start(), "micro");
       if (!started) return;
       recordButton.textContent = "Arrêter et transcrire";
       meter.classList.add("active");
@@ -90,6 +126,19 @@ export function voiceView(ctx: AppContext): HTMLElement {
     "section",
     { class: "view" },
     h("header", { class: "view-header" }, h("h2", {}, "Voix")),
+    h(
+      "section",
+      { class: "card" },
+      h("h3", {}, "Écoute permanente"),
+      h(
+        "p",
+        { class: "note" },
+        "Quand l'écoute est active, Jimmy ouvre le microphone, reste en veille et attend « ",
+        h("code", {}, ctx.status.stt.wake_word),
+        " ». Rien n'est envoyé sur le réseau : la reconnaissance tourne en local.",
+      ),
+      h("div", { class: "row" }, listenButton, listenState),
+    ),
     h(
       "section",
       { class: "card" },
@@ -246,7 +295,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
             onclick: async () => {
               const voice = (voiceSelect as HTMLSelectElement).value;
               const label = status.tts.voices.find((v) => v.id === voice)?.label ?? "";
-              await guard(() => api.ttsPreview(`Bonjour ${nameInput.value},Voici ma voix : ${label}.`), "essai vocal");
+              await guard(() => api.ttsPreview(`Bonjour ${nameInput.value}, voici ma voix : ${label}.`), "essai vocal");
             },
           },
           "Écouter un essai",
@@ -263,8 +312,11 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
           {
             class: "ghost",
             onclick: async () => {
-              await guard(() => api.avatarQuality((qualitySelect as HTMLSelectElement).value), "qualité");
-              toast("Qualité appliquée à l'avatar");
+              const ok = await attempt(
+                () => api.avatarQuality((qualitySelect as HTMLSelectElement).value),
+                "qualité",
+              );
+              if (ok) toast("Qualité appliquée à l'avatar");
             },
           },
           "Appliquer et voir",
@@ -278,11 +330,17 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
     {
       title: "C'est prêt.",
       body: [
-        h("p", {}, "Clique sur mon avatar pour revenir ici, ou dis simplement « Jimmy »."),
+        h("p", {}, "En terminant, j'active l'écoute : j'ouvrirai le micro et resterai en veille."),
+        h("p", {}, "Clique ensuite sur mon avatar pour revenir ici, ou dis simplement « Jimmy »."),
         h(
           "p",
           { class: "note" },
           "Première chose à essayer : « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »",
+        ),
+        h(
+          "p",
+          { class: "note" },
+          "Pour couper l'écoute : page Voix → « Désactiver l'écoute ». Rien n'est envoyé sur le réseau.",
         ),
       ],
     },

@@ -211,6 +211,11 @@ async function main() {
         toast("Onboarding terminé. Bonne conversation.");
         void ctx.refreshStatus();
         render();
+        // L'onboarding est le moment du consentement : on enchaîne sur
+        // l'écoute, sinon Jimmy reste muet jusqu'au passage par la vue Voix.
+        void api.voiceStart()
+          .then(() => toast("Écoute active — dis « Jimmy ».", "info"))
+          .catch((error) => toast(`Écoute : ${String(error)}`, "error"));
       })),
     );
     return;

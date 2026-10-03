@@ -50,8 +50,10 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Synaptiq | ✅ consultation conditionnelle, écriture | appelé dans le test happy path |
 | Synaptiq — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
 | Wake word « Jimmy » | ✅ détection locale, variantes ASR gérées | 5 tests unitaires |
+| Écoute permanente | ✅ micro ouvert, `whisper-server` démarré | `test audio` |
 | STT local | ✅ whisper.cpp, français, hors-ligne | WAV de test transcrit correctement |
-| TTS Fish Audio | ✅ voix française, un appel par piste | appels réels à OpenRouter |
+| TTS Fish Audio | ✅ voix française **lue** | `test audio` — PCM 44,1 kHz |
+| Lecture audio | ✅ cpal, rééchantillonnage si la carte son diffère | `test audio` |
 | Boucle vocale | ✅ wake → STT → agent → voix → avatar | `voice/listener.rs` |
 | Profils graphiques | ✅ `low` / `medium` / `high` appliqués à Godot | logs `[godot/main]` |
 | Diagnostic | ✅ 7 vérifications, chemins, secrets | vue Diagnostic |
@@ -287,6 +289,15 @@ Deux voix françaises sont proposées :
 > machine (skill `synthese-vocale-fr`, 2 octobre 2026) est la voix « Féminine ».
 > Les deux restent disponibles dans les paramètres.
 
+**L'écoute permanente** se pilote depuis la vue **Voix** — bouton « Activer
+l'écoute » — et s'active automatiquement à la fin de l'onboarding. Tant qu'elle
+n'est pas active, Jimmy n'ouvre pas le micro et n'entend rien : c'est un choix,
+le micro ne s'active jamais sans que vous l'ayez demandé.
+
+> Fish Audio ne produit pas de WAV (`wav` renvoie 400). Jimmy demande donc du
+> **PCM 16 bits** : le flux arrive déjà dans le format que la carte son consomme,
+> ce qui évite d'embarquer un décodeur MP3.
+
 ### Permissions
 
 Trois capacités, configurables indépendamment : **lecture**, **modification**,
@@ -318,6 +329,21 @@ outils : ["list_directory", "synaptiq_search", "read_file", "read_file"]
 durée : 13951 ms
 ```
 
+Le même script enchaîne sur la **chaîne audio** (`.\scripts\test-happy.ps1 -SkipAudio`
+pour l'omettre), deux tests qui ouvrent de vrais périphériques :
+
+| Test | Ce qu'il vérifie | Dernier résultat |
+|---|---|---|
+| `tts_synthetise_et_se_lit` | appel Fish Audio, décodage, **lecture réelle** | 225 280 octets, 44 100 Hz, 4,3 s |
+| `ecoute_permanente_demarre` | micro ouvert + `whisper-server` lancé | micro ouvert, Whisper prêt |
+
+Isolément :
+
+```powershell
+.\scripts\with-msvc.ps1 cmd /c "cargo test -p jimmy-agent --test audio -- --ignored --nocapture tts"
+.\scripts\with-msvc.ps1 cmd /c "cargo test -p jimmy-agent --test audio -- --ignored --nocapture ecoute"
+```
+
 À la main, dans l'interface :
 
 > « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »
@@ -325,6 +351,9 @@ durée : 13951 ms
 Jimmy doit détecter « Jimmy », écouter, transcrire, analyser, utiliser ses
 outils, répondre à la voix, animer l'avatar et afficher la réponse dans la
 bulle.
+
+**L'écoute doit être active** (bouton en tête de la vue **Voix**, ou
+automatiquement après l'onboarding). Sinon Jimmy reste muet : c'est voulu.
 
 ### Tests automatisés
 

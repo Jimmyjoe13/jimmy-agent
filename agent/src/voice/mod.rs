@@ -339,15 +339,19 @@ pub fn strip_wake_word(text: &str, wake_word: &str) -> String {
 
 /// Joue un buffer audio via le périphérique de sortie par défaut.
 ///
+/// `sample_rate` décrit l'audio entrant : 44 100 Hz pour le PCM de Fish Audio.
+/// Si la carte son ne sait pas travailler à cette fréquence — c'est rare, mais
+/// un périphérique à 48 kHz peut refuser — on rééchantillonne.
+///
 /// Le flux est construit explicitement plutôt que via une aide globale : le
 /// tampon est vidé par la callback, et l'appelant attend la fin de la lecture.
 /// C'est ce qui permet d'enchaîner parole → animation → parole sans que les
 /// flux se chevauchent.
-pub fn play_bytes(bytes: &[u8]) -> Result<()> {
+pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
     }
-    let samples = decode_audio(bytes)?;
+    let mut samples = decode_audio(bytes, sample_rate)?;
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -357,12 +361,18 @@ pub fn play_bytes(bytes: &[u8]) -> Result<()> {
         .map_err(|e| Error::Voice(format!("configuration de sortie indisponible : {e}")))?;
     let config: cpal::StreamConfig = supported.config();
 
+    let device_rate = config.sample_rate.0;
+    if device_rate != sample_rate && sample_rate > 0 {
+        samples = resample(&samples, sample_rate, device_rate);
+    }
+
+    let total_samples = samples.len() as u64;
     let queue = Arc::new(Mutex::new(samples.into_iter().collect::<VecDeque<f32>>()));
     let done = Arc::new(AtomicBool::new(false));
     let queue_cb = queue.clone();
     let done_cb = done.clone();
 
-    let _stream = match supported.sample_format() {
+    let stream = match supported.sample_format() {
         cpal::SampleFormat::F32 => device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
@@ -387,11 +397,30 @@ pub fn play_bytes(bytes: &[u8]) -> Result<()> {
     }
     .map_err(|e| Error::Voice(format!("lecture impossible : {e}")))?;
 
+    // Indispensable : `build_output_stream` ne fait que préparer le flux. Sans
+    // cet appel, la callback n'est jamais invoquée et la boucle d'attente
+    // ci-dessous ne termine jamais.
+    stream
+        .play()
+        .map_err(|e| Error::Voice(format!("démarrage de la lecture impossible : {e}")))?;
+
+    // Filet de sécurité : si le périphérique se tait, on ne bloque pas
+    // l'agent indéfiniment. La durée réelle est majorée d'une seconde de
+    // latence de périphérique.
+    let limit = std::time::Duration::from_millis(
+        ((total_samples * 1000) / device_rate.max(1) as u64).saturating_add(1_000),
+    );
+    let started = std::time::Instant::now();
     while !done.load(Ordering::Relaxed) {
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        if started.elapsed() > limit {
+            log::warn!("[voice] lecture interrompue : le périphérique n'a rien produit");
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
     Ok(())
 }
+
 
 /// Vide la file dans le tampon de sortie, et signale la fin quand elle n'a
 /// plus rien à fournir.
@@ -421,21 +450,39 @@ fn drain<T: Copy + Default>(
     }
 }
 
-/// Décode un fichier audio en échantillons flottants.
+/// Décode un buffer audio en échantillons flottants.
 ///
-/// L'audio de Fish Audio arrive en MP3. Décoder du MP3 sans dépendance lourde
+/// Deux formats sont acceptés, tous deux sans dépendance :
 ///
-/// se fait en confiant à Windows : `Media Foundation` est disponible sur la
-/// machine cible. Si le décodage échoue, la lecture est ignorée plutôt que de
-/// faire échouer la réponse — le texte reste affiché.
-fn decode_audio(bytes: &[u8]) -> Result<Vec<f32>> {
-    // WAV : décodé directement, chemin le plus simple et le plus fréquent.
-    if bytes.len() > 44 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WAVE" {
+/// * **WAV** — décodé directement ;
+/// * **PCM brut** — ce que Fish Audio renvoie quand on demande
+///   `response_format: "pcm"` : échantillons 16 bits signés, petit-boutistes,
+///   sans aucune en-tête.
+///
+/// Pourquoi le PCM plutôt que le MP3 ? Le modèle ne produit pas de WAV
+/// (`wav` renvoie 400), et le MP3 exigerait un décodeur — donc une
+/// dépendance et quelques licences. Demander du PCM évite les deux : le
+/// fichier est déjà dans le format que la carte son consomme.
+fn decode_audio(bytes: &[u8], sample_rate: u32) -> Result<Vec<f32>> {
+    if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WAVE" {
         return decode_wav(bytes);
     }
-    Err(Error::Voice(
-        "format audio non décodable par Jimmy (MP3)".into(),
-    ))
+    decode_pcm(bytes, sample_rate)
+}
+
+/// PCM 16 bits signés, petit-boutiste, sans en-tête.
+fn decode_pcm(bytes: &[u8], _sample_rate: u32) -> Result<Vec<f32>> {
+    // Un nombre impair d'octets signifie un échantillon tronqué : on l'ignore.
+    let usable = bytes.len() - (bytes.len() % 2);
+    if usable == 0 {
+        return Err(Error::Voice("audio vide".into()));
+    }
+    let mut out = Vec::with_capacity(usable / 2);
+    for chunk in bytes[..usable].chunks_exact(2) {
+        let value = i16::from_le_bytes([chunk[0], chunk[1]]);
+        out.push(value as f32 / 32768.0);
+    }
+    Ok(out)
 }
 
 fn decode_wav(bytes: &[u8]) -> Result<Vec<f32>> {

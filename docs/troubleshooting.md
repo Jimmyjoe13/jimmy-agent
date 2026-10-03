@@ -143,10 +143,49 @@ basculez le modèle payant dans les paramètres.
 
 ### Aucun son n'est produit
 
-Windows peut muted le périphérique de sortie par défaut. Vérifiez dans
+Windows peut avoir muet le périphérique de sortie par défaut. Vérifiez dans
 Paramètres → Son. Le test « Lire » de la page **Voix » renvoie la taille de
 l'audio : si elle est non nulle, la synthèse fonctionne et le problème est
 côté lecture.
+
+> **Erreur historique : « format audio non décodable par Jimmy (MP3) ».**
+> Corrigée. Fish Audio ne produit pas de WAV (`wav` renvoie 400), et le code
+> demandait du MP3 — que Jimmy ne savait pas décoder, faute de décodeur.
+> La synthèse demande désormais du **PCM** (`response_format: "pcm"`), déjà
+> dans le format que la carte son consomme : aucune dépendance ajoutée.
+> Si vous rencontrez encore ce message, le binaire est antérieur à la
+> correction — recompilez avec `.\scripts\build.ps1 -Release`.
+
+### « Jimmy ne se réveille pas » — causes réelles rencontrées
+
+Deux causes distinctes, toutes deux corrigées :
+
+1. **L'écoute n'était jamais démarrée.** Les commandes `voice_start` /
+   `voice_stop` existaient côté Rust mais n'étaient appelées nulle part dans
+   l'interface : le micro n'était jamais ouvert et Whisper jamais chargé. Un
+   bouton « Activer l'écoute » existe désormais en tête de la vue **Voix**, et
+   l'écoute s'active automatiquement à la fin de l'onboarding.
+
+2. **Le mot court mal transcrit.** Whisper `base` entend « J'y mise » pour
+   « Jimmy ». Les trois formes réelles sont reconnues
+   (`voice::KNOWN_PHRASES`), et un test unitaire
+   (`pas_de_faux_positif_sur_jai`) garantit que « j'ai besoin » ne réveille
+   pas Jimmy.
+
+**Test isolé de l'écoute** — démarre Whisper et ouvre le micro, sans passer par
+l'interface :
+
+```powershell
+.\scripts\with-msvc.ps1 cmd /c "cargo test -p jimmy-agent --test audio -- --ignored --nocapture ecoute"
+```
+
+**Test de la synthèse vocale**, de bout en bout jusqu'à la lecture :
+
+```powershell
+.\scripts\with-msvc.ps1 cmd /c "cargo test -p jimmy-agent --test audio -- --ignored --nocapture tts"
+```
+
+Les deux tests ignorés s'exécutent aussi via `.\scripts\test-happy.ps1`.
 
 ## Agent
 

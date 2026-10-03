@@ -19,6 +19,8 @@
 | Installateur | `scripts/install.ps1 -NoBuild` → 8 vérifications, sortie 0 |
 | Frontend | `npm run build` → TypeScript strict sans erreur |
 | Godot | `--headless` → aucun script en erreur |
+| **Synthèse vocale** | `cargo test --test audio tts` → 225 280 octets PCM 44 100 Hz, **lu sans erreur** |
+| **Écoute permanente** | `cargo test --test audio ecoute` → micro ouvert, `whisper-server` démarré |
 
 ---
 
@@ -63,6 +65,56 @@ démarrage paraît correct et seule l'interface manque.
 Il est lancé dans `setup()` (Rust), pas dans la commande `bootstrap`. La fenêtre
 peut mettre du temps à charger, ou échouer : Jimmy doit malgré tout être sur le
 bureau.
+
+**9. Fish Audio ne produit pas de WAV.**
+`response_format: "wav"` renvoie **400**. Les deux formats acceptés sont `mp3`
+et `pcm`. Jimmy demande `pcm` : le flux est déjà dans le format que la carte son
+consomme, donc aucun décodeur MP3 à embarquer (ni dépendance, ni licence).
+`providers::tts::parse_rate` lit la fréquence dans l'en-tête
+`audio/pcm;rate=44100;channels=1` ; si elle est absente, elle vaut 0 et le lecteur
+ne rééchantillonne pas. Le MP3 n'est plus supporté — `decode_audio` le refuse
+explicitement plutôt que de produire du bruit.
+
+**10. `build_output_stream` ne joue rien tant que `.play()` n'est pas appelé.**
+C'est le piège le plus coûteux de cette session : le code construisait le flux,
+puis attendait `done` dans une boucle. Sans `.play()`, la callback n'est jamais
+invoquée, `done` ne passe jamais à `true`, et **la lecture bloque
+indéfiniment** — sans message d'erreur. Le test TTS reste bloqué plus de 15
+minutes avant correction. Symptôme reconnaissable : le processus consomme un cœur
+et rien ne se passe. Il y a maintenant un filet de sécurité : durée réelle
+majorée d'une seconde, puis abandon avec `log::warn`.
+
+**11. Une commande Tauri qui existe n'est pas une commande appelée.**
+`voice_start` / `voice_stop` étaient implémentées côté Rust, exposées dans
+`api.ts`… et jamais invoquées. Résultat : le micro n'était jamais ouvert,
+`whisper-server` jamais lancé, et le wake word muet — sans la moindre erreur
+visible. Une commande Rust sans appelant ne se voit pas. Vérifier avec
+`rg 'api\.voiceStart' desktop/src` : un résultat = un bug.
+
+**12. `cargo test --test audio` doit utiliser les vrais chemins.**
+Un `Paths` pointant vers un dossier temporaire ne trouve ni `whisper-server.exe`
+ni les modèles : le test échoue sur « composant introuvable » alors que
+l'installation est correcte. `app_reel()` cible le workspace ; `app_de_test()`
+(dossier temporaire) ne sert qu'aux tests hors processus.
+
+**13. `guard()` renvoie `undefined` pour une action `void` — dans les deux cas.**
+`guard` retourne `T | undefined`. Quand `T` vaut `void`, impossible de distinguer
+« réussi » de « échoué ». Le code
+`if (!(await guard(() => recorder.start()))) return;` faisait donc **toujours**
+sortir, et le bouton « Enregistrer » ne passait jamais à l'étape suivante : le
+micro s'ouvrait, le texte ne s'affichait pas. Même famille que le piège 11, mais
+invisible et plus sournois : TypeScript n'y voit rien.
+
+`ui::attempt` existe pour ça : il renvoie un booléen. **Règle : dès que la
+commande Tauri ne retourne rien, utiliser `attempt`, jamais `guard`.**
+`tts_preview`, `voice_start`, `avatar_start`, `avatar_quality`,
+`avatar_stop`, `set_startup`, `save_*` sont tous concernés.
+
+**14. Un « exit code 1 » sans erreur n'est pas forcément une erreur.**
+Les commandes de ce projet sont souvent pipées vers `Select-Object -Last N` ou
+`-First N` : PowerShell ferme alors le pipeline en amont, la commande native est
+tuée, et le code de sortie vaut 1 alors que la compilation a réussi. Redirecter
+vers un fichier (`> log 2>&1`) puis lire le log, pour un verdict fiable.
 
 ---
 

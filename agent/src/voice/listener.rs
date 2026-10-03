@@ -213,8 +213,9 @@ async fn speak(app: &Arc<App>, text: &str) {
     if bytes.is_empty() {
         return;
     }
+    let sample_rate = speech.sample_rate;
     let _ = app.avatar.say(text, speech.estimated_ms).await;
-    let outcome = tokio::task::spawn_blocking(move || super::play_bytes(&bytes)).await;
+    let outcome = tokio::task::spawn_blocking(move || super::play_bytes(&bytes, sample_rate)).await;
     if let Ok(Err(error)) = outcome {
         log::warn!("[voice] lecture impossible : {error}");
     }

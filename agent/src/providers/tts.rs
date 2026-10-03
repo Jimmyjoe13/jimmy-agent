@@ -55,10 +55,32 @@ pub enum TtsProvider {
 
 #[derive(Debug, Clone)]
 pub struct Speech {
-    /// Audio MP3 décodé, prêt à être lu.
+    /// Audio prêt à être lu : PCM 16 bits si le fournisseur l'accepte, WAV
+    /// sinon.
     pub bytes: Vec<u8>,
+    /// Fréquence d'échantillonnage de `bytes`.
+    pub sample_rate: u32,
     /// Durée estimée, à partir du débit moyen observé.
     pub estimated_ms: u64,
+}
+
+/// Réponse d'une synthèse, avant agrégation des morceaux.
+struct AudioPayload {
+    bytes: Vec<u8>,
+    sample_rate: u32,
+}
+
+/// Extrait la fréquence d'un en-tête `audio/pcm;rate=44100;channels=1`.
+/// Renvoie 0 si l'en-tête est absent : le lecteur ne rééchantillonne pas.
+fn parse_rate(content_type: &str) -> u32 {
+    content_type
+        .split(';')
+        .find_map(|part| {
+            let part = part.trim();
+            part.strip_prefix("rate=")
+                .and_then(|v| v.parse::<u32>().ok())
+        })
+        .unwrap_or(0)
 }
 
 pub struct Tts {
@@ -102,6 +124,7 @@ impl Tts {
         if prepared.is_empty() {
             return Ok(Speech {
                 bytes: Vec::new(),
+                sample_rate: 0,
                 estimated_ms: 0,
             });
         }
@@ -109,27 +132,45 @@ impl Tts {
         // Au-delà de cette taille, le fournisseur refuse : on découpe.
         const MAX_CHARS: usize = 4000;
         if prepared.chars().count() <= MAX_CHARS {
-            let bytes = self.request_once(api_key, model, voice, &prepared).await?;
+            let audio = self.request_once(api_key, model, voice, &prepared).await?;
             let ms = estimate_ms(&prepared, chars_per_minute);
-            return Ok(Speech { bytes, estimated_ms: ms });
+            return Ok(Speech {
+                bytes: audio.bytes,
+                sample_rate: audio.sample_rate,
+                estimated_ms: ms,
+            });
         }
 
         let mut all = Vec::new();
+        let mut sample_rate = 0;
         for chunk in split_sentences(&prepared, MAX_CHARS) {
-            all.extend(self.request_once(api_key, model, voice, &chunk).await?);
+            let audio = self.request_once(api_key, model, voice, &chunk).await?;
+            sample_rate = sample_rate.max(audio.sample_rate);
+            all.extend(audio.bytes);
         }
         Ok(Speech {
             bytes: all,
+            sample_rate,
             estimated_ms: estimate_ms(&prepared, chars_per_minute),
         })
     }
 
-    async fn request_once(&self, api_key: &str, model: &str, voice: &str, text: &str) -> Result<Vec<u8>> {
+    /// Un appel de synthèse. Retourne les octets et la fréquence annoncée.
+    async fn request_once(
+        &self,
+        api_key: &str,
+        model: &str,
+        voice: &str,
+        text: &str,
+    ) -> Result<AudioPayload> {
         let body = serde_json::json!({
             "model": model,
             "input": text,
             "voice": voice,
-            "response_format": "mp3",
+            // PCM plutôt que MP3 : le modèle ne produit pas de WAV (400), et le
+            // PCM arrive déjà dans le format que la carte son consomme — donc
+            // aucun décodeur à embarquer.
+            "response_format": "pcm",
         });
         let response = self
             .http
@@ -159,11 +200,15 @@ impl Tts {
                 sanitize(&raw, 200)
             )));
         }
+        let sample_rate = parse_rate(&content_type);
         let bytes = response
             .bytes()
             .await
             .map_err(|e| Error::Tts(e.to_string()))?;
-        Ok(bytes.to_vec())
+        Ok(AudioPayload {
+            bytes: bytes.to_vec(),
+            sample_rate,
+        })
     }
 }
 
