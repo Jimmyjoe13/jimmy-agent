@@ -186,7 +186,10 @@ impl AvatarState {
 
 /// Événements émis par l'agent pendant une demande.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+// `rename_all_fields` : sans lui, `call_id` et `duration_ms` partaient en
+// snake_case alors que l'interface lit `callId` et `durationMs` — les durées
+// des outils n'apparaissaient jamais.
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     /// Changement d'état de l'avatar.
     State { state: AvatarState, detail: String },
@@ -213,6 +216,11 @@ pub enum AgentEvent {
     /// Commande dite à voix haute, telle que transmise à l'agent : affichée
     /// dans le chat comme un message de l'utilisateur.
     Spoken { text: String },
+    /// Où en est l'écoute, pour que l'utilisateur sache toujours ce que Jimmy
+    /// attend de lui. `phase` : `idle` (en veille), `capturing` (je t'entends),
+    /// `transcribing`, `your_turn` (à toi, `remaining` ms pour commencer),
+    /// `thinking`, `speaking`.
+    Listen { phase: String, remaining: u64 },
     /// Ce que l'écoute a transcrit (fenêtre du wake word). `matched` : le mot
     /// d'activation y a été reconnu. Sert au retour visuel de la vue Voix.
     Heard { text: String, matched: bool },

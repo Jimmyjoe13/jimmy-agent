@@ -44,8 +44,14 @@ struct Inference {
 
 impl Stt {
     pub fn new(port: u16, language: &str) -> Result<Self> {
+        // Aucune connexion gardée ouverte : whisper-server ferme les siennes
+        // après un court délai, et réutiliser une connexion fermée faisait
+        // échouer la première requête après chaque pause (« error sending
+        // request », mesuré dans le journal) — d'où une réparation complète
+        // des serveurs et plusieurs secondes perdues.
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
+            .pool_max_idle_per_host(0)
             .user_agent("jimmy/0.1 (desktop agent)")
             .build()?;
         Ok(Stt {
@@ -68,7 +74,12 @@ impl Stt {
     }
 
     /// Démarre `whisper-server.exe` s'il ne répond pas déjà.
-    pub async fn ensure_server(&mut self, exe: &Path, model: &Path, threads: u32) -> Result<()> {
+    /// `audio_ctx` : contexte audio de Whisper, en trames de 20 ms (1500 =
+    /// 30 s, valeur d'origine ; 0 = ne pas le réduire). Whisper traite toujours
+    /// une fenêtre complète, même pour une phrase de 2 s : réduire le contexte
+    /// divise le temps d'inférence. Mesuré sur 8 phrases (modèle `small`) :
+    /// 4,0 s → 1,1 s (512) ou 1,7 s (768), erreur de mots identique (~20 %).
+    pub async fn ensure_server(&mut self, exe: &Path, model: &Path, threads: u32, audio_ctx: u32) -> Result<()> {
         if self.health().await {
             log::info!("[stt] whisper-server déjà actif sur le port{}", self.port());
             return Ok(());
@@ -96,7 +107,11 @@ impl Stt {
             .arg("--vad-model")
             .arg(vad_model_for(model))
             .arg("-t")
-            .arg(if threads == 0 { num_cpus() } else { threads }.to_string())
+            .arg(if threads == 0 { num_cpus() } else { threads }.to_string());
+        if audio_ctx > 0 {
+            command.arg("-ac").arg(audio_ctx.to_string());
+        }
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -174,7 +189,7 @@ impl Stt {
             .json()
             .await
             .map_err(|e| Error::Stt(format!("réponse illisible : {e}")))?;
-        Ok(parsed.text.trim().to_string())
+        Ok(clean_transcript(&parsed.text))
     }
 
     pub async fn shutdown(&mut self) {
@@ -182,6 +197,54 @@ impl Stt {
             let _ = child.kill().await;
         }
     }
+}
+
+/// Phrases que Whisper « invente » sur du bruit ou du silence : elles
+/// viennent de ses données d'entraînement (sous-titres de vidéos), pas de ce
+/// que l'utilisateur a dit.
+const HALLUCINATIONS: &[&str] = &[
+    "amara.org",
+    "sous-titr",
+    "sous titr",
+    "merci d'avoir regardé",
+    "merci d’avoir regardé",
+    "abonnez-vous",
+    "abonne-toi",
+    "n'oubliez pas de vous abonner",
+];
+
+/// Nettoie une transcription : retire les annotations de Whisper (`[BLANK_AUDIO]`,
+/// `(musique)`, `*bruit*`, notes de musique) et les phrases inventées sur du
+/// bruit. Renvoie une chaîne vide s'il ne reste rien d'un propos réel.
+pub fn clean_transcript(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut closing: Option<char> = None;
+    for ch in text.chars() {
+        match (closing, ch) {
+            (None, '[') => closing = Some(']'),
+            (None, '(') => closing = Some(')'),
+            (None, '*') => closing = Some('*'),
+            (Some(close), c) if c == close => closing = None,
+            (Some(_), _) => {}
+            (None, '♪' | '♫') => {}
+            (None, c) => out.push(c),
+        }
+    }
+    // Annotation jamais refermée : on ne jette pas tout le reste de la phrase.
+    let base = if closing.is_some() {
+        text.chars().filter(|c| !matches!(c, '♪' | '♫')).collect::<String>()
+    } else {
+        out
+    };
+    let cleaned = base.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = cleaned.to_lowercase();
+    if HALLUCINATIONS.iter().any(|h| lower.contains(h)) {
+        return String::new();
+    }
+    if !cleaned.chars().any(|c| c.is_alphanumeric()) {
+        return String::new();
+    }
+    cleaned
 }
 
 fn num_cpus() -> u32 {
@@ -266,6 +329,23 @@ pub fn is_speech(samples: &[f32], threshold: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcription_nettoyee() {
+        assert_eq!(clean_transcript("[BLANK_AUDIO]"), "");
+        assert_eq!(clean_transcript("(musique) Bonjour"), "Bonjour");
+        assert_eq!(clean_transcript("♪ ♪"), "");
+        assert_eq!(clean_transcript("*bruit de porte*"), "");
+        assert_eq!(clean_transcript("  Quelle   heure est-il ?  "), "Quelle heure est-il ?");
+        assert_eq!(clean_transcript("..."), "");
+        // Phrases de sous-titres inventées sur du bruit.
+        assert_eq!(clean_transcript("Sous-titres réalisés par la communauté d'Amara.org"), "");
+        assert_eq!(clean_transcript("Merci d'avoir regardé cette vidéo !"), "");
+        // Annotation non refermée : le reste est conservé.
+        assert_eq!(clean_transcript("Bonjour (euh"), "Bonjour (euh");
+        // Un vrai propos n'est jamais touché.
+        assert_eq!(clean_transcript("Dis-moi bonjour."), "Dis-moi bonjour.");
+    }
 
     #[test]
     fn wav_a_entete_valide() {

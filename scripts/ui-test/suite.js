@@ -102,6 +102,23 @@ async function step(name, fn) {
     return servers.replace(/\s+/g, " ").trim();
   });
 
+  await step("Voix : bandeau de phase et état d'attente visibles", async () => {
+    await nav("Voix");
+    // Le bandeau n'existe visiblement que pendant l'écoute : on l'active, on
+    // vérifie, puis on recoupe pour laisser l'état attendu par l'étape suivante.
+    await p.locator("button", { hasText: "Activer l'écoute" }).click();
+    await p.waitForFunction(() => document.querySelector(".listen-state")?.textContent === "active", null, { timeout: 90000 });
+    await p.waitForSelector(".phase-banner", { state: "visible", timeout: 5000 });
+    const text = (await p.locator(".phase-banner .phase-text").textContent()) ?? "";
+    expect(/veille|t'entends|transcris|À toi|réfléchis|réponds/.test(text), `bandeau : « ${text} »`);
+    const chip = (await p.locator(".topbar .chip").textContent()) ?? "";
+    await p.locator("button", { hasText: "Couper l'écoute" }).click();
+    await p.waitForFunction(() => document.querySelector(".listen-state")?.textContent === "arrêtée", null, { timeout: 15000 });
+    const hidden = await p.locator(".phase-banner").isHidden();
+    expect(hidden, "le bandeau doit disparaître quand l'écoute est coupée");
+    return `bandeau « ${text} », pastille « ${chip} »`;
+  });
+
   await step("Voix : relance de l'écoute (serveurs whisper conservés)", async () => {
     await p.locator("button", { hasText: "Activer l'écoute" }).click();
     await p.waitForFunction(() => document.querySelector(".listen-state")?.textContent === "active", null, { timeout: 90000 });
@@ -141,6 +158,16 @@ async function step(name, fn) {
       { timeout: 10000 },
     );
     return "toast affiché";
+  });
+
+  await step("Paramètres : conversation continue et pause de fin de phrase", async () => {
+    await nav("Paramètres");
+    await p.waitForTimeout(800);
+    const follow = await p.locator(".field-row", { hasText: "Conversation continue" }).locator("select").inputValue();
+    expect(follow === "8", `conversation continue : ${follow} s (attendu 8)`);
+    const pause = await p.locator(".field-row", { hasText: "Pause qui termine" }).locator("input").inputValue();
+    expect(Number(pause) === 700, `pause de fin de phrase : ${pause} ms (attendu 700)`);
+    return `${follow} s, ${pause} ms`;
   });
 
   await step("Historique : ouvrir une session", async () => {

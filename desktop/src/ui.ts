@@ -139,6 +139,16 @@ export const STATE_LABEL: Record<string, string> = {
   waiting: "j'attends",
 };
 
+/** Étapes de l'écoute, en une expression courte (pastille de la barre du haut). */
+export const PHASE_LABEL: Record<string, string> = {
+  idle: "prêt",
+  capturing: "je t'entends",
+  transcribing: "je transcris",
+  your_turn: "à toi",
+  thinking: "je réfléchis",
+  speaking: "je parle",
+};
+
 /** « jimmy » → « Jimmy » (affichage du mot d'activation). */
 export function capitalize(word: string): string {
   return word ? word[0].toUpperCase() + word.slice(1) : word;

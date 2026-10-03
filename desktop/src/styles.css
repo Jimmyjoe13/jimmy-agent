@@ -809,6 +809,93 @@ textarea:focus {
   border-color: rgba(52, 211, 153, 0.5);
 }
 
+/* Bandeau de phase : ce que Jimmy attend de toi, à chaque instant. */
+.phase-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #12151b;
+  font-weight: 560;
+}
+
+.phase-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.phase-banner.capturing .phase-dot {
+  background: #60a5fa;
+  animation: pulse 0.9s infinite ease-in-out;
+}
+
+.phase-banner.transcribing,
+.phase-banner.thinking {
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.phase-banner.transcribing .phase-dot,
+.phase-banner.thinking .phase-dot {
+  background: var(--accent);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.phase-banner.your_turn {
+  border-color: rgba(52, 211, 153, 0.6);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.phase-banner.your_turn .phase-dot {
+  background: var(--ok);
+  animation: pulse 0.7s infinite ease-in-out;
+}
+
+.phase-banner.speaking .phase-dot {
+  background: #93c5fd;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase-dot {
+    animation: none !important;
+  }
+}
+
+/* Pastille d'état de la barre du haut : étapes de l'écoute. */
+.chip.phase-capturing,
+.chip.phase-speaking {
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+
+.chip.phase-transcribing,
+.chip.phase-thinking {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip.phase-your_turn {
+  border-color: var(--ok);
+  color: var(--ok);
+  font-weight: 600;
+}
+
 .heard-tag {
   flex: none;
   font-size: 10.5px;

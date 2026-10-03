@@ -30,6 +30,7 @@ export interface AgentEvent {
     | "notice"
     | "heard"
     | "spoken"
+    | "listen"
     | "failed";
   state?: AvatarState;
   detail?: string;
@@ -44,6 +45,10 @@ export interface AgentEvent {
   message?: string;
   /** `heard` : le mot d'activation a été reconnu dans la transcription. */
   matched?: boolean;
+  /** `listen` : étape de l'écoute (idle, capturing, transcribing, your_turn,
+   *  thinking, speaking) et temps restant en ms pour `your_turn`. */
+  phase?: string;
+  remaining?: number;
 }
 
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
@@ -162,6 +167,7 @@ export interface SttSettings {
   threads: number;
   command_model: string;
   command_port: number;
+  command_audio_ctx: number;
 }
 
 export interface VoiceSettings {
@@ -170,6 +176,8 @@ export interface VoiceSettings {
   input_sample_rate: number;
   vad_threshold: number;
   end_of_speech_ms: number;
+  follow_up_ms: number;
+  debug_audio: boolean;
   listen_on_start: boolean;
 }
 

@@ -20,6 +20,35 @@ export function voiceView(ctx: AppContext): HTMLElement {
   const listenButton = h("button", { class: "primary", onclick: () => void toggleListening() }, "…");
   const servers = h("div", { class: "note" }, "");
   const heard = h("div", { class: "heard" });
+
+  // Bandeau de phase : à chaque instant, ce que Jimmy attend de toi.
+  const phaseText = h("span", { class: "phase-text" }, "…");
+  const banner = h("div", { class: "phase-banner idle", role: "status" }, h("span", { class: "phase-dot" }), phaseText);
+  let phaseTimer = 0;
+  const wake = capitalize(ctx.status.stt.wake_word);
+
+  function showPhase(phase: string, remaining = 0) {
+    window.clearInterval(phaseTimer);
+    banner.className = `phase-banner ${phase}`;
+    const labels: Record<string, string> = {
+      idle: `En veille — dis « ${wake} »`,
+      capturing: "Je t'entends…",
+      transcribing: "Je transcris ce que tu as dit…",
+      thinking: "Je réfléchis…",
+      speaking: "Je te réponds à voix haute…",
+    };
+    if (phase === "your_turn" && remaining > 0) {
+      const end = Date.now() + remaining;
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        phaseText.textContent = `À toi — parle, je t'écoute (${s} s)`;
+      };
+      tick();
+      phaseTimer = window.setInterval(tick, 250);
+      return;
+    }
+    phaseText.textContent = labels[phase] ?? phase;
+  }
   // Vumètre de l'écoute permanente : la preuve que le micro capte.
   const liveMeter = h("div", { class: "meter active", title: "Niveau du micro" }, h("div", { class: "meter-fill" }));
   const livePoll = window.setInterval(async () => {
@@ -31,6 +60,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
     (liveMeter.firstElementChild as HTMLElement).style.width = `${level * 100}%`;
   }, 300);
   ctx.onCleanup(() => {
+    window.clearInterval(phaseTimer);
     window.clearInterval(livePoll);
     window.clearInterval(meterTimer);
     // Quitter la vue pendant un enregistrement libère le micro de la fenêtre.
@@ -46,6 +76,8 @@ export function voiceView(ctx: AppContext): HTMLElement {
     listenButton.className = running ? "ghost" : "primary";
     listenButton.removeAttribute("disabled");
     liveMeter.style.display = running ? "" : "none";
+    banner.style.display = running ? "" : "none";
+    if (running && banner.classList.contains("idle")) showPhase("idle");
     if (!voice) {
       servers.textContent = "État de l'écoute indisponible.";
       return;
@@ -81,15 +113,16 @@ export function voiceView(ctx: AppContext): HTMLElement {
   // Fil « ce que Jimmy entend » : le retour qui manquait pour savoir si le
   // micro capte, et si le mot d'éveil est reconnu.
   ctx.onEvent((event) => {
-    // Après « Oui ? », Jimmy attend la commande : on le dit clairement.
-    if (event.type === "state" && event.state === "listening" && event.detail === "Oui ?") {
+    if (event.type === "listen") showPhase(event.phase ?? "idle", event.remaining ?? 0);
+    // Après « Oui ? » ou une réponse, Jimmy attend la suite : on le dit clairement.
+    if (event.type === "state" && event.state === "listening" && (event.detail === "Oui ?" || event.detail === "À toi")) {
       heard.querySelector(".hint")?.remove();
       heard.prepend(
         h(
           "div",
           { class: "heard-line matched" },
           h("span", { class: "heard-tag" }, "à toi"),
-          h("span", {}, "Jimmy t'écoute — parle maintenant."),
+          h("span", {}, event.detail === "À toi" ? "Conversation ouverte — réponds sans dire « Jimmy »." : "Jimmy t'écoute — parle maintenant."),
         ),
       );
       return;
@@ -201,6 +234,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
         " ». La reconnaissance tourne en local : rien n'est envoyé sur le réseau. Si tu la laisses active, l'écoute reprend toute seule au prochain lancement.",
       ),
       h("div", { class: "row" }, listenButton, listenState),
+      banner,
       liveMeter,
       servers,
       h("h4", {}, "Ce que Jimmy entend"),

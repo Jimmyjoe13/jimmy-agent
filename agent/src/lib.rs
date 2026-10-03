@@ -339,7 +339,10 @@ impl App {
                 }
                 let mut stt = providers::Stt::new(settings.stt.port, &settings.stt.language)?
                     .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Wake));
-                stt.ensure_server(&server_exe, &models.join(&settings.stt.model), settings.stt.threads)
+                // Serveur du mot d'éveil : contexte complet. Réduit, il
+                // reconnaît mal les mots courts (« Dis-moi bonjour » →
+                // « D'y ma bonjour », mesuré).
+                stt.ensure_server(&server_exe, &models.join(&settings.stt.model), settings.stt.threads, 0)
                     .await?;
                 *guard = Some(stt);
             }
@@ -365,7 +368,12 @@ impl App {
         let started = async {
             let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?
                 .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Command));
-            stt.ensure_server(&server_exe, &models.join(command_model), settings.stt.threads)
+            stt.ensure_server(
+                &server_exe,
+                &models.join(command_model),
+                settings.stt.threads,
+                settings.stt.command_audio_ctx,
+            )
                 .await?;
             Ok::<_, Error>(stt)
         }

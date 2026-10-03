@@ -168,6 +168,87 @@ mot rapide incompréhensible, plus de vocal ». Causes, toutes corrigées :
 - Vérifié sans aucun clic simulé : `WindowFromPoint` (zone cliquable) et
   `SetCursorPos` + position de fenêtre (esquive, poursuite, retour).
 
+# Fluidité de la conversation (3 octobre 2026, soir)
+
+Retour d'usage : « pas assez fluide, la transcription enregistre des bruits
+parasites, je ne comprends pas les périodes où elle attend que je parle ».
+Le journal détaillé a permis de **mesurer** (délais en secondes, fin de phrase
+→ commande transmise).
+
+## Où partait le temps
+
+| Poste | Avant | Après | Cause / correctif |
+|---|---|---|---|
+| Fin de phrase → commande transmise | 4,2–4,5 s | **1,6–2,2 s** | Silence de fin 900→700 ms, paliers de 450 ms → trames de 50 ms ; surtout **modèle précis 3,4 s → 1,2 s** (`-ac 640`) |
+| « Jimmy » seul → « Oui ? » | ~5 s | ~1,5 s | `base` déjà reconnu et prise brève (≤ 900 ms de parole) : `small` n'est plus appelé |
+| Après « Oui ? » | ≥ 3,5 s fixes | dès la fin de ta phrase | l'attente fixe devenait « attendre le début de la parole » (4,5 s max) |
+| Réponse → début de la voix | +3 à 5 s | immédiat | l'**apprentissage mémoire** (appel au modèle) précédait l'envoi de la réponse → tâche de fond, 1 tour sur 4 |
+| Chat → échec après chaque pause | 1 requête sur 2 | 0 | connexions HTTP gardées vers whisper-server (fermées côté serveur) → `pool_max_idle_per_host(0)` |
+
+## Ce qui n'est PAS corrigeable de notre côté
+
+**La latence du modèle de langage varie de 2 s à 25 s pour la même requête**
+(mesure : requête enregistrée rejouée 14 fois, médiane 3,9 s, max 10,8 s ;
+une heure avant, tous les modèles du fournisseur répondaient en 1,2–2,3 s).
+Éliminé un par un : outils, taille du prompt (2,9 k jetons), historique,
+`max_tokens`, identifiant de session, appels concurrents, raisonnement caché
+(22 jetons en sortie pour 11 s). **Requête « couverte » (2e requête après 3 s)
+testée : aucun gain**, la lenteur est corrélée (fournisseur chargé à ce moment).
+Réponse : « Un instant. » dit à voix haute au-delà de 5 s (`Cue::Thinking`) et
+pastille « je réfléchis » en continu. Piste non faite : modèle local (LM Studio)
+pour les échanges courants.
+
+## Ce qui a été construit
+
+- **Détecteur par trames** (`voice/vad.rs`, 9 tests) : trames de 50 ms,
+  confirmation sur 2 trames (un claquement n'est pas de la parole), fin de
+  phrase au silence, **temps de l'audio et non de l'horloge**, extrait rogné
+  (parole + 300 ms) avant Whisper, parole antérieure au « Oui ? » conservée
+  si ≥ 700 ms (sinon c'est l'écho du cue).
+- **Conversation continue** : après la réponse, 8 s d'écoute **sans** redire
+  « Jimmy » (`voice.follow_up_ms`, 0 = désactivée). Fenêtre visible : pastille
+  « à toi · 6 s » (barre du haut) et bandeau de la page Voix.
+- **Événement `Listen`** (idle, capturing, transcribing, your_turn, thinking,
+  speaking) : l'utilisateur sait à chaque instant ce que Jimmy attend.
+- **Anti-bruit** : `clean_transcript` (annotations `[BLANK_AUDIO]`, `(musique)`,
+  `*bruit*`, ♪, phrases de sous-titres inventées), parole minimale 250 ms,
+  extrait rogné. Réglage `voice.debug_audio` : garde les 40 derniers extraits
+  dans `data/audio/debug/` pour écouter ce que Whisper a reçu.
+- **Mode vocal de l'agent** sans `search_memory`/`synaptiq_search` (le contexte
+  est déjà dans le prompt : 2 à 4 s par aller-retour économisés).
+- `rename_all_fields = "camelCase"` sur `AgentEvent` : les durées d'outils
+  n'apparaissaient jamais dans l'interface (`duration_ms` ≠ `durationMs`).
+
+## Mesures de Whisper à ne pas refaire
+
+`small-q5` sur ce CPU (16 threads) : **3,4 s pour 1,8 s d'audio**, identique à
+8, 12 ou 16 threads (4 threads : 4,7 s). Whisper traite toujours 30 s de
+contexte. `-ac` (contexte audio, 1500 = 30 s) :
+
+| | s / phrase | erreur de mots |
+|---|---|---|
+| small, `-ac` 0 | 4,0 | 20 % |
+| small, `-ac` 1024 | 2,4 | 18 % |
+| small, `-ac` 768 | 1,7 | 20 % |
+| **small, `-ac` 640 (retenu)** | ~1,4 | ~20 % |
+| small, `-ac` 512 | 1,1 | 19 % |
+| base, `-ac` 0 | 0,9 | 29 % |
+| base, `-ac` 768 | 0,4 | 38 % (« Dis-moi bonjour » → « D'y ma bonjour ») |
+
+640 = 12,8 s, juste au-dessus de la phrase maximale (12 s + marges) : jamais
+tronquée. **Appliqué au seul serveur de commande** ; le serveur du mot d'éveil
+garde le contexte complet. Scripts de mesure : voir pièges 41 et 42.
+
+## À savoir pour la suite
+
+- Si une phrase est coupée en deux : c'est la **pause de fin de phrase**
+  (700 ms, Paramètres → Écoute). Une pause de réflexion plus longue coupe la
+  phrase ; le nom suivi d'une pause est géré (la suite est reprise après le
+  « Oui ? »).
+- En conversation continue, tout ce qui est dit pendant la fenêtre est pris
+  pour une commande : coupe-la (0) dans une pièce où l'on parle à quelqu'un
+  d'autre.
+
 ## Pièges connus
 
 **1. PowerShell 5.1 lit les `.ps1` en ANSI sans BOM.**
@@ -379,6 +460,39 @@ La session vocale est réutilisée tant que le dernier échange date de moins de
 10 minutes (`VOICE_SESSION_IDLE`) ; avant, chaque phrase ouvrait une session
 neuve et Jimmy oubliait tout.
 
+**38. Whisper traite toujours une fenêtre de 30 s, même pour 2 s d'audio.**
+D'où ~3 s par transcription `small`, quel que soit le nombre de threads.
+`-ac 640` divise le temps par ~3 sans perte mesurée de précision (voir le
+tableau). Ne pas l'appliquer au modèle de mot d'éveil.
+
+**39. L'apprentissage mémoire bloquait la réponse.**
+`learn()` est un appel de plus au modèle ; placé avant l'envoi de la réponse,
+il la retardait de 3 à 5 s. Maintenant en tâche de fond avec un `WeakSender`
+(un `Sender` fort ferait attendre l'interface). Et le réglage
+`memory.auto_learn_every` existait mais n'était jamais lu : 1 tour sur 4.
+
+**40. Connexions HTTP gardées vers whisper-server.**
+Le serveur ferme ses connexions inactives ; reqwest en réutilisait une fermée
+et la première requête après chaque pause échouait (« error sending request »),
+ce qui déclenchait toute la réparation des serveurs. `pool_max_idle_per_host(0)`
+sur le client STT.
+
+**41. Python ne passe pas le pare-feu du fournisseur LLM sans User-Agent.**
+`urllib` seul → HTTP 403 (et pas une erreur de clé). Ajouter
+`User-Agent: jimmy/0.1 (desktop agent)`. Mesures reproductibles :
+`JIMMY_LLM_DUMP=<dossier>` enregistre chaque requête envoyée au modèle
+(corps JSON, sans la clé), à rejouer à la main pour comparer des latences.
+
+**42. Pour mesurer Whisper hors de Rust** : test ignoré `exporter_clips_de_test`
+(`JIMMY_CLIPS_DIR`) écrit des phrases de synthèse variées en WAV 16 kHz, puis
+lancer `whisper-server.exe` à la main avec `-ac N` et POSTer les clips sur
+`/inference`.
+
+**43. Une prise qui commence avant la fin du « Oui ? » n'est pas un écho.**
+L'écho du cue dure ~0,5 s ; une parole confirmée ≥ 700 ms avant l'armement
+est l'utilisateur qui enchaîne sa commande pendant la pause qui suit le nom.
+Sans cette règle, « Jimmy… (pause) dis-moi bonjour » perdait la commande.
+
 ---
 
 ## Prochaines étapes
@@ -423,7 +537,7 @@ neuve et Jimmy oubliait tout.
 .\scripts\build.ps1 -Release -Bundles   # + installateur NSIS
 .\scripts\test-happy.ps1       # test de bout en bout + chaîne audio
 .\scripts\test-happy.ps1 -SkipAudio
-.\scripts\test-ui.ps1        # 12 parcours UI sur la vraie application (CDP)
+.\scripts\test-ui.ps1        # 14 parcours UI sur la vraie application (CDP)
 .\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_ '--' --ignored --nocapture --test-threads=1
 .\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\shortcut.ps1 -Autostart   # démarrage avec Windows

@@ -48,6 +48,14 @@ pub async fn learn(
     if !settings.memory.auto_learn {
         return Vec::new();
     }
+    // Une conversation sur `auto_learn_every` seulement : le réglage existait
+    // mais n'était jamais lu, et chaque tour payait un appel de plus au modèle
+    // — qui, sur un modèle gratuit, retarde aussi la réponse suivante.
+    static TURNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let every = u64::from(settings.memory.auto_learn_every.max(1));
+    if TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % every != 0 {
+        return Vec::new();
+    }
     let messages = vec![
         Message::system(EXTRACTOR),
         Message::user(format!(

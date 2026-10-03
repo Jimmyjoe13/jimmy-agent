@@ -80,9 +80,17 @@ pub async fn run(
     .await;
 
     // 1. Contexte : mémoire locale puis, si la règle le justifie, Synaptiq.
+    let step = Instant::now();
     let memory_block = prompt::recall_for(&deps.memory, &settings, &request).await;
+    log::info!("[agent] mémoire consultée en {} ms", step.elapsed().as_millis());
+    let step = Instant::now();
     let synaptiq_block =
         prompt::synaptiq_context(deps.synaptiq.as_ref(), &settings, &request).await;
+    log::info!(
+        "[agent] Synaptiq en {} ms ({})",
+        step.elapsed().as_millis(),
+        if synaptiq_block.is_some() { "contexte injecté" } else { "rien" }
+    );
     if synaptiq_block.is_some() {
         emit(
             &mut events,
@@ -116,7 +124,13 @@ pub async fn run(
         .append(&session_id, &Message::user(request.clone()))
         .catch();
 
-    let specs = deps.registry.specs();
+    let mut specs = deps.registry.specs();
+    if deps.voice {
+        // Le contexte mémoire est déjà injecté dans le prompt : ces deux
+        // outils ne font qu'ajouter des allers-retours au modèle (2 à 4 s
+        // chacun), alors que la conversation est à voix haute.
+        specs.retain(|spec| !matches!(spec.name.as_str(), "search_memory" | "synaptiq_search"));
+    }
     let max_iterations = if deps.voice {
         settings.llm.max_iterations.clamp(1, VOICE_MAX_ITERATIONS)
     } else {
@@ -139,6 +153,7 @@ pub async fn run(
             break;
         }
 
+        let call_started = Instant::now();
         let reply = deps
             .llm
             .chat(
@@ -149,6 +164,15 @@ pub async fn run(
                 settings.llm.max_tokens,
             )
             .await?;
+        log::info!(
+            "[agent] appel au modèle n°{} en {} ms ({} outil(s), {} caractères ; jetons : {} en entrée, {} en sortie)",
+            iteration + 1,
+            call_started.elapsed().as_millis(),
+            reply.tool_calls.len(),
+            reply.content.chars().count(),
+            reply.usage.prompt_tokens,
+            reply.usage.completion_tokens
+        );
 
         if !reply.content.trim().is_empty() {
             final_text = reply.content.trim().to_string();
@@ -253,24 +277,6 @@ pub async fn run(
         final_text = "Je n'ai pas pu formuler de réponse à cette demande.".into();
     }
 
-    // 3. Mémorisation : ce que la conversation apprend de stable.
-    if settings.memory.enabled {
-        let learned = crate::memory::learn::learn(&deps.llm, &settings, &request, &final_text).await;
-        for (kind, content) in learned {
-            match deps.memory.remember_indexed(kind, &content, "auto", 0.55).await {
-                Ok(_) => emit(
-                    &mut events,
-                    AgentEvent::Memory {
-                        action: "learn".into(),
-                        detail: content,
-                    },
-                )
-                .await,
-                Err(error) => log::warn!("[memory] écriture impossible : {error}"),
-            }
-        }
-    }
-
     deps.history.touch(&session_id).catch();
 
     emit(
@@ -288,6 +294,35 @@ pub async fn run(
         },
     )
     .await;
+
+    // 3. Mémorisation, **après** la réponse et en tâche de fond. Avant, elle
+    // se faisait ici même, avant d'envoyer la réponse : un appel de plus au
+    // modèle (3 à 5 s) retardait chaque réponse — mesuré dans le journal.
+    // `WeakSender` : la tâche ne retient pas le canal ouvert, sinon l'interface
+    // attendrait la fin de l'apprentissage avant de lire la réponse.
+    if settings.memory.enabled {
+        let llm = deps.llm.clone();
+        let memory = deps.memory.clone();
+        let settings = settings.clone();
+        let request = request.clone();
+        let answer = final_text.clone();
+        let weak = events.downgrade();
+        tokio::spawn(async move {
+            let learned = crate::memory::learn::learn(&llm, &settings, &request, &answer).await;
+            for (kind, content) in learned {
+                match memory.remember_indexed(kind, &content, "auto", 0.55).await {
+                    Ok(_) => {
+                        if let Some(events) = weak.upgrade() {
+                            let _ = events
+                                .send(AgentEvent::Memory { action: "learn".into(), detail: content })
+                                .await;
+                        }
+                    }
+                    Err(error) => log::warn!("[memory] écriture impossible : {error}"),
+                }
+            }
+        });
+    }
 
     Ok(AgentAnswer {
         session_id,

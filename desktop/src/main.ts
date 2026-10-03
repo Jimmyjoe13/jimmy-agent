@@ -17,7 +17,7 @@ import { historyView } from "./views/history";
 import { diagnosticView, memoryView, skillsView, skinView } from "./views/panels";
 import { onboardingView, voiceView } from "./views/voice";
 import { settingsView } from "./views/settings";
-import { STATE_LABEL, attempt, capitalize, guard, h, mount, toast } from "./ui";
+import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, mount, toast } from "./ui";
 import "./styles.css";
 
 const ROUTES: { id: Route; label: string; icon: string; subtitle: string }[] = [
@@ -79,9 +79,31 @@ async function main() {
   const content = h("main", { class: "content" });
   const stateChip = h("span", { class: "chip state-idle", title: "État de Jimmy" }, STATE_LABEL.idle);
 
+  // Compte à rebours de « à toi » : le temps qu'il reste pour parler.
+  let countdown = 0;
+
   function setState(state: string) {
+    window.clearInterval(countdown);
     stateChip.textContent = STATE_LABEL[state] ?? state;
     stateChip.className = `chip state-${state}`;
+  }
+
+  /** Étape de l'écoute (événement `listen`) : plus fine que l'état de l'avatar. */
+  function setPhase(phase: string, remaining: number) {
+    window.clearInterval(countdown);
+    window.clearTimeout(idleTimer);
+    stateChip.className = `chip phase-${phase}`;
+    if (phase === "your_turn" && remaining > 0) {
+      const end = Date.now() + remaining;
+      const tick = () => {
+        const seconds = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        stateChip.textContent = `à toi · ${seconds} s`;
+      };
+      tick();
+      countdown = window.setInterval(tick, 250);
+      return;
+    }
+    stateChip.textContent = PHASE_LABEL[phase] ?? phase;
   }
 
   // Retour à « prêt » après une réponse : le chat n'émet pas d'état final,
@@ -94,6 +116,7 @@ async function main() {
       window.clearTimeout(idleTimer);
       setState(event.state ?? "idle");
     }
+    if (event.type === "listen") setPhase(event.phase ?? "idle", event.remaining ?? 0);
     if (event.type === "final") {
       window.clearTimeout(idleTimer);
       idleTimer = window.setTimeout(() => setState("idle"), 6000);

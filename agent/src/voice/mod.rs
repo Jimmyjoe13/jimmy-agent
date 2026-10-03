@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex};
 
 pub mod cues;
 pub mod listener;
+pub mod vad;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 

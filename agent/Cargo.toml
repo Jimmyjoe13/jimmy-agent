@@ -24,3 +24,6 @@ uuid.workspace = true
 chrono.workspace = true
 cpal.workspace = true
 hound.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true

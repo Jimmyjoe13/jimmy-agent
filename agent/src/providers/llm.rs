@@ -103,6 +103,17 @@ impl LlmClient {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
+        // Diagnostic : `JIMMY_LLM_DUMP=<dossier>` enregistre chaque requête
+        // (corps JSON, sans la clé) pour la rejouer à la main et comparer des
+        // latences. Sans cette variable, rien n'est écrit.
+        if let Some(dir) = std::env::var_os("JIMMY_LLM_DUMP") {
+            let n = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(format!("requete-{n:02}.json")),
+                body.to_string(),
+            );
+        }
+
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))

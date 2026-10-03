@@ -97,6 +97,19 @@ pub struct SttSettings {
     /// Port du second `whisper-server` (commande).
     #[serde(default = "default_command_port")]
     pub command_port: u16,
+    /// Contexte audio du serveur de commande (voir `Stt::ensure_server`).
+    /// 640 = 12,8 s, juste au-dessus de la phrase la plus longue acceptée
+    /// (12 s + marges) : jamais tronquée. 0 = contexte complet (plus lent).
+    #[serde(default = "default_command_audio_ctx")]
+    pub command_audio_ctx: u32,
+}
+
+fn default_command_audio_ctx() -> u32 {
+    640
+}
+
+fn default_follow_up_ms() -> u64 {
+    8000
 }
 
 fn default_command_model() -> String {
@@ -120,6 +133,7 @@ impl Default for SttSettings {
             threads: 0,
             command_model: default_command_model(),
             command_port: default_command_port(),
+            command_audio_ctx: default_command_audio_ctx(),
         }
     }
 }
@@ -135,6 +149,17 @@ pub struct VoiceSettings {
     pub vad_threshold: f32,
     /// Nombre de millisecondes de silence qui clôturent une phrase.
     pub end_of_speech_ms: u64,
+    /// Conversation continue : après une réponse, Jimmy écoute encore ce
+    /// nombre de millisecondes **sans** qu'il faille redire son nom
+    /// (0 = désactivée). Sans elle, chaque phrase demandait « Jimmy » puis
+    /// « Oui ? » : ce n'était pas une conversation.
+    #[serde(default = "default_follow_up_ms")]
+    pub follow_up_ms: u64,
+    /// Garde chaque extrait audio transcrit dans `data/audio/debug/` (les 40
+    /// derniers, en local) : indispensable pour comprendre pourquoi une
+    /// phrase est mal transcrite.
+    #[serde(default)]
+    pub debug_audio: bool,
     /// L'écoute reprend au lancement de Jimmy. Mis à jour quand l'utilisateur
     /// active ou coupe l'écoute : Jimmy reste comme on l'a laissé.
     #[serde(default)]
@@ -148,7 +173,9 @@ impl Default for VoiceSettings {
             volume: 0.9,
             input_sample_rate: 16_000,
             vad_threshold: 0.012,
-            end_of_speech_ms: 900,
+            end_of_speech_ms: 700,
+            follow_up_ms: default_follow_up_ms(),
+            debug_audio: false,
             listen_on_start: false,
         }
     }
@@ -360,6 +387,12 @@ impl Settings {
             Ok(raw) => match serde_json::from_str::<Settings>(&raw) {
                 Ok(mut s) => {
                     s.apply_env();
+                    // 900 ms était l'ancien défaut de fin de phrase : mesuré
+                    // trop long (Jimmy semblait ne rien faire après qu'on a
+                    // fini de parler). Migré vers 700 ms.
+                    if s.voice.end_of_speech_ms == 900 {
+                        s.voice.end_of_speech_ms = 700;
+                    }
                     s
                 }
                 Err(err) => {

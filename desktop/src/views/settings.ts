@@ -27,6 +27,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const synaptiqUrl = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const synaptiqEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
   const cuesEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const followSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const pauseInput = h("input", { class: "field", type: "number", min: "400", max: "1500", step: "50" }) as HTMLInputElement;
+  const debugAudio = h("input", { type: "checkbox" }) as HTMLInputElement;
 
   async function load() {
     const loaded = await guard(() => api.getSettings(), "paramètres");
@@ -87,6 +90,19 @@ export function settingsView(ctx: AppContext): HTMLElement {
     synaptiqEnabled.checked = settings.synaptiq.enabled;
     cuesEnabled.checked = settings.tts.cues;
 
+    mount(followSelect);
+    for (const [seconds, label] of FOLLOW_UP_CHOICES) {
+      followSelect.append(h("option", { value: String(seconds) }, label));
+    }
+    // Une valeur personnalisée (fichier de config édité) reste sélectionnable.
+    const current = Math.round(settings.voice.follow_up_ms / 1000);
+    if (![...FOLLOW_UP_CHOICES].some(([s]) => s === current)) {
+      followSelect.append(h("option", { value: String(current) }, `${current} s`));
+    }
+    followSelect.value = String(current);
+    pauseInput.value = String(settings.voice.end_of_speech_ms);
+    debugAudio.checked = settings.voice.debug_audio;
+
     render();
   }
 
@@ -105,6 +121,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.synaptiq.base_url = synaptiqUrl.value.trim();
     settings.synaptiq.enabled = synaptiqEnabled.checked;
     settings.tts.cues = cuesEnabled.checked;
+    settings.voice.follow_up_ms = Number(followSelect.value) * 1000;
+    settings.voice.end_of_speech_ms = Math.min(1500, Math.max(400, Number(pauseInput.value) || 700));
+    settings.voice.debug_audio = debugAudio.checked;
 
     const before = ctx.status.stt;
     if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
@@ -163,6 +182,14 @@ export function settingsView(ctx: AppContext): HTMLElement {
         field("Modèle de la commande (précis)", commandSelect),
         field("Langue", languageSelect),
         field("Mot d'activation", wakeInput, "jimmy"),
+        field("Conversation continue (écoute sans redire le nom)", followSelect),
+        field("Pause qui termine ta phrase (ms)", pauseInput),
+        h(
+          "p",
+          { class: "note" },
+          "Après chaque réponse, Jimmy t'écoute encore quelques secondes sans que tu aies à redire son nom. Une pause plus courte rend les réponses plus vives, mais Jimmy peut te couper si tu hésites.",
+        ),
+        toggle("Garder les 40 derniers extraits audio pour le diagnostic (sur cette machine seulement)", debugAudio),
       ),
       card(
         "Avatar",
@@ -315,6 +342,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
   void load();
   return container;
 }
+
+/** Durées proposées pour la conversation continue : [secondes, libellé]. */
+const FOLLOW_UP_CHOICES: [number, string][] = [
+  [0, "Désactivée (dire « Jimmy » à chaque phrase)"],
+  [5, "5 secondes"],
+  [8, "8 secondes (recommandé)"],
+  [12, "12 secondes"],
+  [20, "20 secondes"],
+];
 
 /** Langues proposées pour la reconnaissance vocale (codes Whisper). */
 const LANGUAGES: [string, string][] = [

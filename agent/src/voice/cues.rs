@@ -23,6 +23,8 @@ pub enum Cue {
     Listening,
     /// Une réponse écrite est prête (chat texte).
     Answer,
+    /// Le modèle de langage tarde : Jimmy le dit au lieu de se taire.
+    Thinking,
     /// La demande a échoué.
     Error,
 }
@@ -30,12 +32,13 @@ pub enum Cue {
 impl Cue {
     /// Sons pré-générés. `Answer` n'en fait plus partie : le chat lit
     /// désormais la réponse elle-même.
-    pub const ALL: [Cue; 2] = [Cue::Listening, Cue::Error];
+    pub const ALL: [Cue; 3] = [Cue::Listening, Cue::Error, Cue::Thinking];
 
     fn id(self) -> &'static str {
         match self {
             Cue::Listening => "listening",
             Cue::Answer => "answer",
+            Cue::Thinking => "thinking",
             Cue::Error => "error",
         }
     }
@@ -46,6 +49,7 @@ impl Cue {
         match self {
             Cue::Listening => "Oui ?",
             Cue::Answer => "C'est prêt.",
+            Cue::Thinking => "Un instant.",
             Cue::Error => "Oups, ça n'a pas marché.",
         }
     }

@@ -535,3 +535,152 @@ async fn stt_se_repare_apres_arret_du_serveur() {
         }
     }
 }
+
+/// Conversation continue : « Jimmy, … » puis, **sans redire son nom**, une
+/// seconde question dans la fenêtre qui suit la réponse. Mesure aussi les
+/// délais ressentis : fin de la phrase → commande transmise → fin de la réponse.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_conversation_continue() {
+    use jimmy_agent::core::types::AgentEvent;
+    use std::time::{Duration, Instant};
+
+    // Journal visible dans la sortie du test : durées de chaque étape de l'agent.
+    let _ = env_logger::Builder::new().filter_level(log::LevelFilter::Info).is_test(false).try_init();
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 99;
+    let mut premier = bruit(24_000, &mut graine);
+    premier.extend(phrase_avec_nom(&app, "Jimmy, dis-moi bonjour.", 0.02).await);
+    let second = phrase_16k(&app, "Et quel est ton nom ?", 0.02).await;
+
+    let runtime = Arc::new(VoiceRuntime::new(16_000));
+    runtime.start_without_device();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(128);
+    let ecoute = app.clone().spawn_voice_listener(runtime.clone(), tx);
+
+    // Alimentation pilotée : du bruit en continu, et des clips à la demande.
+    let (clips, mut clips_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();
+    let injecteur = runtime.clone();
+    let alimentation = tokio::spawn(async move {
+        let mut graine = 5;
+        loop {
+            let bloc = match clips_rx.try_recv() {
+                Ok(clip) => {
+                    for morceau in clip.chunks(1_600) {
+                        injecteur.inject(morceau);
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    continue;
+                }
+                Err(_) => bruit(1_600, &mut graine),
+            };
+            injecteur.inject(&bloc);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let _ = clips.send(premier.clone());
+    println!("[     0 ms] début de la première phrase ({} ms d'audio)", premier.len() / 16);
+    let fin_phrase_1 = Instant::now() + Duration::from_millis((premier.len() as u64 * 1000) / 16_000);
+
+    let t0 = Instant::now();
+    let mut commandes: Vec<String> = Vec::new();
+    let mut reponses: Vec<String> = Vec::new();
+    let mut fenetre_ouverte = false;
+    let mut envoye_2 = false;
+    let mut t_fin_2: Option<Instant> = None;
+    let mut delais: Vec<String> = Vec::new();
+    let mut t_commande: Option<Instant> = None;
+    let limite = tokio::time::Instant::now() + Duration::from_secs(180);
+    while let Ok(Some(event)) = tokio::time::timeout_at(limite, rx.recv()).await {
+        match &event {
+            AgentEvent::ToolStart { name, .. } => println!("[{:>6} ms] outil : {name}", t0.elapsed().as_millis()),
+            AgentEvent::ToolEnd { name, duration_ms, .. } => {
+                println!("[{:>6} ms] outil fini : {name} en {duration_ms} ms", t0.elapsed().as_millis())
+            }
+            AgentEvent::State { state, detail } => {
+                println!("[{:>6} ms] état : {state:?} {detail}", t0.elapsed().as_millis())
+            }
+            AgentEvent::Listen { phase, remaining } => {
+                println!("[{:>6} ms] phase : {phase} ({remaining} ms)", t0.elapsed().as_millis());
+                // La fenêtre s'ouvre après la 1re réponse : on pose la 2e question.
+                if phase == "your_turn" && !reponses.is_empty() && !envoye_2 {
+                    fenetre_ouverte = true;
+                    envoye_2 = true;
+                    let _ = clips.send(second.clone());
+                    t_fin_2 = Some(Instant::now() + Duration::from_millis((second.len() as u64 * 1000) / 16_000));
+                }
+            }
+            AgentEvent::Spoken { text } => {
+                println!("[{:>6} ms] commande {} : « {text} »", t0.elapsed().as_millis(), commandes.len() + 1);
+                let depuis = match (commandes.len(), t_fin_2) {
+                    (0, _) => Instant::now().saturating_duration_since(fin_phrase_1),
+                    (_, Some(t)) => Instant::now().saturating_duration_since(t),
+                    _ => Duration::ZERO,
+                };
+                delais.push(format!("fin de phrase → commande transmise : {} ms", depuis.as_millis()));
+                t_commande = Some(Instant::now());
+                commandes.push(text.clone());
+            }
+            AgentEvent::Final { text } => {
+                println!("[{:>6} ms] réponse {} : « {text} »", t0.elapsed().as_millis(), reponses.len() + 1);
+                if let Some(t) = t_commande {
+                    delais.push(format!("commande → réponse écrite : {} ms", t.elapsed().as_millis()));
+                }
+                reponses.push(text.clone());
+                if reponses.len() == 2 {
+                    break;
+                }
+            }
+            AgentEvent::Failed { message } => panic!("échec de l'agent : {message}"),
+            _ => {}
+        }
+    }
+    runtime.stop();
+    alimentation.abort();
+    ecoute.abort();
+    for ligne in &delais {
+        println!("délai — {ligne}");
+    }
+    if let Ok(sessions) = app.history.sessions(20) {
+        for s in sessions.iter().filter(|s| s.title == "Session vocale") {
+            let _ = app.history.delete_session(&s.id);
+        }
+    }
+
+    assert!(fenetre_ouverte, "la fenêtre de conversation continue ne s'est pas ouverte");
+    assert_eq!(commandes.len(), 2, "la seconde question (sans « Jimmy ») n'a pas été prise : {commandes:?}");
+    assert!(!jimmy_agent::voice::matches_wake_word(&commandes[1], "jimmy") || commandes[1].len() > 5);
+    assert_eq!(reponses.len(), 2, "pas de seconde réponse");
+}
+
+/// Exporte des phrases variées (voix de synthèse, mono 16 kHz, RMS 0,03) pour
+/// comparer des réglages de Whisper hors de Rust. Dossier : `JIMMY_CLIPS_DIR`.
+#[tokio::test]
+#[ignore = "consulte Fish Audio ; écrit des fichiers dans JIMMY_CLIPS_DIR"]
+async fn exporter_clips_de_test() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    let dir = std::path::PathBuf::from(std::env::var("JIMMY_CLIPS_DIR").expect("JIMMY_CLIPS_DIR"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let phrases = [
+        "Quelle est la météo prévue demain à Marseille ?",
+        "Peux-tu analyser le dossier de mon projet et me dire ce que tu trouves ?",
+        "Dis-moi bonjour.",
+        "Rappelle-moi de téléphoner au dentiste jeudi à quatorze heures.",
+        "Oui, vas-y, continue.",
+        "Combien font vingt-trois fois dix-sept ?",
+        "Jimmy, ouvre mes notes de la semaine dernière.",
+        "Explique-moi en deux phrases pourquoi le ciel est bleu, et ensuite dis-moi si tu penses qu'il va pleuvoir ce week-end ou pas.",
+    ];
+    for (i, texte) in phrases.iter().enumerate() {
+        let clip = phrase_16k(&app, texte, 0.03).await;
+        let wav = jimmy_agent::voice::window_to_wav(&clip, 16_000);
+        std::fs::write(dir.join(format!("clip{i}.wav")), wav).unwrap();
+        std::fs::write(dir.join(format!("clip{i}.txt")), texte).unwrap();
+        println!("clip{i} : {:.1} s", clip.len() as f32 / 16_000.0);
+    }
+}
