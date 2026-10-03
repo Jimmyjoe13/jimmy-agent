@@ -123,12 +123,13 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
 
 /// Message utilisateur enrichi des souvenirs, quand le rappel doit être visible
 /// de l'agent plutôt que du contexte système.
-pub fn recall_for(memory: &MemoryStore, settings: &Settings, request: &str) -> Option<String> {
+pub async fn recall_for(memory: &MemoryStore, settings: &Settings, request: &str) -> Option<String> {
     if !settings.memory.enabled {
         return None;
     }
     let block = memory
         .context_block(request, settings.memory.recall_limit as usize)
+        .await
         .ok()?;
     (!block.trim().is_empty()).then_some(block)
 }

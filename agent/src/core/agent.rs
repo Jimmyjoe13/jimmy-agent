@@ -72,7 +72,7 @@ pub async fn run(
     .await;
 
     // 1. Contexte : mémoire locale puis, si la règle le justifie, Synaptiq.
-    let memory_block = prompt::recall_for(&deps.memory, &settings, &request);
+    let memory_block = prompt::recall_for(&deps.memory, &settings, &request).await;
     let synaptiq_block =
         prompt::synaptiq_context(deps.synaptiq.as_ref(), &settings, &request).await;
     if synaptiq_block.is_some() {
@@ -244,7 +244,7 @@ pub async fn run(
     if settings.memory.enabled {
         let learned = crate::memory::learn::learn(&deps.llm, &settings, &request, &final_text).await;
         for (kind, content) in learned {
-            match deps.memory.remember(kind, &content, "auto", 0.55) {
+            match deps.memory.remember_indexed(kind, &content, "auto", 0.55).await {
                 Ok(_) => emit(
                     &mut events,
                     AgentEvent::Memory {

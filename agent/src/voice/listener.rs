@@ -152,8 +152,11 @@ async fn collect_utterance(
 
     while started.elapsed() < MAX_UTTERANCE {
         tokio::time::sleep(hop).await;
-        let chunk = (rate as f64 * hop.as_secs_f64() * 2.0) as usize;
-        let recent = runtime.take_window(chunk.max(rate as usize / 4));
+        // La détection de parole regarde 2 pas (900 ms) pour être stable, mais
+        // seul le dernier pas est **nouveau**. Ajouter toute la fenêtre
+        // mettait chaque morceau d'audio deux fois dans le tampon.
+        let step = (rate as f64 * hop.as_secs_f64()) as usize;
+        let recent = runtime.take_window((step * 2).max(rate as usize / 4));
         if recent.is_empty() {
             break;
         }
@@ -162,12 +165,13 @@ async fn collect_utterance(
             app.settings().voice.vad_threshold * 1.4,
         );
         silence = if talking { Duration::ZERO } else { silence + hop };
-        buffer.extend_from_slice(&recent);
+        let fresh = recent.len().saturating_sub(step);
+        buffer.extend_from_slice(&recent[fresh..]);
         if silence >= end_of_speech && started.elapsed() > min_duration {
             break;
         }
     }
-    transcribe_samples(app, &buffer, rate).await
+    transcribe_command(app, &buffer, rate).await
 }
 
 async fn transcribe(
@@ -183,6 +187,21 @@ async fn transcribe(
     transcribe_samples(app, &window, rate).await
 }
 
+/// Transcription de la commande : modèle précis (second serveur) si présent.
+async fn transcribe_command(app: &Arc<App>, samples: &[f32], rate: u32) -> Option<String> {
+    if samples.len() < rate as usize / 2 {
+        return None;
+    }
+    match app.transcribe_command(window_to_wav(samples, rate)).await {
+        Ok(text) => Some(text),
+        Err(error) => {
+            log::warn!("[voice] transcription de la commande impossible : {error}");
+            None
+        }
+    }
+}
+
+/// Transcription du wake word : modèle rapide.
 async fn transcribe_samples(app: &Arc<App>, samples: &[f32], rate: u32) -> Option<String> {
     if samples.len() < rate as usize / 2 {
         return None;

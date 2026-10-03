@@ -89,6 +89,16 @@ impl Db {
                 vec       BLOB NOT NULL
             );
 
+            -- Vecteurs sémantiques (LM Studio), à côté des vecteurs de
+            -- hachage : ceux-ci restent le repli quand LM Studio est éteint.
+            -- `model` évite de comparer deux espaces vectoriels différents.
+            CREATE TABLE IF NOT EXISTS memory_semantic (
+                memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                model     TEXT NOT NULL,
+                vec       BLOB NOT NULL,
+                PRIMARY KEY (memory_id, model)
+            );
+
             CREATE TABLE IF NOT EXISTS skills (
                 name         TEXT PRIMARY KEY,
                 description  TEXT NOT NULL DEFAULT '',

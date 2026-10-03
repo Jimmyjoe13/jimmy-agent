@@ -88,6 +88,23 @@ pub struct SttSettings {
     pub wake_word: String,
     /// Nombre de threads envoyés à whisper.cpp (0 = automatique).
     pub threads: u32,
+    /// Modèle dédié à la **commande** (la phrase après « Jimmy »). Le wake
+    /// word reste sur `model`, rapide ; la commande, transcrite une seule
+    /// fois, mérite un modèle plus précis. Vide ou identique à `model` = un
+    /// seul serveur.
+    #[serde(default = "default_command_model")]
+    pub command_model: String,
+    /// Port du second `whisper-server` (commande).
+    #[serde(default = "default_command_port")]
+    pub command_port: u16,
+}
+
+fn default_command_model() -> String {
+    "ggml-small-q5_1.bin".into()
+}
+
+fn default_command_port() -> u16 {
+    8179
 }
 
 impl Default for SttSettings {
@@ -101,6 +118,8 @@ impl Default for SttSettings {
             wake_window_ms: 2400,
             wake_word: "jimmy".into(),
             threads: 0,
+            command_model: default_command_model(),
+            command_port: default_command_port(),
         }
     }
 }
@@ -172,6 +191,20 @@ pub struct MemorySettings {
     pub auto_learn_every: u32,
     /// Extraction automatique des préférences à la fin d'une session.
     pub auto_learn: bool,
+    /// API d'embeddings compatible OpenAI (LM Studio). Vide = hachage seul.
+    #[serde(default = "default_embedding_url")]
+    pub embedding_url: String,
+    /// Même modèle que SynaptiQ : multilingue, bon en français, 384 dim.
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+}
+
+fn default_embedding_url() -> String {
+    "http://localhost:1234/v1".into()
+}
+
+fn default_embedding_model() -> String {
+    "text-embedding-paraphrase-multilingual-minilm-l12-v2.gguf".into()
 }
 
 impl Default for MemorySettings {
@@ -182,6 +215,8 @@ impl Default for MemorySettings {
             min_score: 0.12,
             auto_learn_every: 4,
             auto_learn: true,
+            embedding_url: default_embedding_url(),
+            embedding_model: default_embedding_model(),
         }
     }
 }

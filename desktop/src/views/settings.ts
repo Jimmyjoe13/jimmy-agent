@@ -18,6 +18,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const workspaceInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const sttSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const commandSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const languageInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const wakeInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
@@ -47,6 +48,13 @@ export function settingsView(ctx: AppContext): HTMLElement {
       sttSelect.append(h("option", { value: model.id }, `${model.label} — ${model.note}`));
     }
     sttSelect.value = settings.stt.model;
+
+    mount(commandSelect);
+    commandSelect.append(h("option", { value: "" }, "Identique au wake word (un seul serveur)"));
+    for (const model of ctx.status.stt.models) {
+      commandSelect.append(h("option", { value: model.id }, `${model.label} — ${model.note}`));
+    }
+    commandSelect.value = settings.stt.command_model;
 
     languageInput.value = settings.stt.language;
     wakeInput.value = settings.stt.wake_word;
@@ -85,6 +93,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.workspace = workspaceInput.value.trim();
     settings.tts.voice = voiceSelect.value;
     settings.stt.model = sttSelect.value;
+    settings.stt.command_model = commandSelect.value;
     settings.stt.language = languageInput.value.trim();
     settings.stt.wake_word = wakeInput.value.trim() || "jimmy";
     settings.avatar.quality = qualitySelect.value;
@@ -137,7 +146,8 @@ export function settingsView(ctx: AppContext): HTMLElement {
           { class: "note" },
           "whisper.cpp tourne en local : l'audio n'est jamais envoyé dans le cloud.",
         ),
-        field("Modèle de reconnaissance", sttSelect),
+        field("Modèle du wake word (rapide)", sttSelect),
+        field("Modèle de la commande (précis, au prochain démarrage de l'écoute)", commandSelect),
         field("Langue", languageInput, "fr"),
         field("Mot d'activation", wakeInput, "jimmy"),
       ),

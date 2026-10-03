@@ -413,10 +413,8 @@ pub async fn voice_stop(
 /// Transcrit un WAV 16 kHz envoyé par l'interface (onboarding, test du micro).
 #[tauri::command]
 pub async fn stt_transcribe(state: State<'_, AppState>, wav: Vec<u8>) -> std::result::Result<String, String> {
-    let app = state.app.clone();
-    let guard = app.stt.lock().await;
-    let stt = guard.as_ref().ok_or("la reconnaissance vocale n'est pas démarrée")?;
-    stt.transcribe_wav(wav).await.map_err(err)
+    // Une phrase libre, comme une commande : modèle précis si disponible.
+    state.app.transcribe_command(wav).await.map_err(err)
 }
 
 // ── Avatar ───────────────────────────────────────────────────────────────────
@@ -530,6 +528,14 @@ pub async fn doctor(state: State<'_, AppState>) -> std::result::Result<serde_jso
         model.is_file(),
         &format!("{} introuvable", model.display()),
     ));
+    if !settings.stt.command_model.trim().is_empty() {
+        let command_model = whisper_dir.join("models").join(&settings.stt.command_model);
+        checks.push(check(
+            "Modèle de commande (précis)",
+            command_model.is_file(),
+            &format!("{} introuvable — la commande utilisera le modèle du wake word", command_model.display()),
+        ));
+    }
     let godot = jimmy_agent::paths::find_godot_exe(&settings.avatar.godot_exe);
     checks.push(check(
         "Godot",

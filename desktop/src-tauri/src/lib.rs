@@ -120,6 +120,16 @@ pub fn run() {
                     });
                 }
 
+                // Mémoire : vecteurs sémantiques manquants (LM Studio), en
+                // tâche de fond. Sans LM Studio, s'arrête au premier essai.
+                let app_for_memory = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let count = app_for_memory.memory.reindex_semantic().await;
+                    if count > 0 {
+                        log::info!("[memory] {count} souvenir(s) indexé(s) sémantiquement");
+                    }
+                });
+
                 // Serveurs MCP : connectés en tâche de fond, leurs outils
                 // rejoignent le registre dès qu'ils répondent.
                 if !app.mcp.is_empty() {

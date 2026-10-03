@@ -182,3 +182,60 @@ async fn sons_d_etat_en_cache_et_lus() {
     println!("« {} » lu en {:?} (lecture comprise)", Cue::Listening.phrase(), debut.elapsed());
     assert!(debut.elapsed() < std::time::Duration::from_secs(4));
 }
+
+/// Deux serveurs : `base` pour le wake word (8178), `small` pour la commande
+/// (8179). Une phrase synthétisée par Fish Audio doit être retranscrite par le
+/// serveur de commande.
+#[tokio::test]
+#[ignore = "démarre deux whisper-server, consulte Fish Audio"]
+async fn commande_transcrite_par_le_modele_precis() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    let settings = app.settings();
+    let runtime = VoiceRuntime::new(settings.voice.input_sample_rate);
+    app.start_voice(&runtime).await.expect("l'écoute doit démarrer");
+    runtime.stop();
+    assert!(app.stt.lock().await.is_some(), "serveur du wake word absent");
+    assert!(
+        app.stt_command.lock().await.is_some(),
+        "serveur de commande ({}) absent",
+        settings.stt.command_model
+    );
+
+    // Phrase de test, synthétisée puis ramenée en WAV 16 kHz mono.
+    let speech = app
+        .tts
+        .speak(
+            &app.secrets.openrouter_api_key,
+            &settings.tts.model,
+            &settings.tts.voice,
+            "Quelle est la météo prévue demain à Marseille ?",
+            settings.tts.chars_per_minute,
+        )
+        .await
+        .expect("synthèse");
+    let source: Vec<f32> = speech
+        .bytes
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+        .collect();
+    let ratio = speech.sample_rate as f64 / 16_000.0;
+    let resampled: Vec<i16> = (0..(source.len() as f64 / ratio) as usize)
+        .map(|i| (source[(i as f64 * ratio) as usize] * 32767.0) as i16)
+        .collect();
+    let wav = jimmy_agent::providers::stt::pcm_to_wav(&resampled, 16_000);
+
+    let debut = std::time::Instant::now();
+    let texte = app.transcribe_command(wav).await.expect("transcription");
+    println!("commande ({:?}) : « {texte} »", debut.elapsed());
+    let bas = texte.to_lowercase();
+    assert!(bas.contains("marseille"), "transcription inattendue : {texte}");
+
+    for verrou in [&app.stt_command, &app.stt] {
+        let mut garde = verrou.lock().await;
+        if let Some(stt) = garde.as_mut() {
+            stt.shutdown().await;
+        }
+    }
+}

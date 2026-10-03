@@ -6,12 +6,24 @@
 //! * `procedural` — règles, procédures validées ;
 //! * `episodic` — ce qui s'est passé, decisions prises.
 //!
-//! La recherche combine deux signaux : similarité vectorielle (voir
-//! [`embed`]) et pertinence lexicale FTS5 quand SQLite le permet. Les deux
-//! scores sont normalisés puis fusionnés.
+//! Recherche vectorielle à deux niveaux :
+//!
+//! * **sémantique** ([`semantic`]) — embeddings LM Studio, rapprochent le
+//!   sens (« voiture » ≈ « véhicule ») ;
+//! * **hachage** ([`embed`]) — toujours calculé, sans dépendance : c'est le
+//!   repli quand LM Studio ne répond pas.
+//!
+//! Chaque souvenir garde son vecteur de hachage ; le vecteur sémantique est
+//! ajouté quand LM Studio est disponible (à l'écriture, ou par
+//! [`MemoryStore::reindex_semantic`] au démarrage).
 
 pub mod embed;
 pub mod learn;
+pub mod semantic;
+
+use std::sync::Arc;
+
+use semantic::SemanticEmbedder;
 
 
 use chrono::Utc;
@@ -66,11 +78,103 @@ pub struct MemoryHit {
 
 pub struct MemoryStore {
     db: Shared<Db>,
+    semantic: Option<Arc<SemanticEmbedder>>,
 }
 
+/// Similarité sémantique minimale. Les modèles MiniLM donnent ~0,1 à 0,3
+/// entre phrases sans rapport : en dessous de 0,35, c'est du bruit.
+const SEMANTIC_MIN: f32 = 0.35;
+
 impl MemoryStore {
+    /// Mémoire sans embeddings sémantiques (hachage seul).
     pub fn new(db: Shared<Db>) -> Self {
-        MemoryStore { db }
+        MemoryStore { db, semantic: None }
+    }
+
+    /// Mémoire avec embeddings sémantiques (LM Studio), repli sur le hachage.
+    pub fn with_semantic(db: Shared<Db>, semantic: Option<SemanticEmbedder>) -> Self {
+        MemoryStore {
+            db,
+            semantic: semantic.map(Arc::new),
+        }
+    }
+
+    /// Modèle sémantique configuré, s'il y en a un.
+    pub fn semantic_model(&self) -> Option<String> {
+        self.semantic.as_ref().map(|s| s.model().to_string())
+    }
+
+    /// Enregistre un souvenir, puis son vecteur sémantique si LM Studio
+    /// répond. À préférer à [`MemoryStore::remember`] dans le code async.
+    pub async fn remember_indexed(
+        &self,
+        kind: MemoryKind,
+        content: &str,
+        source: &str,
+        importance: f32,
+    ) -> Result<String> {
+        let id = self.remember(kind, content, source, importance)?;
+        if id.is_empty() {
+            return Ok(id);
+        }
+        if let Some(semantic) = &self.semantic {
+            if let Some(vector) = semantic.embed(content.trim()).await {
+                self.store_semantic(&id, semantic.model(), &vector)?;
+            }
+        }
+        Ok(id)
+    }
+
+    fn store_semantic(&self, id: &str, model: &str, vector: &[f32]) -> Result<()> {
+        self.db.lock().unwrap().conn().execute(
+            "INSERT OR REPLACE INTO memory_semantic (memory_id, model, vec) VALUES (?1, ?2, ?3)",
+            params![id, model, vector_to_blob(vector)],
+        )?;
+        Ok(())
+    }
+
+    /// Calcule les vecteurs sémantiques manquants (souvenirs écrits avant
+    /// l'activation, ou pendant une absence de LM Studio). S'arrête au premier
+    /// échec : LM Studio est alors indisponible. Renvoie le nombre indexé.
+    pub async fn reindex_semantic(&self) -> usize {
+        let Some(semantic) = &self.semantic else {
+            return 0;
+        };
+        let pending: Vec<(String, String)> = {
+            let conn = self.db.lock().unwrap();
+            let Ok(mut stmt) = conn.conn().prepare(
+                "SELECT m.id, m.content FROM memories m
+                 WHERE NOT EXISTS (SELECT 1 FROM memory_semantic s
+                                   WHERE s.memory_id = m.id AND s.model = ?1)",
+            ) else {
+                return 0;
+            };
+            stmt.query_map(params![semantic.model()], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default()
+        };
+        let mut done = 0;
+        for (id, content) in pending {
+            let Some(vector) = semantic.embed(&content).await else {
+                break;
+            };
+            if self.store_semantic(&id, semantic.model(), &vector).is_ok() {
+                done += 1;
+            }
+        }
+        done
+    }
+
+    /// Rappel sémantique si LM Studio répond, par hachage sinon.
+    pub async fn recall_semantic(&self, query: &str, limit: usize) -> Result<Vec<MemoryHit>> {
+        let target = match &self.semantic {
+            Some(semantic) => semantic
+                .embed(query)
+                .await
+                .map(|v| (semantic.model().to_string(), v)),
+            None => None,
+        };
+        self.recall_with(query, target, limit)
     }
 
     pub fn count(&self) -> Result<i64> {
@@ -128,17 +232,34 @@ impl MemoryStore {
         Ok(id)
     }
 
-    /// Recherche hybride. `query` est la demande courante de l'utilisateur.
+    /// Recherche par hachage seul (synchrone). `query` est la demande
+    /// courante de l'utilisateur.
     pub fn recall(&self, query: &str, limit: usize) -> Result<Vec<MemoryHit>> {
+        self.recall_with(query, None, limit)
+    }
+
+    /// Recherche. `semantic` = (modèle, vecteur de la requête) : utilisé pour
+    /// les souvenirs qui ont un vecteur de ce modèle ; les autres sont
+    /// comparés par hachage.
+    fn recall_with(
+        &self,
+        query: &str,
+        semantic: Option<(String, Vec<f32>)>,
+        limit: usize,
+    ) -> Result<Vec<MemoryHit>> {
         let target = embed::embed(query);
+        let model = semantic.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
         let conn = self.db.lock().unwrap();
 
         let mut stmt = conn.conn().prepare(
-            "SELECT m.id, m.kind, m.content, m.source, m.importance, m.created_at, m.use_count, v.vec
-             FROM memories m LEFT JOIN memory_vectors v ON v.memory_id = m.id",
+            "SELECT m.id, m.kind, m.content, m.source, m.importance, m.created_at, m.use_count, v.vec, s.vec
+             FROM memories m
+             LEFT JOIN memory_vectors v ON v.memory_id = m.id
+             LEFT JOIN memory_semantic s ON s.memory_id = m.id AND s.model = ?1",
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![model], |row| {
             let blob: Option<Vec<u8>> = row.get(7)?;
+            let semantic_blob: Option<Vec<u8>> = row.get(8)?;
             Ok((
                 Memory {
                     id: row.get(0)?,
@@ -150,16 +271,29 @@ impl MemoryStore {
                     use_count: row.get(6)?,
                 },
                 blob,
+                semantic_blob,
             ))
         })?;
 
         let mut hits: Vec<MemoryHit> = Vec::new();
         for row in rows {
-            let (memory, blob) = row?;
-            let similarity = blob
-                .as_deref()
-                .map(|b| embed::similarity(&target, &blob_to_vec(b)))
-                .unwrap_or(0.0);
+            let (memory, blob, semantic_blob) = row?;
+            // Sémantique si possible (même modèle, même dimension), hachage sinon.
+            let semantic_similarity = match (&semantic, semantic_blob.as_deref()) {
+                (Some((_, query_vec)), Some(b)) => {
+                    let stored = blob_to_vec(b);
+                    (stored.len() == query_vec.len()).then(|| embed::similarity(query_vec, &stored))
+                }
+                _ => None,
+            };
+            let similarity = match semantic_similarity {
+                Some(sim) if sim < SEMANTIC_MIN => continue,
+                Some(sim) => sim,
+                None => blob
+                    .as_deref()
+                    .map(|b| embed::similarity(&target, &blob_to_vec(b)))
+                    .unwrap_or(0.0),
+            };
             // Un souvenir explicitement important reste pertinent même si le
             // texte ne se recoupe pas (préférence, règle).
             let score = similarity * (0.6 + 0.4 * memory.importance);
@@ -173,8 +307,8 @@ impl MemoryStore {
     }
 
     /// Injection textuelle des souvenirs les plus pertinents pour le prompt.
-    pub fn context_block(&self, query: &str, limit: usize) -> Result<String> {
-        let hits = self.recall(query, limit)?;
+    pub async fn context_block(&self, query: &str, limit: usize) -> Result<String> {
+        let hits = self.recall_semantic(query, limit).await?;
         if hits.is_empty() {
             return Ok(String::new());
         }
@@ -206,6 +340,12 @@ impl MemoryStore {
             .unwrap()
             .conn()
             .execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+        // Explicite : la cascade dépend de `PRAGMA foreign_keys`.
+        self.db
+            .lock()
+            .unwrap()
+            .conn()
+            .execute("DELETE FROM memory_semantic WHERE memory_id = ?1", params![id])?;
         Ok(())
     }
 

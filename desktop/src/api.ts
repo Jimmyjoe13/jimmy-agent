@@ -58,6 +58,7 @@ export interface Status {
   stt: {
     enabled: boolean;
     model: string;
+    command_model: string;
     language: string;
     wake_word: string;
     models: { id: string; label: string; note: string }[];
@@ -140,6 +141,8 @@ export interface SttSettings {
   wake_window_ms: number;
   wake_word: string;
   threads: number;
+  command_model: string;
+  command_port: number;
 }
 
 export interface VoiceSettings {

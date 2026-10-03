@@ -54,6 +54,9 @@ pub struct App {
     /// Verrous asynchrones : ces deux champs sont utilisés à travers des
     /// `await`, un `std::sync::Mutex` rendrait la future non `Send`.
     pub stt: tokio::sync::Mutex<Option<Stt>>,
+    /// Second serveur, modèle précis, réservé à la commande. `None` = la
+    /// commande passe par `stt` (repli).
+    pub stt_command: tokio::sync::Mutex<Option<Stt>>,
     pub godot: tokio::sync::Mutex<Option<tokio::process::Child>>,
 }
 
@@ -69,7 +72,13 @@ impl App {
         let settings = Settings::load(&paths);
         let db: Shared<Db> = Arc::new(std::sync::Mutex::new(Db::open(&paths.db_file())?));
         let history = Arc::new(History::new(db.clone()));
-        let memory = Arc::new(MemoryStore::new(db.clone()));
+        let memory = Arc::new(MemoryStore::with_semantic(
+            db.clone(),
+            memory::semantic::SemanticEmbedder::new(
+                &settings.memory.embedding_url,
+                &settings.memory.embedding_model,
+            ),
+        ));
         let skills = Arc::new(SkillStore::new(paths.skills_dir())?);
 
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -135,6 +144,7 @@ impl App {
             mcp,
             synaptiq,
             stt: tokio::sync::Mutex::new(None),
+            stt_command: tokio::sync::Mutex::new(None),
             godot: tokio::sync::Mutex::new(None),
         }))
     }
@@ -270,7 +280,43 @@ impl App {
             let mut guard = self.stt.lock().await;
             *guard = Some(stt);
         }
+
+        // Second serveur pour la commande. Son échec n'est pas bloquant : la
+        // commande retombe sur le modèle du wake word.
+        let command_model = settings.stt.command_model.trim();
+        if !command_model.is_empty() && command_model != settings.stt.model {
+            let path = self.paths.whisper_dir().join("models").join(command_model);
+            let started = async {
+                let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?;
+                stt.ensure_server(&server_exe, &path, settings.stt.threads).await?;
+                Ok::<_, Error>(stt)
+            }
+            .await;
+            match started {
+                Ok(stt) => {
+                    log::info!("[stt] commande : {command_model} (port {})", settings.stt.command_port);
+                    *self.stt_command.lock().await = Some(stt);
+                }
+                Err(error) => log::warn!("[stt] modèle de commande indisponible, repli sur {} : {error}", settings.stt.model),
+            }
+        }
         runtime.start()
+    }
+
+    /// Transcrit une commande avec le modèle précis, ou le modèle du wake
+    /// word si le second serveur n'est pas disponible.
+    pub async fn transcribe_command(&self, wav: Vec<u8>) -> Result<String> {
+        {
+            let guard = self.stt_command.lock().await;
+            if let Some(stt) = guard.as_ref() {
+                return stt.transcribe_wav(wav).await;
+            }
+        }
+        let guard = self.stt.lock().await;
+        let stt = guard
+            .as_ref()
+            .ok_or_else(|| Error::Stt("la reconnaissance vocale n'est pas démarrée".into()))?;
+        stt.transcribe_wav(wav).await
     }
 
     /// Contexte d'outils prêt à l'emploi pour une demande.
@@ -321,6 +367,7 @@ impl App {
             "stt": {
                 "enabled": settings.stt.enabled,
                 "model": settings.stt.model,
+                "command_model": settings.stt.command_model,
                 "language": settings.stt.language,
                 "wake_word": settings.stt.wake_word,
                 "models": providers::stt::MODELS.iter().map(|(id, label, note)| serde_json::json!({
@@ -341,6 +388,7 @@ impl App {
             "memory": {
                 "enabled": settings.memory.enabled,
                 "count": self.memory.count().unwrap_or(0),
+                "semantic_model": self.memory.semantic_model(),
                 "has_fts": self.db.lock().map(|db| db.has_fts()).unwrap_or(false),
             },
             "synaptiq": {

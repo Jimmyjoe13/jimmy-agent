@@ -43,7 +43,7 @@ impl Tool for SearchMemory {
         Box::pin(async move {
             let query = arg_str(args, "query").ok_or_else(|| Error::Tool("« query » manquant".into()))?;
             let limit = arg_u64(args, "limit", 6).min(20) as usize;
-            let hits = ctx.memory.recall(&query, limit)?;
+            let hits = ctx.memory.recall_semantic(&query, limit).await?;
             if hits.is_empty() {
                 return Ok("Rien dans la mémoire pour cette requête.".into());
             }
@@ -92,7 +92,7 @@ impl Tool for Remember {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.6) as f32;
             ctx.check(Capability::Write, "mémoire")?;
-            let id = ctx.memory.remember(kind, &content, "conversation", importance)?;
+            let id = ctx.memory.remember_indexed(kind, &content, "conversation", importance).await?;
             Ok(format!("mémorisé ({}), identifiant {id}", kind.as_str()))
         })
     }
