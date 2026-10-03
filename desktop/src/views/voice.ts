@@ -81,6 +81,19 @@ export function voiceView(ctx: AppContext): HTMLElement {
   // Fil « ce que Jimmy entend » : le retour qui manquait pour savoir si le
   // micro capte, et si le mot d'éveil est reconnu.
   ctx.onEvent((event) => {
+    // Après « Oui ? », Jimmy attend la commande : on le dit clairement.
+    if (event.type === "state" && event.state === "listening" && event.detail === "Oui ?") {
+      heard.querySelector(".hint")?.remove();
+      heard.prepend(
+        h(
+          "div",
+          { class: "heard-line matched" },
+          h("span", { class: "heard-tag" }, "à toi"),
+          h("span", {}, "Jimmy t'écoute — parle maintenant."),
+        ),
+      );
+      return;
+    }
     if (event.type !== "heard") return;
     heard.querySelector(".hint")?.remove();
     heard.prepend(

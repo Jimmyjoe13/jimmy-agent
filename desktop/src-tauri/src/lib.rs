@@ -238,6 +238,7 @@ pub fn run() {
                 commands::avatar_say,
                 commands::avatar_quality,
                 commands::avatar_skin,
+                commands::avatar_dodge,
                 commands::voice_status,
                 commands::wake_word_test,
                 commands::wake_word_strip,

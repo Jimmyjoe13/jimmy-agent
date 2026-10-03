@@ -71,6 +71,10 @@ pub struct VoiceRuntime {
     /// Réservoir d'échantillons partagé avec la callback, **toujours en mono
     /// à `sample_rate`** : la conversion se fait à la capture.
     buffer: Arc<Mutex<VecDeque<f32>>>,
+    /// Nombre total d'échantillons écrits depuis la création. Sert de
+    /// curseur : `read_since` rend exactement l'audio arrivé depuis la
+    /// dernière lecture, sans trou ni doublon.
+    written: Arc<AtomicU64>,
     /// Incrémenté à chaque démarrage. Une boucle d'écoute s'arrête dès que la
     /// génération change : un arrêt suivi d'un redémarrage rapide ne laisse
     /// jamais deux boucles sur le même micro.
@@ -87,6 +91,7 @@ impl VoiceRuntime {
             running: Arc::new(AtomicBool::new(false)),
             sample_rate,
             buffer: Arc::new(Mutex::new(VecDeque::with_capacity(sample_rate as usize * BUFFER_SECONDS))),
+            written: Arc::new(AtomicU64::new(0)),
             generation: AtomicU64::new(0),
         }
     }
@@ -120,6 +125,7 @@ impl VoiceRuntime {
         // doit pas être pris pour un wake word.
         self.buffer.lock().unwrap().clear();
         let buffer = self.buffer.clone();
+        let written = self.written.clone();
         let target = self.sample_rate;
         let err_fn = |error| log::warn!("[voice] flux micro : {error}");
         // Piège corrigé : le flux est **entrelacé** (G D G D… en stéréo) et à
@@ -132,7 +138,7 @@ impl VoiceRuntime {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        push(&buffer, mixer.process(data.iter().map(|s| *s as f32 / 32768.0)));
+                        push(&buffer, &written, mixer.process(data.iter().map(|s| *s as f32 / 32768.0)));
                     },
                     err_fn,
                     None,
@@ -143,7 +149,7 @@ impl VoiceRuntime {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i8], _: &cpal::InputCallbackInfo| {
-                        push(&buffer, mixer.process(data.iter().map(|s| *s as f32 / 128.0)));
+                        push(&buffer, &written, mixer.process(data.iter().map(|s| *s as f32 / 128.0)));
                     },
                     err_fn,
                     None,
@@ -154,7 +160,7 @@ impl VoiceRuntime {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        push(&buffer, mixer.process(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0)));
+                        push(&buffer, &written, mixer.process(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0)));
                     },
                     err_fn,
                     None,
@@ -165,7 +171,7 @@ impl VoiceRuntime {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        push(&buffer, mixer.process(data.iter().copied()));
+                        push(&buffer, &written, mixer.process(data.iter().copied()));
                     },
                     err_fn,
                     None,
@@ -259,7 +265,24 @@ impl VoiceRuntime {
     /// comme s'il venait du micro.
     #[doc(hidden)]
     pub fn inject(&self, samples: &[f32]) {
-        push(&self.buffer, samples.to_vec());
+        push(&self.buffer, &self.written, samples.to_vec());
+    }
+
+    /// Position courante d'écriture (voir `read_since`).
+    pub fn cursor(&self) -> u64 {
+        self.written.load(Ordering::Relaxed)
+    }
+
+    /// Audio arrivé depuis `cursor`, puis avance le curseur. Contrairement à
+    /// `take_window`, ne rend jamais deux fois le même échantillon, et rend
+    /// ce qui est disponible même juste après une purge du tampon.
+    pub fn read_since(&self, cursor: &mut u64) -> Vec<f32> {
+        let buffer = self.buffer.lock().unwrap();
+        let total = self.written.load(Ordering::Relaxed);
+        let fresh = (total.saturating_sub(*cursor) as usize).min(buffer.len());
+        *cursor = total;
+        let start = buffer.len() - fresh;
+        buffer.iter().skip(start).copied().collect()
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -332,11 +355,14 @@ impl Downmixer {
     }
 }
 
-fn push(buffer: &Arc<Mutex<VecDeque<f32>>>, samples: Vec<f32>) {
+fn push(buffer: &Arc<Mutex<VecDeque<f32>>>, written: &AtomicU64, samples: Vec<f32>) {
     if samples.is_empty() {
         return;
     }
     let mut buffer = buffer.lock().unwrap();
+    // Sous le verrou : `read_since` voit toujours un compteur cohérent avec
+    // le contenu du tampon.
+    written.fetch_add(samples.len() as u64, Ordering::Relaxed);
     // On borne le réservoir : au-delà de 30 s, les échantillons sont périmés.
     let limit = buffer.capacity();
     for sample in samples {
@@ -348,6 +374,10 @@ fn push(buffer: &Arc<Mutex<VecDeque<f32>>>, samples: Vec<f32>) {
 }
 
 /// Convertit une fenêtre d'échantillons en fichier WAV prêt pour Whisper.
+///
+/// Pas de normalisation du volume : essayée (crête ramenée à 0,9), elle a
+/// dégradé la transcription — « et Jimmy. » devenait « ee uh ! » et le bruit
+/// de fond amplifié produisait des phrases inventées.
 pub fn window_to_wav(samples: &[f32], sample_rate: u32) -> Vec<u8> {
     pcm_to_wav(&float_to_i16(samples), sample_rate)
 }
@@ -359,7 +389,8 @@ pub fn window_to_wav(samples: &[f32], sample_rate: u32) -> Vec<u8> {
 /// « j'ai mis » et « j'y mise ». On les liste explicitement, ce qui reste sans
 /// risque de faux positif : une phrase comme « j'ai besoin » ne correspond à
 /// aucune de ces formes.
-const KNOWN_PHRASES: &[&str] = &["j ai mis", "j y mise", "j ai mi", "chemise", "shami"];
+// « je mise » : rendu du modèle `base` mesuré le 3 octobre (« je mise dimanche »).
+const KNOWN_PHRASES: &[&str] = &["j ai mis", "j y mise", "j ai mi", "je mise", "je mis", "j y mis", "chemise", "shami"];
 
 /// Nombre de mots Recognition en tête de `transcript`, si le mot d'activation
 /// y figure. `None` si la phrase ne commence pas par le mot d'activation.
@@ -399,7 +430,8 @@ pub fn find_wake_prefix(transcript: &str, wake_word: &str) -> Option<usize> {
 }
 
 /// Interjections qui peuvent précéder le nom (« hé Jimmy »).
-const CALL_WORDS: &[&str] = &["he", "hey", "ok", "okay", "eh", "dis", "allo", "bonjour", "salut"];
+// « et » : Whisper écrit souvent « Hé Jimmy » comme « Et Jimmy » (même son).
+const CALL_WORDS: &[&str] = &["he", "hey", "et", "ok", "okay", "eh", "dis", "allo", "bonjour", "salut"];
 
 /// Clé phonétique (français) d'un mot normalisé : ce qui s'entend, pas ce qui
 /// s'écrit. `gu`+voyelle → `g`, `g`+e/i/y → `j`, `dj` → `j`, `y` → `i`,
@@ -536,6 +568,11 @@ pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
         .default_output_config()
         .map_err(|e| Error::Voice(format!("configuration de sortie indisponible : {e}")))?;
     let config: cpal::StreamConfig = supported.config();
+    // Piège corrigé : la sortie est **entrelacée**. Écrire un échantillon mono
+    // par case jouait le son deux fois trop vite sur une sortie stéréo — le
+    // « mot rapide incompréhensible ». Chaque échantillon est dupliqué sur
+    // tous les canaux de la trame.
+    let channels = config.channels.max(1) as usize;
 
     let device_rate = config.sample_rate.0;
     if device_rate != sample_rate && sample_rate > 0 {
@@ -552,7 +589,7 @@ pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
         cpal::SampleFormat::F32 => device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                drain(&queue_cb, &done_cb, data, |s| s);
+                drain(&queue_cb, &done_cb, data, channels, |s| s);
             },
             |_err| {},
             None,
@@ -560,7 +597,15 @@ pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
         cpal::SampleFormat::I16 => device.build_output_stream(
             &config,
             move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                drain(&queue_cb, &done_cb, data, |s| (s * 32767.0) as i16);
+                drain(&queue_cb, &done_cb, data, channels, |s| (s.clamp(-1.0, 1.0) * 32767.0) as i16);
+            },
+            |_err| {},
+            None,
+        ),
+        cpal::SampleFormat::U16 => device.build_output_stream(
+            &config,
+            move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
+                drain(&queue_cb, &done_cb, data, channels, |s| ((s.clamp(-1.0, 1.0) + 1.0) * 32767.5) as u16);
             },
             |_err| {},
             None,
@@ -594,34 +639,40 @@ pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    // Le dernier bloc écrit doit encore sortir du périphérique : couper le
+    // flux tout de suite tronquait la dernière syllabe.
+    std::thread::sleep(std::time::Duration::from_millis(200));
     Ok(())
 }
 
 
 /// Vide la file dans le tampon de sortie, et signale la fin quand elle n'a
 /// plus rien à fournir.
-fn drain<T: Copy + Default>(
+fn drain<T: Copy>(
     queue: &Arc<Mutex<VecDeque<f32>>>,
     done: &Arc<AtomicBool>,
     data: &mut [T],
+    channels: usize,
     convert: impl Fn(f32) -> T,
 ) {
     let mut queue = queue.lock().unwrap();
-    let mut produced = 0usize;
-    for slot in data.iter_mut() {
-        match queue.pop_front() {
-            Some(value) => {
-                *slot = convert(value);
-                produced += 1;
-            }
+    let silence = convert(0.0);
+    let mut exhausted = false;
+    for frame in data.chunks_mut(channels) {
+        // Une valeur mono par trame, recopiée sur chaque canal.
+        let value = if exhausted { None } else { queue.pop_front() };
+        match value {
+            Some(sample) => frame.fill(convert(sample)),
             None => {
-                *slot = T::default();
-                break;
+                // Toute la fin du tampon est remise au silence : avant, les
+                // cases restantes gardaient l'ancien contenu (bruit).
+                exhausted = true;
+                frame.fill(silence);
             }
         }
     }
     drop(queue);
-    if produced < data.len() {
+    if exhausted {
         done.store(true, Ordering::Relaxed);
     }
 }
@@ -692,6 +743,8 @@ mod tests {
     #[test]
     fn interjection_avant_le_nom() {
         assert!(matches_wake_word("Hé Jimmy, ouvre mes notes", "jimmy"));
+        assert!(matches_wake_word("et Jimmy.", "jimmy"), "« Hé » transcrit « et »");
+        assert_eq!(strip_wake_word("je mise, dis-moi bonjour", "jimmy"), "dis-moi bonjour");
         assert_eq!(strip_wake_word("Ok Jimmy, ouvre mes notes", "jimmy"), "ouvre mes notes");
     }
 
@@ -700,6 +753,31 @@ mod tests {
         for transcript in ["Gimou.", "J'ai besoin d'aide", "Jamais de la vie", "Salut tout le monde", "Il est midi"] {
             assert!(!matches_wake_word(transcript, "jimmy"), "{transcript}");
         }
+    }
+
+    #[test]
+    fn sortie_stereo_duplique_chaque_echantillon() {
+        let queue = Arc::new(Mutex::new(VecDeque::from(vec![0.1f32, 0.2, 0.3])));
+        let done = Arc::new(AtomicBool::new(false));
+        let mut data = [9.0f32; 8];
+        drain(&queue, &done, &mut data, 2, |s| s);
+        // 3 trames stéréo, puis silence (et non l'ancien contenu « 9 »).
+        assert_eq!(data, [0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.0, 0.0]);
+        assert!(done.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn curseur_sans_doublon_ni_trou() {
+        let runtime = VoiceRuntime::new(16_000);
+        let mut cursor = runtime.cursor();
+        runtime.inject(&[1.0, 2.0, 3.0]);
+        assert_eq!(runtime.read_since(&mut cursor), vec![1.0, 2.0, 3.0]);
+        assert!(runtime.read_since(&mut cursor).is_empty());
+        runtime.inject(&[4.0]);
+        runtime.drain();
+        runtime.inject(&[5.0, 6.0]);
+        // Après une purge : seul ce qui reste est rendu, sans paniquer.
+        assert_eq!(runtime.read_since(&mut cursor), vec![5.0, 6.0]);
     }
 
     #[test]

@@ -121,6 +121,8 @@ async function step(name, fn) {
     await p.waitForTimeout(1500);
     const back = await p.locator("button", { hasText: "Renard roux" }).getAttribute("class");
     expect(back === "primary", `retour renard : ${back}`);
+    const dodge = p.locator(".card", { hasText: "Comportement" }).locator("input[type=checkbox]");
+    expect((await dodge.count()) === 1, "interrupteur d'esquive absent");
     const states = await p.$$eval(".state-chip", (els) => els.map((e) => e.textContent));
     expect(states.includes("j'écoute"), `états non traduits : ${states.join(", ")}`);
     return "fennec puis renard";

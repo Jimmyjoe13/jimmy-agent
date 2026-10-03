@@ -131,6 +131,43 @@ génération), et l'écoute ne reprenait jamais au lancement
   échouait. Libellés anglais traduits (qualité, états, types de souvenirs).
 - Logs de la release perdus (application sans console) → `data/logs/jimmy.log`.
 
+# Retours d'usage réel (3 octobre 2026, soir)
+
+« Quand je dis Jimmy il réagit, puis plus rien » et « dans le chat il dit un
+mot rapide incompréhensible, plus de vocal ». Causes, toutes corrigées :
+
+- **Sortie audio entrelacée ignorée** (`play_bytes`) : le son mono était
+  écrit une case sur deux en stéréo → **lu deux fois trop vite**. Toutes les
+  voix de Jimmy étaient touchées. Fin de tampon non remise à zéro (bruit) et
+  dernière syllabe coupée, aussi corrigés.
+- **Après « Oui ? », la boucle s'arrêtait** : purge du micro puis lecture par
+  fenêtre fixe de 900 ms → fenêtre vide → sortie immédiate. Lecture par
+  curseur (`read_since`) ; rien n'est transcrit si personne n'a parlé.
+- **Table `memory_semantic` absente des bases existantes** (schéma resté en
+  version 1) : recherche et écriture mémoire en erreur. `SCHEMA_VERSION = 2`.
+- **Le chat ne parlait pas** (jamais, en fait) : il lit désormais sa réponse
+  (`App::speak`, partagé avec l'écoute), texte nettoyé du Markdown (pas
+  d'« astérisque », code et URL remplacés). L'écoute est suspendue pendant que
+  Jimmy parle.
+- **Détection en deux temps** : `base` réagit pendant la phrase, `small`
+  décide sur la phrase entière (`base` seul se trompait sur les fenêtres
+  courtes). Prompts Whisper différents par rôle (voir piège 31).
+- Variantes du nom ajoutées : « je mise », « et Jimmy » (= « Hé Jimmy »).
+
+## Avatar : zone cliquable et esquive
+
+- Seul le personnage (et la bulle quand elle est affichée) capte la souris :
+  `window_set_mouse_passthrough` avec la silhouette projetée par la caméra.
+  Le reste de la fenêtre 560×620 laisse passer les clics vers le bureau.
+- **Esquive** : à l'approche du curseur, Jimmy glisse de côté (opposé au
+  curseur, en restant sur l'écran), puis revient à sa place 1,4 s après que
+  le curseur s'est éloigné. Aller le chercher là où il s'est réfugié permet de
+  le cliquer (réarmement seulement quand le curseur a quitté les deux zones).
+  Glisser-déposer = nouvelle place. Réglable : vue Skin → « Comportement »
+  (`avatar.dodge`, route Godot `/dodge`, argument `--dodge=0|1`).
+- Vérifié sans aucun clic simulé : `WindowFromPoint` (zone cliquable) et
+  `SetCursorPos` + position de fenêtre (esquive, poursuite, retour).
+
 ## Pièges connus
 
 **1. PowerShell 5.1 lit les `.ps1` en ANSI sans BOM.**
@@ -290,6 +327,41 @@ toujours Jimmy sans ce port à la fin.
 Pour patcher des fichiers contenant du français, écrire le script dans un
 fichier (scratchpad) plutôt que `python3 - <<'EOF'`.
 
+**28. La sortie audio cpal est entrelacée, comme l'entrée.**
+Un échantillon mono par case = lecture deux fois trop rapide en stéréo. Dans
+`drain`, une valeur par trame, recopiée sur chaque canal. Test unitaire
+`sortie_stereo_duplique_chaque_echantillon`.
+
+**29. `take_window` après une purge rend du vide.**
+Il exige `n` échantillons disponibles. Pour suivre un flux, utiliser le
+curseur (`cursor` + `read_since`), qui rend exactement l'audio nouveau.
+
+**30. Toute table ajoutée au schéma doit faire monter `SCHEMA_VERSION`.**
+Sinon les bases existantes ne la reçoivent jamais, et les tests (base neuve
+en mémoire) ne voient rien. Test `migration_v1_vers_v2_cree_memory_semantic`.
+
+**31. Le prompt Whisper n'est pas neutre.**
+« Jimmy, » en prompt : le modèle `small` croit le nom déjà dit et l'omet de
+la commande ; un prompt descriptif fait halluciner `base` sur un appel court.
+D'où un prompt par rôle (`whisper_prompt(…, SttRole)`).
+
+**32. Normaliser le volume avant Whisper a dégradé la transcription.**
+Essayé (crête à 0,9) : « et Jimmy. » devenait « ee uh ! ». Retiré, documenté
+sur `window_to_wav`.
+
+**33. Godot : repère viewport ≠ repère fenêtre si Windows met à l'échelle.**
+Projeter avec la caméra donne des pixels de viewport ; la zone cliquable et
+l'esquive travaillent en pixels de fenêtre / d'écran. Multiplier par
+`window_get_size() / viewport_size` (`_window_scale`). Les tests PowerShell
+doivent appeler `SetProcessDPIAware()`, sinon leurs coordonnées sont
+virtualisées.
+
+**34. Les clips de synthèse ne sont pas des entrées fiables.**
+Fish Audio prononce parfois mal « Jimmy » ; à RMS 0,008 Whisper comprend mal
+la phrase elle-même. Les tests d'écoute affichent une **référence** (clip
+entier transcrit hors écoute) et régénèrent le clip tant que le nom n'y est
+pas audible (`phrase_avec_nom`).
+
 ---
 
 ## Prochaines étapes
@@ -335,7 +407,7 @@ fichier (scratchpad) plutôt que `python3 - <<'EOF'`.
 .\scripts\test-happy.ps1       # test de bout en bout + chaîne audio
 .\scripts\test-happy.ps1 -SkipAudio
 .\scripts\test-ui.ps1        # 12 parcours UI sur la vraie application (CDP)
-.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_reconnait '--' --ignored --nocapture
+.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_ '--' --ignored --nocapture --test-threads=1
 .\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\shortcut.ps1 -Autostart   # démarrage avec Windows
 .\scripts\with-msvc.ps1 cargo test

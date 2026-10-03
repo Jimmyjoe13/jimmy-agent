@@ -114,10 +114,12 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         // peut fermer avant d'avoir reçu les derniers événements.
         let _ = relay.await;
 
-        // Son d'état : le chat texte ne parle pas, un « C'est prêt. » signale
-        // la réponse quand la fenêtre n'est pas sous les yeux.
-        let cue = if outcome.is_ok() { Cue::Answer } else { Cue::Error };
-        cues::play(&cue_app, cue).await;
+        // Jimmy lit sa réponse à voix haute, comme en vocal. (Avant : un son
+        // « C'est prêt. » joué deux fois trop vite, et aucune voix.)
+        match &outcome {
+            Ok(answer) => cue_app.speak(&answer.text).await,
+            Err(_) => cues::play(&cue_app, Cue::Error).await,
+        }
 
         if let Err(error) = outcome {
             log::error!("[agent] {error}");
@@ -516,6 +518,16 @@ pub async fn avatar_quality(state: State<'_, AppState>, level: String) -> std::r
     settings.avatar.quality = level.clone();
     app.save_settings(settings).map_err(err)?;
     app.avatar.set_quality(&level).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn avatar_dodge(state: State<'_, AppState>, enabled: bool) -> std::result::Result<(), String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    settings.avatar.dodge = enabled;
+    app.save_settings(settings).map_err(err)?;
+    app.avatar.set_dodge(enabled).await;
     Ok(())
 }
 

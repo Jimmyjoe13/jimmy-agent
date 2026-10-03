@@ -10,7 +10,10 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const SCHEMA_VERSION: i64 = 1;
+/// Version 2 : table `memory_semantic` (embeddings LM Studio). Toute table
+/// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
+/// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub struct Db {
     conn: Connection,
@@ -165,5 +168,38 @@ impl Db {
             )
             .map(|n| n > 0)
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Une base créée en version 1 (sans `memory_semantic`) doit recevoir la
+    /// table à l'ouverture.
+    #[test]
+    fn migration_v1_vers_v2_cree_memory_semantic() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v1.db");
+        // Base réelle, ramenée à l'état « version 1 » : sans la table, et
+        // marquée v1 — exactement le cas d'une installation antérieure.
+        drop(Db::open(&path).expect("création"));
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("DROP TABLE memory_semantic; PRAGMA user_version = 1;").unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_semantic'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

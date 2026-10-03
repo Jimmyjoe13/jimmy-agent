@@ -59,18 +59,37 @@ pub struct App {
     pub stt_command: tokio::sync::Mutex<Option<Stt>>,
     /// Dernier seuil de VAD utilisé par l'écoute (diagnostic, vue Voix).
     pub last_vad_threshold: Mutex<f32>,
+    /// Vrai pendant que Jimmy parle : l'écoute ignore alors le micro.
+    speaking: std::sync::atomic::AtomicBool,
     pub godot: tokio::sync::Mutex<Option<tokio::process::Child>>,
 }
 
-/// Contexte donné à Whisper : le nom de l'assistant, capitalisé, en début
-/// de phrase. « jimmy » → « Jimmy, ».
-pub fn whisper_prompt(wake_word: &str) -> String {
+/// Prompts Whisper, un par rôle — mesurés, les deux serveurs ont des besoins
+/// opposés :
+/// - **mot d'éveil** (`base`, fenêtres de 2,4 s) : « Jimmy, » pousse le modèle
+///   à écrire le nom (« et Jimmy. ») ; un prompt descriptif le faisait
+///   halluciner sur un appel court (« Je sais pas, je sais pas ») ;
+/// - **commande** (`small`, phrase entière) : avec « Jimmy, », le modèle
+///   croyait le nom déjà dit et l'omettait (« dis-moi bonjour ») ; un prompt
+///   qui cite le nom sans être la phrase précédente le conserve.
+pub fn whisper_prompt(wake_word: &str, role: SttRole) -> String {
     let word = wake_word.trim();
     let mut chars = word.chars();
-    match chars.next() {
-        Some(first) => format!("{}{}, ", first.to_uppercase(), chars.as_str()),
-        None => String::new(),
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let name = format!("{}{}", first.to_uppercase(), chars.as_str());
+    match role {
+        SttRole::Wake => format!("{name}, "),
+        SttRole::Command => format!("Discussion avec {name}, l'assistant vocal."),
     }
+}
+
+/// Rôle d'un serveur whisper (voir [`whisper_prompt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SttRole {
+    Wake,
+    Command,
 }
 
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.
@@ -159,6 +178,7 @@ impl App {
             stt: tokio::sync::Mutex::new(None),
             stt_command: tokio::sync::Mutex::new(None),
             last_vad_threshold: Mutex::new(0.0),
+            speaking: std::sync::atomic::AtomicBool::new(false),
             godot: tokio::sync::Mutex::new(None),
         }))
     }
@@ -237,6 +257,7 @@ impl App {
             .arg(format!("--bridge-port={}", settings.avatar.bridge_port))
             .arg(format!("--skin={}", settings.avatar.skin))
             .arg(format!("--quality={}", settings.avatar.quality))
+            .arg(format!("--dodge={}", u8::from(settings.avatar.dodge)))
             .env("JIMMY_GODOT_PORT", settings.avatar.port.to_string())
             .env("JIMMY_BRIDGE_PORT", settings.avatar.bridge_port.to_string())
             .env("JIMMY_SKIN", &settings.avatar.skin)
@@ -317,7 +338,7 @@ impl App {
                     old.shutdown().await;
                 }
                 let mut stt = providers::Stt::new(settings.stt.port, &settings.stt.language)?
-                    .with_prompt(&whisper_prompt(&settings.stt.wake_word));
+                    .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Wake));
                 stt.ensure_server(&server_exe, &models.join(&settings.stt.model), settings.stt.threads)
                     .await?;
                 *guard = Some(stt);
@@ -343,7 +364,7 @@ impl App {
         }
         let started = async {
             let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?
-                .with_prompt(&whisper_prompt(&settings.stt.wake_word));
+                .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Command));
             stt.ensure_server(&server_exe, &models.join(command_model), settings.stt.threads)
                 .await?;
             Ok::<_, Error>(stt)
@@ -360,6 +381,55 @@ impl App {
             ),
         }
         Ok(())
+    }
+
+    /// Jimmy est-il en train de parler ?
+    pub fn is_speaking(&self) -> bool {
+        self.speaking.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Dit `text` à voix haute (synthèse + lecture) et l'affiche dans la bulle
+    /// de l'avatar. Utilisé par l'écoute **et** par le chat. Ne renvoie pas
+    /// d'erreur : une voix indisponible ne doit pas faire échouer la réponse.
+    pub async fn speak(&self, text: &str) {
+        let settings = self.settings();
+        if !settings.tts.enabled {
+            return;
+        }
+        let cleaned = providers::tts::prepare_for_speech(text);
+        if cleaned.is_empty() {
+            return;
+        }
+        let speech = match self
+            .tts
+            .speak(
+                &self.secrets.openrouter_api_key,
+                &settings.tts.model,
+                &settings.tts.voice,
+                &cleaned,
+                settings.tts.chars_per_minute,
+            )
+            .await
+        {
+            Ok(speech) => speech,
+            Err(error) => {
+                log::warn!("[tts] {error}");
+                return;
+            }
+        };
+        if speech.bytes.is_empty() {
+            return;
+        }
+        log::info!("[tts] lecture de {} caractères", cleaned.chars().count());
+        let _ = self.avatar.say(text, speech.estimated_ms).await;
+        let bytes = speech.bytes;
+        let rate = speech.sample_rate;
+        self.speaking.store(true, std::sync::atomic::Ordering::Relaxed);
+        let outcome = tokio::task::spawn_blocking(move || voice::play_bytes(&bytes, rate)).await;
+        self.speaking.store(false, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(Err(error)) = outcome {
+            log::warn!("[voice] lecture impossible : {error}");
+        }
     }
 
     /// Transcrit une commande avec le modèle précis, ou le modèle du wake
@@ -440,6 +510,7 @@ impl App {
                     "id": id, "label": label
                 })).collect::<Vec<_>>(),
                 "quality": settings.avatar.quality,
+                "dodge": settings.avatar.dodge,
                 "host": settings.avatar.host,
                 "port": settings.avatar.port,
                 "running": self.godot.try_lock().map(|g| g.is_some()).unwrap_or(false),

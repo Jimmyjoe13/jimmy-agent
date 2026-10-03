@@ -43,6 +43,22 @@ var _state_label: Label
 var _bridge: HTTPRequest
 var _bubble_timer := 0.0
 var _dragging := false
+## Esquive : Jimmy s'écarte quand le curseur approche, puis revient.
+var dodge_enabled := true
+## Position « à la maison » de la fenêtre (choisie par l'utilisateur en
+## faisant glisser Jimmy). L'esquive s'en écarte, puis y revient.
+var _home := Vector2i.ZERO
+## Position visée et position courante (flottante, pour une glisse douce).
+var _target := Vector2.ZERO
+var _current := Vector2.ZERO
+## L'esquive n'est réarmée que lorsque le curseur a quitté les deux zones
+## (maison et position d'esquive). Ainsi, aller chercher Jimmy là où il
+## s'est réfugié permet de le cliquer.
+var _dodge_armed := true
+var _away_time := 0.0
+## Dernière région cliquable envoyée au système (évite les appels inutiles).
+var _last_region := Rect2()
+var _last_bubble := false
 var _drag_offset := Vector2i.ZERO
 var _moved := false
 var _look_smooth := Vector2.ZERO
@@ -68,6 +84,8 @@ func _parse_cmdline() -> void:
 			bridge_port = int(arg.trim_prefix("--bridge-port="))
 		elif arg.begins_with("--bridge-host="):
 			bridge_host = arg.trim_prefix("--bridge-host=")
+		elif arg.begins_with("--dodge="):
+			dodge_enabled = arg.trim_prefix("--dodge=") != "0"
 		elif arg.begins_with("--quality="):
 			_quality = arg.trim_prefix("--quality=").to_lower()
 	# Variables d'environnement (positionnées par Tauri au lancement)
@@ -90,6 +108,9 @@ func _setup_window() -> void:
 	# Position initiale : bas à droite du bureau, comme un assistant.
 	var pos := Vector2i(screen.position.x + screen.size.x - w - 40, screen.position.y + screen.size.y - h - 20)
 	DisplayServer.window_set_position(pos)
+	_home = pos
+	_target = Vector2(pos)
+	_current = Vector2(pos)
 
 
 func _build_scene() -> void:
@@ -349,7 +370,12 @@ func _on_http_request(method: String, path: String, body: Dictionary) -> void:
 			else:
 				print("[godot/main] skin inconnu : %s (on garde %s)" % [wanted, skin])
 		"/position":
-			DisplayServer.window_set_position(Vector2i(int(body.get("x", 0)), int(body.get("y", 0))))
+			_go_home(Vector2i(int(body.get("x", 0)), int(body.get("y", 0))))
+		"/dodge":
+			dodge_enabled = bool(body.get("enabled", true))
+			if not dodge_enabled:
+				_target = Vector2(_home)
+			print("[godot/main] esquive : %s" % ("active" if dodge_enabled else "désactivée"))
 		"/hide":
 			_hide_bubble()
 		"/snapshot":
@@ -402,6 +428,136 @@ func _process(delta: float) -> void:
 		if _bubble_timer <= 0.0:
 			_hide_bubble()
 
+	_update_dodge(delta)
+	_update_click_region()
+
+
+# ── Zone cliquable et esquive ───────────────────────────────────────────────
+
+const DODGE_MARGIN := 70.0       # px autour du personnage qui déclenchent l'esquive
+const DODGE_SPEED := 9.0         # vitesse de glisse (plus haut = plus vif)
+const RETURN_DELAY := 1.4        # s hors zone avant de revenir à la maison
+const CLICK_PADDING := 8.0       # px de marge autour de la silhouette cliquable
+
+
+## Rapport pixels de fenêtre / pixels du viewport. Différent de 1 quand
+## Windows met l'affichage à l'échelle : sans cette conversion, la zone
+## cliquable et la zone d'esquive étaient décalées par rapport au personnage.
+func _window_scale() -> Vector2:
+	var viewport_size := get_viewport().get_visible_rect().size
+	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
+		return Vector2.ONE
+	return Vector2(DisplayServer.window_get_size()) / viewport_size
+
+
+## Rectangle du personnage, en pixels de fenêtre : projection de sa
+## silhouette (pieds → pointe des oreilles, bras compris) par la caméra.
+func _avatar_rect() -> Rect2:
+	var points := [
+		Vector3(-0.32, -0.06, 0.0), Vector3(0.32, -0.06, 0.0),
+		Vector3(-0.32, 1.62, 0.0), Vector3(0.32, 1.62, 0.0),
+	]
+	var scale := _window_scale()
+	var rect := Rect2(_camera.unproject_position(points[0]) * scale, Vector2.ZERO)
+	for point in points:
+		rect = rect.expand(_camera.unproject_position(point) * scale)
+	return rect
+
+
+## La fenêtre fait 560×620 mais seuls Jimmy (et sa bulle) doivent capter la
+## souris : ailleurs, les clics traversent vers le bureau. Avant, toute la
+## surface transparente bloquait ce qu'il y avait derrière.
+func _update_click_region() -> void:
+	var rect := _avatar_rect().grow(CLICK_PADDING)
+	var bubble := _bubble.visible
+	if _dragging:
+		return
+	if rect.position.distance_to(_last_region.position) < 2.0 \
+			and rect.size.distance_to(_last_region.size) < 2.0 and bubble == _last_bubble:
+		return
+	_last_region = rect
+	_last_bubble = bubble
+	var region := PackedVector2Array()
+	if bubble:
+		# Forme en T : la bulle (en haut, large) puis le personnage.
+		var bubble_rect := _bubble.get_global_rect()
+		var scale := _window_scale()
+		var b := Rect2(bubble_rect.position * scale, bubble_rect.size * scale).grow(4.0)
+		region = PackedVector2Array([
+			b.position, Vector2(b.end.x, b.position.y), Vector2(b.end.x, b.end.y),
+			Vector2(rect.end.x, b.end.y), Vector2(rect.end.x, rect.end.y),
+			Vector2(rect.position.x, rect.end.y), Vector2(rect.position.x, b.end.y),
+			Vector2(b.position.x, b.end.y),
+		])
+	else:
+		region = PackedVector2Array([
+			rect.position, Vector2(rect.end.x, rect.position.y), rect.end,
+			Vector2(rect.position.x, rect.end.y),
+		])
+	DisplayServer.window_set_mouse_passthrough(region)
+
+
+## Esquive du curseur : quand la souris entre dans la zone du personnage,
+## la fenêtre glisse sur le côté opposé ; quand elle s'éloigne assez
+## longtemps, Jimmy revient à sa place.
+func _update_dodge(delta: float) -> void:
+	if _dragging:
+		return
+	var mouse := Vector2(DisplayServer.mouse_get_position())
+	var rect := _avatar_rect()
+	var here := Rect2(rect.position + _current, rect.size).grow(DODGE_MARGIN)
+	var home := Rect2(rect.position + Vector2(_home), rect.size).grow(DODGE_MARGIN)
+	var near_here := here.has_point(mouse)
+	var near_home := home.has_point(mouse)
+
+	if dodge_enabled and _dodge_armed and near_here:
+		_target = _dodge_target(mouse, rect)
+		_dodge_armed = false
+		_away_time = 0.0
+		print("[godot/dodge] esquive : souris %s, fenêtre %s → %s" % [mouse, _current.round(), _target.round()])
+	elif not near_here and not near_home:
+		_dodge_armed = true
+		_away_time += delta
+		# Retour à la maison quand le curseur s'est éloigné des deux zones.
+		if _away_time > RETURN_DELAY and _target != Vector2(_home):
+			_target = Vector2(_home)
+			print("[godot/dodge] retour à la maison %s" % _home)
+	else:
+		_away_time = 0.0
+
+	# Glisse douce vers la cible.
+	if _current.distance_to(_target) > 0.5:
+		_current = _current.lerp(_target, clampf(delta * DODGE_SPEED, 0.0, 1.0))
+		DisplayServer.window_set_position(Vector2i(_current.round()))
+
+
+## Position d'esquive : décalage horizontal, du côté opposé au curseur, de
+## la largeur du personnage plus la marge — en restant sur l'écran.
+func _dodge_target(mouse: Vector2, rect: Rect2) -> Vector2:
+	var screen := Rect2(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()))
+	var size := Vector2(WINDOW_SIZE)
+	var center_x := _current.x + rect.get_center().x
+	var shift := rect.size.x + DODGE_MARGIN * 2.0
+	var direction := -1.0 if mouse.x > center_x else 1.0
+	var candidate := _current + Vector2(shift * direction, 0.0)
+	# Bord d'écran : on part de l'autre côté.
+	var min_x := screen.position.x - rect.position.x
+	var max_x := screen.end.x - rect.end.x
+	if candidate.x < min_x or candidate.x > max_x:
+		candidate = _current + Vector2(-shift * direction, 0.0)
+	candidate.x = clampf(candidate.x, min_x, max_x)
+	candidate.y = clampf(candidate.y, screen.position.y - size.y + 40.0, screen.end.y - size.y + 40.0)
+	return candidate
+
+
+## Nouvelle maison (glisser-déposer ou route /position).
+func _go_home(position: Vector2i) -> void:
+	_home = position
+	_target = Vector2(position)
+	_current = Vector2(position)
+	_dodge_armed = false
+	DisplayServer.window_set_position(position)
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -410,18 +566,27 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mb.pressed:
 				_dragging = true
 				_moved = false
-				var win := DisplayServer.window_get_position()
-				_drag_offset = Vector2i(int(mb.position.x) - win.x, int(mb.position.y) - win.y)
+				# Coordonnées écran : avant, position locale et position de
+				# fenêtre étaient mélangées, d'où un glisser saccadé.
+				_drag_offset = DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
+				# Pendant le glisser, toute la fenêtre capte la souris.
+				DisplayServer.window_set_mouse_passthrough(PackedVector2Array())
 			else:
 				if _dragging and not _moved:
 					_on_avatar_clicked()
+				if _dragging and _moved:
+					# Là où on lâche Jimmy devient sa nouvelle place.
+					_go_home(DisplayServer.window_get_position())
 				_dragging = false
+				_last_region = Rect2() # force la mise à jour de la zone cliquable
 	elif event is InputEventMouseMotion and _dragging:
-		var mm := event as InputEventMouseMotion
-		var target := Vector2i(int(mm.position.x) - _drag_offset.x, int(mm.position.y) - _drag_offset.y)
-		if absi(target.x - DisplayServer.window_get_position().x) > 2 or absi(target.y - DisplayServer.window_get_position().y) > 2:
+		var target := DisplayServer.mouse_get_position() - _drag_offset
+		var win := DisplayServer.window_get_position()
+		if absi(target.x - win.x) > 2 or absi(target.y - win.y) > 2:
 			_moved = true
 		DisplayServer.window_set_position(target)
+		_current = Vector2(target)
+		_target = _current
 
 
 func _on_avatar_clicked() -> void:

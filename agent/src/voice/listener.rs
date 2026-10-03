@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
 
 use super::{matches_wake_word, strip_wake_word, window_to_wav, VoiceRuntime};
-use crate::config::Settings;
 use crate::core::types::{AgentEvent, AvatarState};
 use crate::App;
 
@@ -72,6 +71,12 @@ impl App {
 
             while alive(&runtime) {
                 tokio::time::sleep(hop).await;
+                // Jimmy parle (réponse du chat, synthèse) : on n'écoute pas
+                // sa propre voix, et on repart d'un tampon vide ensuite.
+                if self.is_speaking() {
+                    runtime.drain();
+                    continue;
+                }
                 let level = runtime.level(recent_samples);
                 let threshold = vad_threshold(noise_floor, settings.voice.vad_threshold);
                 if level <= threshold {
@@ -83,33 +88,50 @@ impl App {
                 }
                 *self.last_vad_threshold.lock().unwrap() = threshold;
 
-                // 1. Fenêtre courte : le wake word est-il là ?
-                let Some(text) = transcribe(&self, &runtime, window_samples, rate).await else {
-                    continue;
-                };
-                if text.is_empty() || !alive(&runtime) {
-                    continue;
-                }
-                let matched = matches_wake_word(&text, &settings.stt.wake_word);
-                emit(&events, AgentEvent::Heard { text: text.clone(), matched }).await;
-                if !matched {
-                    log::debug!("[voice] parole sans wake word : « {text} »");
-                    continue;
-                }
-                log::info!("[voice] wake word entendu : « {text} »");
+                // Début de la phrase, marqué *avant* toute transcription. Piège
+                // corrigé : la fenêtre était prise après la transcription
+                // rapide ; si Whisper traînait (machine chargée), le début de
+                // la phrase — donc « Jimmy » — en sortait et se perdait.
+                let segment_start = runtime.cursor().saturating_sub(window_samples as u64);
 
-                // 2. Le wake word est passé : on attend la fin de la phrase.
-                emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: text.clone() }).await;
-                // On écoute d'abord la phrase jusqu'au silence, à partir de la
-                // fenêtre qui contient le nom. Piège corrigé : la détection
-                // tombe souvent *pendant* la phrase (la fenêtre ne contient
-                // encore que « Jimmy »). Conclure « Jimmy seul » faisait jouer
-                // « Oui ? » puis purger le micro… en effaçant la commande en
-                // train d'être dite.
+                // 1. Détection rapide (`base`, fenêtre courte) : réagir pendant
+                //    que l'utilisateur parle encore.
+                let early = transcribe(&self, &runtime, window_samples, rate).await.unwrap_or_default();
+                if !alive(&runtime) {
+                    continue;
+                }
+                let early_match = !early.is_empty() && matches_wake_word(&early, &settings.stt.wake_word);
+                if !early.is_empty() {
+                    emit(&events, AgentEvent::Heard { text: early.clone(), matched: early_match }).await;
+                }
+                if early_match {
+                    log::info!("[voice] wake word entendu (rapide) : « {early} »");
+                    emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: early.clone() }).await;
+                }
+
+                // 2. Phrase entière jusqu'au silence, transcrite par le modèle
+                //    précis (`small`) : c'est elle qui décide. Mesuré : `base`
+                //    se trompe souvent sur les fenêtres courtes (« je m'y en ai
+                //    dit », « je suis à la fois de la nuit » pour « Jimmy… »),
+                //    alors que `small` entend le nom sur la phrase complète.
+                //    Écouter jusqu'au silence évite aussi de conclure « Jimmy
+                //    seul » quand la détection tombe en milieu de phrase.
                 let utterance =
-                    collect_utterance(&self, &runtime, window_samples, rate, hop, end_of_speech, MIN_UTTERANCE, threshold)
+                    collect_utterance(&self, &runtime, segment_start, true, rate, hop, end_of_speech, MIN_UTTERANCE, threshold)
                         .await
                         .unwrap_or_default();
+                let full_match = matches_wake_word(&utterance, &settings.stt.wake_word);
+                if !early_match && !full_match {
+                    log::debug!("[voice] parole sans wake word : « {utterance} »");
+                    continue;
+                }
+                if !early_match {
+                    // Le modèle rapide l'avait raté : la phrase entière l'a reconnu.
+                    log::info!("[voice] wake word entendu (phrase entière) : « {utterance} »");
+                    emit(&events, AgentEvent::Heard { text: utterance.clone(), matched: true }).await;
+                    emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: utterance.clone() }).await;
+                }
+
                 let command = if strip_wake_word(&utterance, &settings.stt.wake_word).trim().is_empty() {
                     // Vraiment « Jimmy » seul, suivi d'une pause : Jimmy répond
                     // « Oui ? », puis écoute. Le micro est purgé après le son
@@ -117,7 +139,10 @@ impl App {
                     // un délai de grâce laisse le temps de commencer à parler.
                     super::cues::play(&self, super::cues::Cue::Listening).await;
                     runtime.drain();
-                    collect_utterance(&self, &runtime, 0, rate, hop, end_of_speech, AFTER_CUE_GRACE, threshold)
+                    // Signal « parle maintenant » : l'interface l'affiche, et
+                    // c'est à partir d'ici que la commande est écoutée.
+                    emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: "Oui ?".into() }).await;
+                    collect_utterance(&self, &runtime, runtime.cursor(), false, rate, hop, end_of_speech, AFTER_CUE_GRACE, threshold)
                         .await
                         .unwrap_or_default()
                 } else {
@@ -150,12 +175,12 @@ impl App {
 
                 match answer {
                     Ok(answer) => {
-                        speak(&self, &answer.text).await;
+                        self.speak(&answer.text).await;
                         emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
                     }
                     Err(error) => {
                         emit(&events, AgentEvent::Failed { message: error.to_string() }).await;
-                        speak(&self, &format!("Désolé, je n'ai pas pu faire ça : {error}.")).await;
+                        self.speak(&format!("Désolé, je n'ai pas pu faire ça : {error}.")).await;
                     }
                 }
                 // Le tampon contient maintenant la voix de Jimmy lui-même
@@ -174,39 +199,51 @@ pub fn vad_threshold(noise_floor: f32, ceiling: f32) -> f32 {
 }
 
 /// Accumule des échantillons jusqu'au silence, puis transcrit la phrase entière.
+/// `start` : curseur à partir duquel l'audio fait partie de la phrase.
+/// `speech_started` : la parole a déjà commencé (le mot d'éveil est dedans).
 async fn collect_utterance(
     app: &Arc<App>,
     runtime: &Arc<VoiceRuntime>,
-    initial_samples: usize,
+    start: u64,
+    speech_started: bool,
     rate: u32,
     hop: Duration,
     end_of_speech: Duration,
     min_duration: Duration,
     threshold: f32,
 ) -> Option<String> {
-    let mut buffer: Vec<f32> = runtime.take_window(initial_samples);
+    let mut cursor = start;
+    let mut buffer: Vec<f32> = runtime.read_since(&mut cursor);
+    let mut heard_speech = speech_started && !buffer.is_empty();
     let started = Instant::now();
     let mut silence = Duration::ZERO;
 
-    while started.elapsed() < MAX_UTTERANCE {
+    while started.elapsed() < MAX_UTTERANCE && runtime.is_running() {
         tokio::time::sleep(hop).await;
-        // La détection de parole regarde 2 pas (900 ms) pour être stable, mais
-        // seul le dernier pas est **nouveau**. Ajouter toute la fenêtre
-        // mettait chaque morceau d'audio deux fois dans le tampon.
-        let step = (rate as f64 * hop.as_secs_f64()) as usize;
-        let recent = runtime.take_window((step * 2).max(rate as usize / 4));
-        if recent.is_empty() {
-            break;
+        // Lecture par curseur : exactement l'audio nouveau. Piège corrigé :
+        // juste après la purge qui suit « Oui ? », une fenêtre fixe de
+        // 900 ms était vide et la boucle s'arrêtait aussitôt — Jimmy
+        // réagissait à son nom, puis plus rien.
+        let fresh = runtime.read_since(&mut cursor);
+        if fresh.is_empty() {
+            silence += hop;
+        } else {
+            // Même seuil que celui qui a déclenché l'écoute : la fin de
+            // phrase est détectée relativement au bruit de ce micro-ci.
+            let talking = crate::providers::stt::is_speech(&fresh, threshold);
+            heard_speech |= talking;
+            silence = if talking { Duration::ZERO } else { silence + hop };
+            buffer.extend_from_slice(&fresh);
         }
-        // Même seuil que celui qui a déclenché l'écoute : la fin de phrase
-        // est détectée relativement au bruit de ce micro-ci.
-        let talking = crate::providers::stt::is_speech(&recent, threshold);
-        silence = if talking { Duration::ZERO } else { silence + hop };
-        let fresh = recent.len().saturating_sub(step);
-        buffer.extend_from_slice(&recent[fresh..]);
         if silence >= end_of_speech && started.elapsed() > min_duration {
             break;
         }
+    }
+    // Personne n'a parlé (après « Oui ? ») : ne rien transcrire. Whisper
+    // invente volontiers du texte sur du silence (« Sous-titres réalisés… »),
+    // qui serait exécuté comme une commande.
+    if !heard_speech {
+        return None;
     }
     transcribe_command(app, &buffer, rate).await
 }
@@ -252,45 +289,6 @@ async fn transcribe_samples(app: &Arc<App>, samples: &[f32], rate: u32) -> Optio
             log::warn!("[voice] transcription impossible : {error}");
             None
         }
-    }
-}
-
-/// Synthèse puis lecture. La lecture est bloquante pour `cpal`, donc isolée.
-async fn speak(app: &Arc<App>, text: &str) {
-    let settings: Settings = app.settings();
-    if !settings.tts.enabled {
-        return;
-    }
-    let cleaned = crate::providers::tts::prepare_for_speech(text);
-    if cleaned.is_empty() {
-        return;
-    }
-    let speech = match app
-        .tts
-        .speak(
-            &app.secrets.openrouter_api_key,
-            &settings.tts.model,
-            &settings.tts.voice,
-            &cleaned,
-            settings.tts.chars_per_minute,
-        )
-        .await
-    {
-        Ok(speech) => speech,
-        Err(error) => {
-            log::warn!("[tts] {error}");
-            return;
-        }
-    };
-    let bytes = speech.bytes;
-    if bytes.is_empty() {
-        return;
-    }
-    let sample_rate = speech.sample_rate;
-    let _ = app.avatar.say(text, speech.estimated_ms).await;
-    let outcome = tokio::task::spawn_blocking(move || super::play_bytes(&bytes, sample_rate)).await;
-    if let Ok(Err(error)) = outcome {
-        log::warn!("[voice] lecture impossible : {error}");
     }
 }
 

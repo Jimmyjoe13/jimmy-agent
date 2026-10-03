@@ -285,32 +285,21 @@ async fn niveau_du_micro_pendant_la_parole() {
     runtime.stop();
 }
 
-/// Écoute de bout en bout, sans micro : une phrase synthétisée est injectée
-/// dans le tampon comme si elle venait du micro, atténuée pour imiter un micro
-/// peu sensible, sur un bruit de fond. La vraie boucle d'écoute doit :
-/// détecter la parole (VAD adaptatif), reconnaître « Jimmy », transcrire la
-/// commande avec le modèle précis, faire répondre l'agent.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
-async fn ecoute_reconnait_jimmy_et_repond() {
-    use jimmy_agent::core::types::AgentEvent;
-
-    let Some(app) = app_reel() else {
-        panic!("environnement de test indisponible");
-    };
-    app.ensure_stt().await.expect("serveurs whisper");
+/// Synthétise `texte` et le ramène en mono 16 kHz, au niveau RMS `rms`.
+///
+/// Mesuré : à 0,008 (sous l'ancien seuil fixe de 0,012) le VAD adaptatif se
+/// déclenche bien, mais Whisper comprend mal la phrase *elle-même* (référence
+/// hors écoute : « Qu'est-ce que tu as fait ? » pour « quelle heure est-il »).
+/// Les scénarios utilisent donc 0,02, une voix normale près du micro.
+async fn phrase_16k(app: &App, texte: &str, rms_cible: f32) -> Vec<f32> {
     let settings = app.settings();
-    let debut_test = chrono::Utc::now().to_rfc3339();
-
-    // Phrase synthétisée → mono 16 kHz, ramenée à un RMS de 0,008 (en dessous
-    // de l'ancien seuil fixe de 0,012 : c'est le cas du micro intégré).
     let speech = app
         .tts
         .speak(
             &app.secrets.openrouter_api_key,
             &settings.tts.model,
             &settings.tts.voice,
-            "Jimmy, quelle heure est-il ?",
+            texte,
             settings.tts.chars_per_minute,
         )
         .await
@@ -326,48 +315,120 @@ async fn ecoute_reconnait_jimmy_et_repond() {
         .collect();
     let rms = (phrase.iter().map(|s| s * s).sum::<f32>() / phrase.len() as f32).sqrt();
     for s in phrase.iter_mut() {
-        *s *= 0.008 / rms;
+        *s *= rms_cible / rms;
     }
+    phrase
+}
 
-    // Bruit de fond faible et déterministe (RMS ≈ 0,0015).
-    let mut graine: u32 = 12345;
-    let mut bruit = move |n: usize| -> Vec<f32> {
-        (0..n)
-            .map(|_| {
-                graine = graine.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-                ((graine >> 16) as f32 / 32768.0 - 1.0) * 0.0026
-            })
-            .collect()
-    };
+/// Comme [`phrase_16k`], mais régénère le clip (4 essais au plus) tant que
+/// Whisper n'y entend pas le nom : la synthèse prononce parfois mal
+/// « Jimmy », et aucun détecteur ne retrouve un nom absent de l'audio. Le
+/// test vérifie l'écoute sur une entrée intelligible, pas la diction de Fish.
+async fn phrase_avec_nom(app: &App, texte: &str, rms_cible: f32) -> Vec<f32> {
+    let mut dernier = Vec::new();
+    for essai in 1..=4 {
+        let clip = phrase_16k(app, texte, rms_cible).await;
+        let reference = app
+            .transcribe_command(jimmy_agent::voice::window_to_wav(&clip, 16_000))
+            .await
+            .unwrap_or_default();
+        println!("clip {essai} : « {reference} »");
+        if jimmy_agent::voice::matches_wake_word(&reference, "jimmy") {
+            return clip;
+        }
+        dernier = clip;
+    }
+    dernier
+}
 
+/// Bruit de fond faible et déterministe (RMS ≈ 0,0015), `n` échantillons.
+fn bruit(n: usize, graine: &mut u32) -> Vec<f32> {
+    (0..n)
+        .map(|_| {
+            *graine = graine.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            ((*graine >> 16) as f32 / 32768.0 - 1.0) * 0.0026
+        })
+        .collect()
+}
+
+/// Fait « entendre » `flux` à la vraie boucle d'écoute, en temps réel, et
+/// renvoie (mot d'éveil reconnu, réponse de l'agent). Si `apres_oui` est
+/// fourni, il n'est injecté qu'au signal « Oui ? » de Jimmy — comme une
+/// personne qui attend sa réponse avant de parler.
+async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32>>) -> (bool, String) {
+    use jimmy_agent::core::types::AgentEvent;
+
+    let debut_test = chrono::Utc::now().to_rfc3339();
+    // Référence : ce que Whisper comprend du clip entier, hors boucle
+    // d'écoute. Distingue un clip de synthèse raté d'un bug de l'écoute.
+    let mut tout = flux.clone();
+    if let Some(suite) = &apres_oui {
+        tout.extend_from_slice(suite);
+    }
+    let reference = app
+        .transcribe_command(jimmy_agent::voice::window_to_wav(&tout, 16_000))
+        .await
+        .unwrap_or_default();
+    println!("référence (clip entier) : « {reference} »");
     let runtime = Arc::new(VoiceRuntime::new(16_000));
     runtime.start_without_device();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
     let ecoute = app.clone().spawn_voice_listener(runtime.clone(), tx);
 
-    // Alimentation en temps réel, par blocs de 100 ms : 2 s de fond, la
-    // phrase, puis 4 s de fond pour la fin de phrase.
+    // Alimentation par blocs de 100 ms, au rythme réel. Entre les deux
+    // parties, du bruit de fond jusqu'au signal « Oui ? ».
     let injecteur = runtime.clone();
+    let oui = Arc::new(tokio::sync::Notify::new());
+    let oui_recu = oui.clone();
     let alimentation = tokio::spawn(async move {
-        let mut flux = bruit(32_000);
-        flux.extend_from_slice(&phrase);
-        flux.extend(bruit(64_000));
-        for bloc in flux.chunks(1_600) {
-            injecteur.inject(bloc);
+        let blocs = |donnees: Vec<f32>| donnees.chunks(1_600).map(|c| c.to_vec()).collect::<Vec<_>>();
+        for bloc in blocs(flux) {
+            injecteur.inject(&bloc);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let mut graine = 4242;
+        if let Some(suite) = apres_oui {
+            loop {
+                tokio::select! {
+                    _ = oui_recu.notified() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        injecteur.inject(&bruit(1_600, &mut graine));
+                    }
+                }
+            }
+            // Le temps de réagir au « Oui ? ».
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            for bloc in blocs(suite) {
+                injecteur.inject(&bloc);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+        loop {
+            injecteur.inject(&bruit(1_600, &mut graine));
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     });
 
-    let mut entendu_reveil = false;
+    let mut reveil = false;
     let mut reponse = String::new();
     let limite = tokio::time::Instant::now() + std::time::Duration::from_secs(150);
     while let Ok(Some(event)) = tokio::time::timeout_at(limite, rx.recv()).await {
         match &event {
             AgentEvent::Heard { text, matched } => {
                 println!("entendu ({}) : « {text} »", if *matched { "réveil" } else { "rien" });
-                entendu_reveil |= *matched;
+                reveil |= *matched;
             }
-            AgentEvent::State { state, detail } => println!("état : {state:?} {detail}"),
+            AgentEvent::State { state, detail } => {
+                println!("état : {state:?} {detail}");
+                if detail == "Oui ?" {
+                    oui.notify_one();
+                }
+            }
+            AgentEvent::Notice { message } => println!("avis : {message}"),
+            AgentEvent::ToolStart { name, arguments, .. } => println!("outil : {name} {arguments}"),
+            AgentEvent::ToolEnd { name, ok, duration_ms, summary, .. } => {
+                println!("outil fini : {name} ok={ok} {duration_ms} ms — {}", summary.chars().take(80).collect::<String>())
+            }
             AgentEvent::Final { text } => {
                 println!("réponse : « {text} »");
                 reponse = text.clone();
@@ -381,13 +442,52 @@ async fn ecoute_reconnait_jimmy_et_repond() {
     alimentation.abort();
     ecoute.abort();
 
-    // Nettoyage : la session vocale créée par le test sort de l'historique.
+    // Nettoyage : les sessions vocales créées par le test sortent de l'historique.
     if let Ok(sessions) = app.history.sessions(20) {
         for s in sessions.iter().filter(|s| s.title == "Session vocale" && s.created_at >= debut_test) {
             let _ = app.history.delete_session(&s.id);
         }
     }
+    (reveil, reponse)
+}
 
-    assert!(entendu_reveil, "le mot d'éveil n'a pas été reconnu");
+/// Phrase enchaînée : « Jimmy, quelle heure est-il ? » d'une traite.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_reconnait_jimmy_et_repond() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 12345;
+    let mut flux = bruit(32_000, &mut graine);
+    flux.extend(phrase_avec_nom(&app, "Jimmy, dis-moi bonjour.", 0.02).await);
+
+    let (reveil, reponse) = faire_ecouter(&app, flux, None).await;
+    assert!(reveil, "le mot d'éveil n'a pas été reconnu");
     assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu");
+}
+
+/// Le scénario qui échouait en vrai : « Jimmy » seul, une pause, le « Oui ? »
+/// de Jimmy, puis la commande. Avant le correctif, la boucle s'arrêtait juste
+/// après le « Oui ? » (fenêtre vide après la purge) : plus rien.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_nom_seul_puis_commande() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 777;
+    let mut flux = bruit(32_000, &mut graine);
+    // Un « Jimmy. » de synthèse isolé (0,5 s) est coupé par le VAD de
+    // whisper-server ; une vraie voix passe (journal du 3 octobre, 14:34:53).
+    flux.extend(phrase_avec_nom(&app, "Hé Jimmy !", 0.02).await);
+    // Pause : Jimmy détecte la fin de phrase, répond « Oui ? »… et la
+    // commande n'arrive qu'à ce moment-là.
+    let commande = phrase_16k(&app, "Dis-moi bonjour.", 0.02).await;
+
+    let (reveil, reponse) = faire_ecouter(&app, flux, Some(commande)).await;
+    assert!(reveil, "le mot d'éveil n'a pas été reconnu");
+    assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu après « Oui ? »");
 }

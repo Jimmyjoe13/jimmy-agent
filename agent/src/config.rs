@@ -167,6 +167,9 @@ pub struct AvatarSettings {
     pub godot_exe: String,
     /// Lancement automatique de l'avatar au démarrage de Jimmy.
     pub autostart: bool,
+    /// Jimmy s'écarte quand le curseur approche, puis revient à sa place.
+    #[serde(default = "default_true")]
+    pub dodge: bool,
 }
 
 impl Default for AvatarSettings {
@@ -181,6 +184,7 @@ impl Default for AvatarSettings {
             bridge_port: 8790,
             godot_exe: String::new(),
             autostart: true,
+            dodge: true,
         }
     }
 }

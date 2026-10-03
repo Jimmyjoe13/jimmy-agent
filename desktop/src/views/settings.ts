@@ -150,7 +150,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
         "Voix de sortie",
         h("p", { class: "note" }, "Synthèse Fish Audio via OpenRouter. L'audio ne transite que par le réseau vers ce service."),
         field("Voix", voiceSelect),
-        toggle("Sons d'état (« Oui ? », « C'est prêt. », « Oups… »)", cuesEnabled),
+        toggle("Sons d'état (« Oui ? » quand tu dis son nom, « Oups… » en cas d'échec)", cuesEnabled),
       ),
       card(
         "Écoute",

@@ -2,7 +2,7 @@
 import { api, type DoctorReport, type Memory, type Skill } from "../api";
 import { MEMORY_KIND_LABEL, QUALITY_LABEL, STATE_LABEL, attempt, formatTime, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
-import { card } from "./settings";
+import { card, toggle } from "./settings";
 
 /** Mémoire : ce que Jimmy a retenu, et le droit de l'oublier. */
 export function memoryView(ctx: AppContext): HTMLElement {
@@ -202,6 +202,17 @@ export function skinView(ctx: AppContext): HTMLElement {
   );
 
   const bubbleInput = h("input", { class: "field", value: "Bonjour, je suis Jimmy." }) as HTMLInputElement;
+  const dodgeToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
+  dodgeToggle.checked = ctx.status.avatar.dodge;
+  dodgeToggle.addEventListener("change", async () => {
+    const enabled = dodgeToggle.checked;
+    if (!(await attempt(() => api.avatarDodge(enabled), "esquive"))) {
+      dodgeToggle.checked = !enabled;
+      return;
+    }
+    await ctx.refreshStatus();
+    toast(enabled ? "Jimmy s'écartera à l'approche de la souris" : "Esquive désactivée");
+  });
 
   return h(
     "section",
@@ -223,6 +234,15 @@ export function skinView(ctx: AppContext): HTMLElement {
       ),
     ),
     card("Qualité graphique", h("p", { class: "note" }, "Appliquée immédiatement à l'avatar Godot."), qualityButtons),
+    card(
+      "Comportement",
+      h(
+        "p",
+        { class: "note" },
+        "Seul le personnage capte la souris : le reste de sa fenêtre laisse passer les clics vers le bureau. Avec l'esquive, Jimmy s'écarte quand le curseur approche et revient à sa place ensuite — va le chercher là où il s'est réfugié pour le cliquer.",
+      ),
+      toggle("S'écarter à l'approche de la souris", dodgeToggle),
+    ),
     card(
       "États de l'avatar",
       h(

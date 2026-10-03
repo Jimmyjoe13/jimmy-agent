@@ -85,6 +85,7 @@ export interface Status {
     skin: string;
     skins: { id: string; label: string }[];
     quality: string;
+    dodge: boolean;
     host: string;
     port: number;
     running: boolean;
@@ -181,6 +182,7 @@ export interface AvatarSettings {
   bridge_port: number;
   godot_exe: string;
   autostart: boolean;
+  dodge: boolean;
 }
 
 export interface MemorySettings {
@@ -306,6 +308,7 @@ export const api = {
   avatarSay: (text: string) => invoke<void>("avatar_say", { text }),
   avatarQuality: (level: string) => invoke<void>("avatar_quality", { level }),
   avatarSkin: (skin: string) => invoke<void>("avatar_skin", { skin }),
+  avatarDodge: (enabled: boolean) => invoke<void>("avatar_dodge", { enabled }),
   wakeWordTest: (transcript: string, wakeWord: string) =>
     invoke<boolean>("wake_word_test", { transcript, wakeWord }),
   wakeWordStrip: (transcript: string, wakeWord: string) =>

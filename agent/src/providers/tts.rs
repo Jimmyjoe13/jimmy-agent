@@ -214,6 +214,7 @@ impl Tts {
 
 /// Rend un texte écrit pour l'écran lisible à voix haute.
 pub fn prepare_for_speech(text: &str) -> String {
+    let text = strip_markdown(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -236,6 +237,65 @@ pub fn prepare_for_speech(text: &str) -> String {
         }
     }
     cleaned.trim().to_string()
+}
+
+/// Retire ce qui ne se lit pas à voix haute : blocs de code, balises
+/// Markdown (`**`, `#`, `` ` ``, puces), liens et URL. Sans cela, la synthèse
+/// prononçait « astérisque astérisque » ou des adresses entières.
+pub fn strip_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_code = false;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            if !in_code {
+                out.push_str("(code affiché à l'écran). ");
+            }
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        // Titres et puces : on garde le texte, pas le marqueur.
+        let line = trimmed
+            .trim_start_matches('#')
+            .trim_start_matches(|c| c == '-' || c == '*' || c == '>')
+            .trim_start();
+        out.push_str(line);
+        out.push('\n');
+    }
+    // Liens [texte](url) → texte ; URL nues → « lien ».
+    let mut cleaned = String::with_capacity(out.len());
+    let chars: Vec<char> = out.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '[' {
+            if let Some(close) = chars[i..].iter().position(|&c| c == ']') {
+                let close = i + close;
+                if chars.get(close + 1) == Some(&'(') {
+                    if let Some(end) = chars[close..].iter().position(|&c| c == ')') {
+                        cleaned.extend(&chars[i + 1..close]);
+                        i = close + end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        cleaned.push(chars[i]);
+        i += 1;
+    }
+    let words: Vec<String> = cleaned
+        .split(' ')
+        .map(|w| {
+            if w.starts_with("http://") || w.starts_with("https://") {
+                "lien".to_string()
+            } else {
+                w.replace("**", "").replace("__", "").replace('`', "")
+            }
+        })
+        .collect();
+    words.join(" ")
 }
 
 /// Estimation de durée : le débit retenu lors des essais est d'environ
@@ -319,6 +379,23 @@ struct SpeechResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_non_lu_a_voix_haute() {
+        let texte = "## Résumé
+**Trois** points :
+- un `fichier`
+```rust
+fn main() {}
+```
+Voir [la doc](https://exemple.fr) ou https://x.fr/a";
+        let oral = prepare_for_speech(texte);
+        assert!(!oral.contains('*') && !oral.contains('#') && !oral.contains('`'), "{oral}");
+        assert!(!oral.contains("fn main"), "{oral}");
+        assert!(oral.contains("code affiché"), "{oral}");
+        assert!(oral.contains("la doc") && !oral.contains("https"), "{oral}");
+        assert!(oral.starts_with("Résumé Trois points"), "{oral}");
+    }
 
     #[test]
     fn retours_a_la_ligne_deviennent_des_espaces() {

@@ -81,6 +81,11 @@ impl AvatarClient {
         self.post("/quality", serde_json::json!({ "level": level })).await
     }
 
+    /// Active ou coupe l'esquive du curseur.
+    pub async fn set_dodge(&self, enabled: bool) -> bool {
+        self.post("/dodge", serde_json::json!({ "enabled": enabled })).await
+    }
+
     /// Change le skin de l'avatar ; Godot reconstruit le personnage.
     pub async fn set_skin(&self, skin: &str) -> bool {
         self.post("/skin", serde_json::json!({ "skin": skin })).await

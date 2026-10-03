@@ -28,7 +28,9 @@ pub enum Cue {
 }
 
 impl Cue {
-    pub const ALL: [Cue; 3] = [Cue::Listening, Cue::Answer, Cue::Error];
+    /// Sons pré-générés. `Answer` n'en fait plus partie : le chat lit
+    /// désormais la réponse elle-même.
+    pub const ALL: [Cue; 2] = [Cue::Listening, Cue::Error];
 
     fn id(self) -> &'static str {
         match self {
