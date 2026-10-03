@@ -1,11 +1,11 @@
 # HANDOFF
 
-État du prototype au **3 octobre 2026**.
+État du prototype au **3 octobre 2026**, fin de la session « avatar +
+fonctionnalités ».
 
-**Objectif de la prochaine session :** retravailler la **qualité graphique de
-l'avatar**, puis les **fonctionnalités manquantes**. Les deux sections
-« Priorité 1 » et « Priorité 2 » ci-dessous sont l'état réel, lu dans le code —
-pas une liste d'idées.
+**Objectif de la prochaine session :** trancher les deux décisions du lot 6
+(modèle STT par défaut, embeddings), puis **utiliser Jimmy au quotidien**.
+Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
 
@@ -27,108 +27,58 @@ pas une liste d'idées.
 | Frontend | `npm run build` → TypeScript strict sans erreur |
 | Godot | `--headless` → aucun script en erreur |
 | Binaire release | contient `response_format`, **ne contient plus** l'ancien message MP3 |
+| Rendu avatar (lot 1-2) | `/snapshot` sur les 3 profils, planches avant/après comparées |
+| Skins | `/skin` renard → arctique → fennec → « licorne » refusé, rendu vérifié |
+| Sons d'état | `cargo test --test audio sons_d_etat -- --ignored` : 3 sons en cache, « Oui ? » relu en 267 ms |
+| MCP | `cargo test --test mcp` : serveur Node réel via `cmd /C`, noms normalisés, `isError` remonté |
+| Tests | 37 unitaires + 3 MCP, tous verts (`cargo test --workspace`) |
 
 ---
 
-# Priorité 1 — Qualité graphique de l'avatar
+# Fait pendant cette session (commits 4ebac03 → 8421e6a)
 
-## État réel, mesuré dans le code
+## Avatar
 
-`godot/` pèse **0,03 Mo, 14 fichiers**. `godot/assets/` et `godot/skins/` sont
-**des dossiers vides**. Il n'existe **aucun asset externe** : tout est
-procédural. C'est un choix assumé (zéro fichier à maintenir), mais c'est aussi
-la cause racine de la platitude visuelle.
+- **Cadrage** : caméra à `(0, 1.92, 4.69)`, plongée 8°. Le renard occupait
+  ~35 % de la hauteur, il est ~1,6× plus grand ; la bulle garde le haut.
+- **Rendu** (`main.gd`) : tonemapper **AgX** + saturation 1,18 / contraste
+  1,06 ; **SSAO** réglée à l'échelle du personnage (rayon 0,22), coupée en
+  `low` ; `medium` rendu à pleine résolution (0,85 rendait flou).
+- **Ancrage au sol** : tache de contact (tous profils) + **capteur d'ombre**
+  `shadow_to_opacity` (medium/high). Voir piège 17 avant d'y toucher.
+- **Proportions** (`jimmy.gd`) : `HEAD_Y = 0.30` (cou de girafe à 0,42),
+  bassin, épaules, bras rapprochés (0,135), ventre enfoncé.
+- **Contour** inverted hull (`next_pass`), sauf yeux et cônes (piège 18).
+- **Tessellation** ×1 / ×1,5 / ×2 selon le profil : `set_detail` reconstruit
+  le personnage à chaud. Les trois profils diffèrent enfin par la géométrie.
+- **Fourrure** : `rim` + normal map générée par `NoiseTexture2D` — toujours
+  **zéro asset** dans le dépôt.
+- **Route `/snapshot`** `{"path": "..."}` : PNG du rendu, alpha compris. C'est
+  l'outil de comparaison avant/après (pas besoin du premier plan, piège 16).
 
-**Géométrie** — primitives brutes, `godot/scripts/jimmy.gd:243-287` :
-`_sphere`, `_capsule`, `_cone`, `_box`. La tessellation est **codée en dur et
-basse** : capsules 16 segments / 6 anneaux, cônes 16 / 4, sphères 12 à 24
-(`jimmy.gd:246-266`).
+Leviers restants, par gain : visage plus expressif (sourcils, reflets dans
+les yeux), mains et pieds moins « billes », bascule des ombres en `high`
+vers des ombres plus douces (PCSS). TAA écarté : Jimmy bouge sans arrêt, il
+traînerait ; le MSAA 4× suffit en `high`.
 
-**Matériaux** — 7 `StandardMaterial3D` dans `_make_materials()`
-(`jimmy.gd:224-241`) : couleur unie + `roughness` (0,30 à 0,95) +
-`metallic_specular = 0.35`. **Aucune texture, aucune normal map, aucune
-variation.** C'est la limite n°1 du rendu.
+## Fonctions
 
-**Profils graphiques** — `godot/scripts/main.gd:15-19` ne pilotent que cinq
-choses :
-
-| | low | medium | high |
-|---|---|---|---|
-| `scaling_3d_scale` | 0,62 | **0,85** | 1,0 |
-| `msaa_3d` | désactivé | 2× | 4× |
-| ombres | non | oui | oui |
-| glow | non | non | oui |
-| `Engine.max_fps` | 30 | 60 | 60 |
-
-Conséquence à assumer : **`high` n'est pas plus fin, seulement plus net et
-plus lumineux.** Aucun preset ne touche la géométrie ni les matériaux. Et en
-`medium`, la 3D est rendue à 0,85 puis agrandie — d'où le côté légèrement
-flou en profil par défaut.
-
-**Rendu** — `main.gd:91-97` : fond transparent, lumière ambiante couleur,
-tonemapper **FILMIC**. **Pas d'occlusion ambiante, pas de SDFGI, pas
-d'ajustements (contraste/saturation), pas de brouillard.**
-
-**Éclairage** — 3 sources (`main.gd:104-126`) : une `DirectionalLight3D`
-(clé, ombres) + deux `OmniLight3D` (contre-jour bleu, remplissage chaud). La
-boucle de preset met `shadow_enabled` sur **les trois**
-(`main.gd:332-334`), sans configurer quoi que ce soit pour les omni : coût
-pur, aucun bénéfice.
-
-**Pas de sol.** Le fond est transparent : l'ombre ne peut pas se poser. Elle ne
-produit que de l'auto-ombrage. Le personnage flotte donc au-dessus du bureau
-sans point de contact.
-
-`use_taa = false` est câblé en dur (`main.gd:330`), alors que le MSAA est
-justement faible sur un fond transparent.
-
-## Leviers, classés par rapport gain / effort
-
-1. **Occlusion ambiante** — un bloc de config dans `main.gd`. Pour un
-   personnage fait de primitives empilées, c'est *le* levier : aujourd'hui le
-   bras, la queue et les jambes lisent comme des autocollants flottants, sans
-   contact. Le meilleur gain par ligne de code.
-2. **Ombre de contact au sol** — une ellipse sombre sous les pieds. Puisqu'il
-   n'y a pas de sol, aucune vraie ombre ne peut atterrir. C'est ce qui ancre le
-   personnage sur le bureau.
-3. **Tonemapper** — FILMIC désature et grise les aplats. Passer à ACES ou
-   LINEAR + un ajustement de saturation. Deux lignes, effet couleur immédiat.
-4. **Contour (inverted hull)** — le style qui rend un personnage procédural
-   lisible au-dessus d'un bureau chargé.
-5. **Ombres des omni** — soit les configurer, soit les exclure de la boucle
-   `main.gd:332-334`. Aujourd'hui : coût sans retour.
-6. **Tessellation liée au profil** — faible gain (le personnage fait ~150 px
-   de large), mais elle rendrait l'affirmation « 3 profils » honnête.
-7. **Matériaux** — la fourrure veut une normal map ou un shader de bruit, et
-   de la variation de rugosité. **Ce serait le tout premier asset du projet** :
-   à faire quand la structure d'assets sera décidée.
-8. **TAA** — `use_taa` câblé en faux ; utile sur les bords alpha.
-
-## Animation : ne pas repartir de zéro
-
-Les 8 états sont dans `POSES` (`jimmy.gd:28-78`) et `_apply_pose`
-(`jimmy.gd:169-219`) anime ~15 canaux : respiration, balancement, mâchoire,
-clignement, suivi du curseur, remuage en cascade de la queue. Ajouter un état
-ne demande **qu'une entrée dans `POSES`** — c'est le point d'extension prévu
-par le PLAN. Ne pas réécrire ce système pour gagner en qualité graphique.
-
----
-
-# Priorité 2 — Fonctionnalités
-
-État réel, vérifié dans le code :
-
-| Manque | État réel | Où l'attaquer |
+| Sujet | État | Où |
 |---|---|---|
-| **Peaux** | **Inopérant.** `/skin` ne fait qu'`print` et ne reconstruit rien (`main.gd:237-241`). `skins/` est vide. | reconstruire la scène, pas seulement changer une variable |
-| **Sons d'état** | **Aucun.** Pas de dossier `assets/` à la racine. | 3 fichiers : écoute, réponse, erreur |
-| **MCP** | Config seule. `agent/src/mcp/mod.rs` (12 Ko), `mcp_servers: []`, types déclarés dans `api.ts:187,206`, **aucune commande, aucun transport HTTP** | transport HTTP + `mcp_add_server` |
-| **Mémoire vectorielle** | `memory/embed.rs` = *hashing trick* (FNV, constante `0xcbf29ce484222325`). Rapproche les mots, pas les synonymes. | `MemoryStore` |
-| **STT `small-q5`** | **Présent sur disque** (181 Mo) et **sélectionnable** (`stt.rs:25`), mais le défaut reste `base-q5` (57 Mo) | deux serveurs, ou rechargement de modèle |
-| **Permissions** | Globales (LECTURE / MODIFICATION / EXÉCUTION / RÉSEAU). Pas de raffinement par outil ou par service | la structure de règles est déjà là |
+| **Skins** | **Réel.** renard, arctique, fennec (`ear_scale`), appliqués à chaud. Avant : `set_skin` Rust jamais appelé, `/skin` faisait un `print`. | `jimmy.gd` `SKINS` + `providers::avatar::SKINS` (garder alignés) |
+| **Sons d'état** | **Réel.** « Oui ? » / « C'est prêt. » / « Oups… » synthétisés avec la voix TTS courante, cache `data/audio/cues/`. Réglage `tts.cues`. | `agent/src/voice/cues.rs` |
+| **MCP** | **Réel en stdio.** Outils exposés au modèle, `mcp_add_server`, connexion au démarrage. Le client existait mais n'était branché nulle part. | `agent/src/tools/mcp.rs`, `agent/src/mcp/mod.rs` |
+| MCP HTTP | Non fait. Le stdio couvre presque tout le catalogue. | `McpRegistry::ensure` |
+| Mémoire vectorielle | Inchangée (hashing trick). **Décision attendue**, voir étapes. | `memory/embed.rs` |
+| STT `small-q5` | Inchangé. **Décision attendue**, voir étapes. | `stt.rs:25` |
+| Permissions | Globales. MCP passe par EXÉCUTION, cible `mcp:<serveur>` : un serveur précis peut être interdit par `deny_commands`. | `permissions.rs` |
 
-Outils d'agent déjà en place : `cli.rs`, `fs.rs`, `knowledge.rs`, `net.rs`,
-`skills.rs`.
+**Comportement des sons, choisi exprès :** « Oui ? » ne joue que si
+« Jimmy » est dit **seul** puis une pause. Le micro est alors purgé (sinon le
+haut-parleur repasse dans la commande) et l'écoute accorde 3,5 s de grâce. Si
+la commande suit directement le wake word, aucun son : il couperait la parole.
+En vocal, réponse et erreur sont déjà dites à voix haute ; « C'est prêt. » et
+« Oups » ne servent qu'au chat texte.
 
 ---
 
@@ -234,41 +184,73 @@ derrière — ici la messagerie du travail. **Toujours vérifier
 Pour capturer une fenêtre masquée, utiliser `PrintWindow(h, hdc, 2)` : il rend
 la fenêtre même occultée, sans passer par le premier plan.
 
+**17. `shadow_to_opacity` : albedo noir = plan invisible.**
+Lu dans `scene_forward_clustered.glsl` (Godot 4.5.1, l. 2054 et 2634) :
+l'alpha est plafonné par `length(ambient_light * albedo)`. Albedo noir → alpha
+0 partout. Et chaque lumière **sans ombre** qui touche le plan l'efface
+(`alpha = min(alpha, 1 - attenuation)`). Recette qui marche : albedo blanc,
+`metallic = 1` (annule l'ambiante dans la couleur, appliqué *après* l'alpha),
+plan sur le calque 2, omni avec `light_cull_mask = 1`.
+
+**18. Contour inverted hull sur un cône = éclats.**
+`CylinderMesh` a des normales non lissées entre flanc et base : la coque
+gonflée se fend en éclats visibles (oreilles). `_cone()` utilise donc
+`_without_outline()`. Même règle pour tout futur `BoxMesh`.
+
+**19. `with-msvc.ps1` et la redirection de stderr.**
+Avec `$ErrorActionPreference = 'Stop'`, toute ligne écrite sur stderr par une
+commande native (le « Compiling » de cargo, le message `vswhere` de vcvars)
+devient une erreur bloquante **dès que l'appelant redirige** (`> log 2>&1`).
+Corrigé : `'Continue'` juste avant l'appel natif. Seul `$LASTEXITCODE` fait foi.
+
+**20. PowerShell avale le `--` de `cargo test -- --ignored`.**
+Passé à un script `.ps1`, `--` est consommé comme fin de paramètres. Écrire
+`'--'` entre guillemets : `.\scripts\with-msvc.ps1 cargo test --test audio x '--' --ignored`.
+
+**21. Sous Windows, `npx`/`uvx` ne se lancent pas avec `Command::new`.**
+Ce sont des `.cmd`. Le lanceur MCP passe par `cmd /D /C` sauf pour un `.exe`
+explicite. Le test `--test mcp` lance `node` sans extension pour couvrir ce
+chemin.
+
+**22. Le piège 11 s'est répété trois fois.**
+`set_skin` (Rust) jamais appelé, `McpRegistry` jamais instancié, qualité et
+skin des Paramètres jamais poussés à Godot. Avant de dire « c'est en place »,
+chercher **l'appelant**, pas seulement la définition.
+
 ---
 
 ## Prochaines étapes
 
-### Priorité 1 — l'avatar doit cesser de ressembler à un assemblage de primitives
+### Décisions à prendre (lot 6)
 
-1. **Occlusion ambiante + ombre de contact au sol.** Le plus gros gain
-   perceptible, quasi tout dans `main.gd`. Reprendre `QUALITY_PRESETS`
-   (`main.gd:15-19`) pour que l'AO se dégrade avec le profil.
-2. **Tonemapper + saturation.** Abandonner FILMIC pour un rendu qui garde
-   l'orange du renard.
-3. **Contour** et **densité de maillage liée au profil**, pour que `high` soit
-   réellement plus fin.
-4. Décider si l'on introduit un premier asset (normal map de fourrure). C'est
-   le moment de créer une vraie structure `godot/assets/`, aujourd'hui vide.
+1. **STT `small-q5` par défaut ?** Le wake word et la commande partagent le
+   même modèle, par conception (un seul `whisper-server`). `small` transcrit
+   mieux mais coûte ~3 s de plus **sur chaque fenêtre de wake word**. Options :
+   garder `base` ; passer à `small` ; ou deux serveurs (`base` pour le wake
+   word, `small` pour la commande, ~180 Mo de RAM en plus).
+2. **Embeddings sémantiques ?** Piste : l'endpoint `/v1/embeddings` de LM
+   Studio (`localhost:1234`), déjà utilisé par SynaptiQ. Mais Jimmy
+   dépendrait alors d'un service lancé à côté. Garder le hashing trick en
+   repli si LM Studio ne répond pas.
 
-### Priorité 2 — les fonctions
+### Ensuite
 
-5. **Sons d'état** : trois petits fichiers, fort effet sur le ressenti.
-6. **Rendre le changement de peau réel** : `/skin` doit reconstruire la scène.
-   C'est ce qui débloquera les skins sans toucher à Rust.
-7. **MCP** : transport HTTP + `mcp_add_server`.
-8. **Mémoire** : vrai modèle d'embeddings dans `embed.rs`.
-9. **Brancher `small-q5`** par défaut pour la transcription de commande.
-
-### À faire en parallèle
-
-10. **Utiliser Jimmy au quotidien une semaine.** C'est le seul test qui compte
-    pour la question du PLAN : est-ce que la voix apporte quelque chose ?
+3. **Utiliser Jimmy au quotidien une semaine** — le seul test qui compte.
+4. Vérifier en conditions réelles le son « Oui ? » (écho haut-parleur → micro
+   selon la machine) et un serveur MCP réel (`npx -y
+   @modelcontextprotocol/server-filesystem <dossier>`).
+5. Vue MCP dans l'interface (le statut expose déjà `mcp.servers` et
+   `mcp.tools`).
+6. `collect_utterance` (`listener.rs`) ajoute à chaque pas les 900 dernières
+   ms alors que le pas fait 450 ms : chaque morceau d'audio entre **deux fois**
+   dans le tampon. Whisper s'en accommode visiblement, mais c'est à vérifier
+   avant d'accuser le modèle d'une mauvaise transcription.
 
 ### Différé
 
-11. Export Godot (~1 Go de gabarits) pour que l'installateur n'installe pas le
-    moteur complet.
-12. Mise à jour automatique, quand il existera une distribution.
+7. Export Godot (~1 Go de gabarits) pour que l'installateur n'installe pas le
+   moteur complet.
+8. Mise à jour automatique, quand il existera une distribution.
 
 ---
 
