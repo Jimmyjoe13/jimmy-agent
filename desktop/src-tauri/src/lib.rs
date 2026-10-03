@@ -120,6 +120,16 @@ pub fn run() {
                     });
                 }
 
+                // Serveurs MCP : connectés en tâche de fond, leurs outils
+                // rejoignent le registre dès qu'ils répondent.
+                if !app.mcp.is_empty() {
+                    let app_for_mcp = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let count = app_for_mcp.start_mcp().await;
+                        log::info!("[mcp] {count} outil(s) disponible(s)");
+                    });
+                }
+
                 if !settings.ui.first_run_done {
                     // Premier lancement : on montre l'interface pour l'onboarding.
                     if let Some(window) = handle.get_webview_window("main") {

@@ -48,6 +48,8 @@ pub struct App {
     pub tts: Tts,
     pub avatar: AvatarClient,
     pub registry: Arc<ToolRegistry>,
+    /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
+    pub mcp: Arc<mcp::McpRegistry>,
     pub synaptiq: Option<Arc<SynaptiqClient>>,
     /// Verrous asynchrones : ces deux champs sont utilisés à travers des
     /// `await`, un `std::sync::Mutex` rendrait la future non `Send`.
@@ -90,16 +92,37 @@ impl App {
             None
         };
 
-        let mut registry = ToolRegistry::new();
+        let registry = Arc::new(ToolRegistry::new());
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .user_agent("jimmy/0.1 (desktop agent)")
             .build()?;
         registry.register_defaults(&ToolDeps { http });
 
+        // MCP : seuls les serveurs activés sont connus du registre. Leurs
+        // outils n'arrivent qu'au démarrage effectif (`start_mcp`), car il
+        // faut lancer chaque processus pour les lister.
+        let mcp = mcp::McpRegistry::new(
+            settings
+                .mcp_servers
+                .iter()
+                .filter(|s| s.enabled)
+                .map(tools::mcp::server_from_settings)
+                .collect(),
+        );
+        // Les paramètres sont partagés dès maintenant : `mcp_add_server`
+        // persiste les serveurs qu'il ajoute.
+        let shared_settings = Arc::new(RwLock::new(settings.clone()));
+        registry.register(Arc::new(tools::mcp::McpAddServer::new(
+            mcp.clone(),
+            Arc::downgrade(&registry),
+            shared_settings.clone(),
+            paths.clone(),
+        )));
+
         Ok(Arc::new(App {
             paths,
-            settings: Arc::new(RwLock::new(settings)),
+            settings: shared_settings,
             secrets: Arc::new(secrets),
             db,
             history,
@@ -108,11 +131,18 @@ impl App {
             llm,
             tts,
             avatar,
-            registry: Arc::new(registry),
+            registry,
+            mcp,
             synaptiq,
             stt: tokio::sync::Mutex::new(None),
             godot: tokio::sync::Mutex::new(None),
         }))
+    }
+
+    /// Connecte les serveurs MCP configurés et ajoute leurs outils au
+    /// registre. Renvoie le nombre d'outils ajoutés.
+    pub async fn start_mcp(&self) -> usize {
+        tools::mcp::connect_all(&self.mcp, &self.registry).await
     }
 
     pub fn settings(&self) -> Settings {
@@ -325,6 +355,10 @@ impl App {
                 }))
                 .collect::<Vec<_>>(),
             "tools": self.registry.names(),
+            "mcp": {
+                "servers": self.mcp.server_names(),
+                "tools": self.registry.names().iter().filter(|n| n.starts_with("mcp_")).count(),
+            },
             "skills": self.skills.list().map(|s| s.len()).unwrap_or(0),
             "first_run_done": settings.ui.first_run_done,
         })

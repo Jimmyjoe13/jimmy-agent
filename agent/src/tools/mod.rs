@@ -12,6 +12,7 @@
 pub mod cli;
 pub mod fs;
 pub mod knowledge;
+pub mod mcp;
 pub mod net;
 pub mod skills;
 
@@ -77,45 +78,63 @@ pub trait Tool: Send + Sync {
 }
 
 /// Catalogue d'outils. L'agent interroge le registre, jamais l'inverse.
+///
+/// Le catalogue est modifiable après le démarrage : les outils MCP arrivent
+/// quand leurs serveurs ont répondu, ou quand Jimmy en ajoute un. Verrou
+/// synchrone, jamais tenu à travers un `await` (on clone les `Arc`).
 #[derive(Default)]
 pub struct ToolRegistry {
-    tools: Vec<Arc<dyn Tool>>,
+    tools: RwLock<Vec<Arc<dyn Tool>>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        ToolRegistry { tools: Vec::new() }
+        ToolRegistry::default()
     }
 
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
+    fn snapshot(&self) -> Vec<Arc<dyn Tool>> {
+        self.tools.read().map(|t| t.clone()).unwrap_or_default()
+    }
+
+    pub fn register(&self, tool: Arc<dyn Tool>) {
         let name = tool.name().to_string();
-        self.tools.retain(|t| t.name() != name);
-        self.tools.push(tool);
+        if let Ok(mut tools) = self.tools.write() {
+            tools.retain(|t| t.name() != name);
+            tools.push(tool);
+        }
+    }
+
+    /// Retire les outils dont le nom commence par `prefix` (ex. les outils
+    /// d'un serveur MCP remplacé).
+    pub fn unregister_prefix(&self, prefix: &str) {
+        if let Ok(mut tools) = self.tools.write() {
+            tools.retain(|t| !t.name().starts_with(prefix));
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.iter().find(|t| t.name() == name).cloned()
+        self.snapshot().into_iter().find(|t| t.name() == name)
     }
 
     pub fn specs(&self) -> Vec<ToolSpec> {
-        self.tools.iter().map(|t| t.spec()).collect()
+        self.snapshot().iter().map(|t| t.spec()).collect()
     }
 
     pub fn names(&self) -> Vec<String> {
-        self.tools.iter().map(|t| t.name().to_string()).collect()
+        self.snapshot().iter().map(|t| t.name().to_string()).collect()
     }
 
     pub fn len(&self) -> usize {
-        self.tools.len()
+        self.snapshot().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
+        self.snapshot().is_empty()
     }
 
     /// Enregistre les outils de base. Appelé au démarrage ; les outils MCP
     /// viennent s'y ajouter ensuite.
-    pub fn register_defaults(&mut self, deps: &ToolDeps) {
+    pub fn register_defaults(&self, deps: &ToolDeps) {
         self.register(Arc::new(fs::ListDirectory));
         self.register(Arc::new(fs::ReadFile));
         self.register(Arc::new(fs::WriteFile));

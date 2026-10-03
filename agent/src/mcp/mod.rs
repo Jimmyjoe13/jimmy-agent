@@ -16,7 +16,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -45,10 +46,21 @@ impl McpServer {
 #[derive(Debug, Clone)]
 pub struct McpTool {
     pub server: String,
+    /// Nom exposé au modèle : `mcp_<serveur>__<outil>`, normalisé.
     pub name: String,
+    /// Nom d'origine côté serveur, utilisé pour l'appel (il peut contenir des
+    /// caractères refusés par l'API du modèle, comme `.` ou `/`).
+    pub remote_name: String,
     pub description: String,
     pub input_schema: Value,
 }
+
+/// Délais d'attente. Sans eux, un serveur muet bloquait l'agent indéfiniment.
+/// L'initialisation est longue : `npx -y` télécharge le paquet au premier
+/// lancement.
+const INIT_TIMEOUT: Duration = Duration::from_secs(90);
+const LIST_TIMEOUT: Duration = Duration::from_secs(30);
+const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Connexion active à un serveur MCP.
 struct Connection {
@@ -59,24 +71,49 @@ struct Connection {
 }
 
 pub struct McpRegistry {
-    servers: Vec<McpServer>,
+    /// Verrou synchrone : jamais tenu à travers un `await` (on clone la liste).
+    servers: RwLock<Vec<McpServer>>,
     connections: Mutex<HashMap<String, Connection>>,
 }
 
 impl McpRegistry {
     pub fn new(servers: Vec<McpServer>) -> Arc<Self> {
         Arc::new(McpRegistry {
-            servers,
+            servers: RwLock::new(servers),
             connections: Mutex::new(HashMap::new()),
         })
     }
 
+    fn servers(&self) -> Vec<McpServer> {
+        self.servers.read().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    fn find(&self, name: &str) -> Option<McpServer> {
+        // Le nom peut arriver normalisé (depuis un nom d'outil préfixé).
+        self.servers()
+            .into_iter()
+            .find(|s| s.name == name || sanitize(&s.name) == name)
+    }
+
     pub fn server_names(&self) -> Vec<String> {
-        self.servers.iter().map(|s| s.name.clone()).collect()
+        self.servers().iter().map(|s| s.name.clone()).collect()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.servers.is_empty()
+        self.servers().is_empty()
+    }
+
+    /// Ajoute (ou remplace) un serveur. Une connexion existante portant le
+    /// même nom est fermée : la prochaine utilisation relancera le processus.
+    pub async fn add_server(&self, server: McpServer) {
+        if let Ok(mut servers) = self.servers.write() {
+            servers.retain(|s| s.name != server.name);
+            servers.push(server.clone());
+        }
+        let mut connections = self.connections.lock().await;
+        if let Some(mut old) = connections.remove(&server.name) {
+            let _ = old.child.kill().await;
+        }
     }
 
     /// Démarre le serveur si nécessaire et renvoie l'identifiant de session.
@@ -96,9 +133,8 @@ impl McpRegistry {
             .split_first()
             .ok_or_else(|| Error::Mcp(format!("{} : commande vide", server.name)))?;
 
-        let mut command = Command::new(program);
+        let mut command = launcher(program, args);
         command
-            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -128,7 +164,7 @@ impl McpRegistry {
             next_id: 1,
         };
 
-        let _result = rpc(
+        let _result = rpc_within(
             &mut connection,
             "initialize",
             json!({
@@ -136,6 +172,7 @@ impl McpRegistry {
                 "capabilities": {"tools": {}},
                 "clientInfo": {"name": "jimmy", "version": env!("CARGO_PKG_VERSION")},
             }),
+            INIT_TIMEOUT,
         )
         .await?;
         // La spécification impose cet accusé avant tout appel ultérieur.
@@ -146,38 +183,46 @@ impl McpRegistry {
         Ok(server.name.clone())
     }
 
-    /// Outils exposés par l'ensemble des serveurs activés.
+    /// Outils exposés par l'ensemble des serveurs. Un serveur en panne est
+    /// journalisé et ignoré : il ne doit pas priver Jimmy des autres.
     pub async fn list_tools(&self) -> Vec<McpTool> {
         let mut out = Vec::new();
-        for server in &self.servers {
-            let name = server.name.clone();
-            let mut connections = self.connections.lock().await;
-            if !connections.contains_key(&name) {
-                drop(connections);
-                if self.ensure(server).await.is_err() {
-                    continue;
-                }
-                connections = self.connections.lock().await;
+        for server in self.servers() {
+            match self.list_server_tools(&server.name).await {
+                Ok(tools) => out.extend(tools),
+                Err(error) => log::warn!("[mcp] {} indisponible : {error}", server.name),
             }
-            let Some(connection) = connections.get_mut(&name) else {
+        }
+        out
+    }
+
+    /// Outils d'un serveur, en le démarrant si besoin.
+    pub async fn list_server_tools(&self, server_name: &str) -> Result<Vec<McpTool>> {
+        let server = self
+            .find(server_name)
+            .ok_or_else(|| Error::Mcp(format!("serveur inconnu : {server_name}")))?;
+        let name = server.name.clone();
+        self.ensure(&server).await?;
+        let mut connections = self.connections.lock().await;
+        let connection = connections
+            .get_mut(&name)
+            .ok_or_else(|| Error::Mcp("connexion perdue".into()))?;
+        let value = rpc_within(connection, "tools/list", json!({}), LIST_TIMEOUT).await?;
+        let tools = value
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for tool in tools {
+            let Some(tool_name) = tool.get("name").and_then(|n| n.as_str()) else {
                 continue;
             };
-            let Ok(value) = rpc(connection, "tools/list", json!({})).await else {
-                continue;
-            };
-            let tools = value
-                .get("tools")
-                .and_then(|t| t.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for tool in tools {
-                let Some(tool_name) = tool.get("name").and_then(|n| n.as_str()) else {
-                    continue;
-                };
-                out.push(McpTool {
-                    server: name.clone(),
-                    name: format!("mcp_{}__{}", sanitize(&name), tool_name),
-                    description: tool
+            out.push(McpTool {
+                server: name.clone(),
+                name: format!("mcp_{}__{}", sanitize(&name), sanitize(tool_name)),
+                remote_name: tool_name.to_string(),
+                description: tool
                         .get("description")
                         .and_then(|d| d.as_str())
                         .unwrap_or("Outil MCP")
@@ -185,32 +230,46 @@ impl McpRegistry {
                     input_schema: tool
                         .get("inputSchema")
                         .cloned()
-                        .unwrap_or_else(|| json!({"type": "object", "properties": {}})),
-                });
-            }
+                    .unwrap_or_else(|| json!({"type": "object", "properties": {}})),
+            });
         }
-        out
+        Ok(out)
     }
 
     /// Appelle un outil exposé par un serveur, via son nom préfixé.
     pub async fn call_tool(&self, prefixed_name: &str, arguments: &Value) -> Result<String> {
         let (server_name, tool_name) = split_prefixed(prefixed_name)?;
+        self.call(&server_name, &tool_name, arguments).await
+    }
+
+    /// Appelle `tool` (nom d'origine) sur `server_name`.
+    pub async fn call(&self, server_name: &str, tool: &str, arguments: &Value) -> Result<String> {
         let server = self
-            .servers
-            .iter()
-            .find(|s| s.name == server_name)
+            .find(server_name)
             .ok_or_else(|| Error::Mcp(format!("serveur inconnu : {server_name}")))?;
-        self.ensure(server).await?;
+        self.ensure(&server).await?;
         let mut connections = self.connections.lock().await;
         let connection = connections
-            .get_mut(&server_name)
+            .get_mut(&server.name)
             .ok_or_else(|| Error::Mcp("connexion perdue".into()))?;
-        let value = rpc(
+        let outcome = rpc_within(
             connection,
             "tools/call",
-            json!({ "name": tool_name, "arguments": arguments }),
+            json!({ "name": tool, "arguments": arguments }),
+            CALL_TIMEOUT,
         )
-        .await?;
+        .await;
+        if outcome.is_err() {
+            // Après un délai dépassé, la réponse tardive désynchroniserait le
+            // flux : on repart d'un processus neuf au prochain appel.
+            if let Some(mut dead) = connections.remove(&server.name) {
+                let _ = dead.child.kill().await;
+            }
+        }
+        let value = outcome?;
+        if value.get("isError").and_then(|e| e.as_bool()) == Some(true) {
+            return Err(Error::Mcp(render_result(&value)));
+        }
         Ok(render_result(&value))
     }
 
@@ -275,6 +334,30 @@ async fn notify(connection: &mut Connection, method: &str, params: Value) -> Res
     connection.stdin.write_all(line.as_bytes()).await?;
     connection.stdin.flush().await?;
     Ok(())
+}
+
+/// Construit la commande de lancement. Sous Windows, `npx`, `uvx` et la
+/// plupart des lanceurs sont des scripts `.cmd` : `CreateProcess` ne les trouve
+/// pas sans extension. On passe alors par `cmd /C`, sauf pour un `.exe`
+/// explicite.
+fn launcher(program: &str, args: &[String]) -> Command {
+    #[cfg(windows)]
+    {
+        if !program.to_ascii_lowercase().ends_with(".exe") {
+            let mut command = Command::new("cmd");
+            command.arg("/D").arg("/C").arg(program).args(args);
+            return command;
+        }
+    }
+    let mut command = Command::new(program);
+    command.args(args);
+    command
+}
+
+async fn rpc_within(connection: &mut Connection, method: &str, params: Value, limit: Duration) -> Result<Value> {
+    tokio::time::timeout(limit, rpc(connection, method, params))
+        .await
+        .map_err(|_| Error::Mcp(format!("{method} : pas de réponse en {} s", limit.as_secs())))?
 }
 
 async fn rpc(connection: &mut Connection, method: &str, params: Value) -> Result<Value> {
@@ -357,6 +440,12 @@ mod tests {
     fn nom_serveur_normalise_sans_double_tiret() {
         assert_eq!(sanitize("docker gateway"), "docker_gateway");
         assert_eq!(sanitize("a--b"), "a_b");
+    }
+
+    #[test]
+    fn nom_d_outil_normalise_pour_l_api() {
+        // L'API du modèle n'accepte que [a-zA-Z0-9_-] dans un nom d'outil.
+        assert_eq!(sanitize("files.read/v2"), "files_read_v2");
     }
 
     #[test]
