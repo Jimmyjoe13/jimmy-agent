@@ -130,10 +130,13 @@ func set_state(new_state: String) -> void:
 	state = key
 
 
-## Dur��e forcée de l'animation « speaking » (le temps de lire la bulle).
-func speak_for(seconds: float) -> void:
+## Durée forcée de l'animation « speaking » (le temps de lire la bulle).
+## Renvoie la durée réellement retenue.
+func speak_for(seconds: float) -> float:
 	set_state(SPEAKING)
-	_say_until = _t + maxf(0.4, seconds)
+	var effective := maxf(0.4, seconds)
+	_say_until = _t + effective
+	return effective
 
 
 ## Direction du regard, normalisée dans [-1, 1] (suit le curseur).

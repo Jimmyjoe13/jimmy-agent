@@ -35,6 +35,6 @@ if (-not (Test-Path $vcvars)) { throw "vcvars64.bat introuvable dans $installPat
 
 # On construit une ligne de commande unique : `vcvars64` n'expose que des
 # variables d'environnement, il doit donc s'exécuter dans le même shell.
-$cmdLine = "`"$vcvars`" >nul && set `"PATH=$cargoBin;%PATH%`" && " + ($Command -join ' ')
+$cmdLine = "`"$vcvars`" >nul 2>nul && set `"PATH=$cargoBin;%PATH%`" && " + ($Command -join ' ')
 & cmd.exe /d /s /c $cmdLine
 exit $LASTEXITCODE
