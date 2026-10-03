@@ -32,14 +32,6 @@ pub async fn bootstrap(state: State<'_, AppState>) -> std::result::Result<serde_
     let app = state.app.clone();
     let status = app.status();
 
-    // Premier lancement : on lance l'avatar, mais on n'ouvre surtout pas le
-    // micro tout seul. L'onboarding demande.
-    if app.settings().avatar.enabled && app.settings().avatar.autostart {
-        if let Err(error) = app.start_avatar().await {
-            log::warn!("[avatar] {}", error);
-        }
-    }
-
     Ok(serde_json::json!({
         "status": status,
         "voices": TtsVoice::PRESETS.iter().map(|v| serde_json::json!({

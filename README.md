@@ -201,14 +201,30 @@ cd desktop; npm install; cd ..
 
 ## Lancement
 
+### Le plus simple : le raccourci Bureau
+
+Un raccourci **Jimmy** est posé sur le bureau. Un double-clic lance
+l'application avec son avatar, sans fenêtre de console et sans compilation.
+
+Pour le (re)créer, ou gérer le démarrage automatique :
+
 ```powershell
-.\scripts\dev.ps1
+.\scripts\shortcut.ps1                # crée le raccourci Bureau
+.\scripts\shortcut.ps1 -Autostart     # ajoute le démarrage avec Windows
+.\scripts\shortcut.ps1 -Remove        # supprime le raccourci
 ```
 
-Ou, pour la version installée :
+Le raccourci pointe sur `scripts/launcher.ps1`, qui lance le binaire release
+(`target/release/jimmy.exe`). Si ce binaire n'existe pas encore, il propose de
+le compiler plutôt que d'échouer en silence.
+
+> Le binaire de **debug** n'est pas un repli possible : en développement il
+> attend un serveur Vite, que le raccourci ne lance pas.
+
+### En développement
 
 ```powershell
-jimmy.exe
+.\scripts\dev.ps1
 ```
 
 Au premier lancement, Jimmy :

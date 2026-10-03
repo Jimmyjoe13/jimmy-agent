@@ -7,20 +7,33 @@
 # Build Tools qui fournissent leur propre environnement.
 
 [CmdletBinding()]
-param([switch]$Release)
+param(
+    [switch]$Release,
+    # Produit en plus l'installateur NSIS. Plus long, et demande NSIS.
+    [switch]$Bundles
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
 if ($Release) {
-    Write-Host "Compilation release…" -ForegroundColor Cyan
-    & (Join-Path $root 'scripts\with-msvc.ps1') cargo build --release --message-format short
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
     Push-Location (Join-Path $root 'desktop')
-    npm run build | Out-Host
-    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
-    & (Join-Path $root 'scripts\with-msvc.ps1') npx tauri build --bundles nsis
+
+    if ($Bundles) {
+        # Installateur Windows complet (nécessite NSIS, téléchargé au besoin).
+        & (Join-Path $root 'scripts\with-msvc.ps1') npx tauri build --bundles nsis
+        $code = $LASTEXITCODE
+        Pop-Location
+        exit $code
+    }
+
+    # Binaire autonome pour le raccourci Bureau.
+    #
+    # `tauri build` et non `cargo build --release` : c'est la CLI Tauri qui
+    # embarque les assets du frontend dans le binaire. Avec `cargo build` seul,
+    # la fenêtre en release continue de viser `devUrl` et affiche « Impossible
+    # d'accéder à cette page » — le binaire démarre, mais sans interface.
+    & (Join-Path $root 'scripts\with-msvc.ps1') npx tauri build --no-bundle
     $code = $LASTEXITCODE
     Pop-Location
     exit $code

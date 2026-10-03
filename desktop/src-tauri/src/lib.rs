@@ -106,6 +106,20 @@ pub fn run() {
                 handle.manage(state);
                 handle.manage(Arc::new(VoiceRuntime::new(settings.voice.input_sample_rate)));
 
+                // L'avatar démarre ici, et non dans la commande `bootstrap` :
+                // Jimmy doit être sur le bureau même si l'interface n'a pas
+                // encore fini de charger, ou si elle échoue. C'est le seul
+                // élément visible de l'application — tout le reste peut
+                // attendre.
+                if settings.avatar.enabled && settings.avatar.autostart {
+                    let app_for_avatar = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = app_for_avatar.start_avatar().await {
+                            log::warn!("[avatar] {error}");
+                        }
+                    });
+                }
+
                 if !settings.ui.first_run_done {
                     // Premier lancement : on montre l'interface pour l'onboarding.
                     if let Some(window) = handle.get_webview_window("main") {

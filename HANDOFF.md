@@ -54,6 +54,16 @@ ne réveille pas Jimmy.
 Il occupe le port 8178. Une instance de Jimmy lancée en arrière-plan empêche le
 démarrage. Vérifier avec `Get-Process whisper`.
 
+**7. `frontendDist` ne doit apparaître qu'une seule fois.**
+Un doublon dans `tauri.conf.json` fait gagner `devUrl` au build release : la
+fenêtre affiche « Impossible d'accéder à cette page ». Symptôme trompeur, car le
+démarrage paraît correct et seule l'interface manque.
+
+**8. L'avatar ne doit pas dépendre du frontend.**
+Il est lancé dans `setup()` (Rust), pas dans la commande `bootstrap`. La fenêtre
+peut mettre du temps à charger, ou échouer : Jimmy doit malgré tout être sur le
+bureau.
+
 ---
 
 ## Prochaines étapes, par valeur
@@ -94,9 +104,33 @@ démarrage. Vérifier avec `Get-Process whisper`.
 
 ```powershell
 .\scripts\install.ps1          # vérifications
-.\scripts\dev.ps1              # lancer Jimmy
+.\scripts\dev.ps1              # lancer Jimmy (développement)
 .\scripts\build.ps1            # compiler
 .\scripts\build.ps1 -Release   # release + installateur NSIS
 .\scripts\test-happy.ps1       # test de bout en bout
+.\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\with-msvc.ps1 cargo test
 ```
+
+---
+
+## Lancement depuis le bureau
+
+`scripts/shortcut.ps1` crée `Jimmy.lnk` sur le Bureau (OneDriveDesktop inclus).
+Il cible `scripts/launcher.ps1`, qui démarre `target/release/jimmy.exe` en
+arrière-plan — aucune fenêtre de console.
+
+**Ce qui a été corrigé pour que cela marche :**
+
+- **L'avatar ne démarrait pas en release.** Il était lancé depuis la commande
+  `bootstrap`, c'est-à-dire par le JavaScript de l'interface. Or la fenêtre peut
+  mettre du temps à charger, ou échouer : Jimmy n'apparaissait jamais sur le
+  bureau. Le démarrage a été déplacé dans `setup()`, côté Rust. C'est le seul
+  élément visible de l'application, il ne doit dépendre de rien d'autre.
+- **`devUrl` écrasait les assets embarqués.** En release, la fenêtre tentait de
+  charger `localhost:1420` et affichait « Impossible d'accéder à cette page ».
+  `frontendDist` doit être déclaré **une seule fois** dans `tauri.conf.json` ;
+  un doublon fait gagner `devUrl` et casse le build release.
+
+**Le binaire debug n'est pas un repli** : il attend le serveur Vite. Le
+lanceur affiche un message clair et propose de compiler.
