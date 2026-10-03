@@ -26,6 +26,10 @@ pub struct LlmSettings {
     /// Température ; `None` = réglage par défaut du fournisseur.
     pub temperature: Option<f32>,
     pub max_tokens: u32,
+    /// Modèle utilisé pour les échanges vocaux (vide = le modèle principal).
+    /// Utile pour un modèle plus rapide à voix haute, plus puissant à l'écrit.
+    #[serde(default)]
+    pub voice_model: String,
     /// Nombre maximum d'allers-retours agent/outils sur une demande.
     pub max_iterations: u32,
     /// Préfixe d'identifiant de session envoyé dans `x-opencode-session`.
@@ -39,6 +43,7 @@ impl Default for LlmSettings {
             base_url: "https://opencode.ai/zen/go/v1".into(),
             temperature: None,
             max_tokens: 4096,
+            voice_model: String::new(),
             max_iterations: 12,
             session_prefix: "jimmy".into(),
         }

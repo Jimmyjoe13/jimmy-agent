@@ -114,7 +114,7 @@ pub async fn run(
     }))];
 
     // 2. Historique récent de la session.
-    messages.extend(deps.history.messages(&session_id, 20)?);
+    messages.extend(deps.history.conversation(&session_id, 20)?);
     messages.push(Message::user(request.clone()));
 
     deps.history
@@ -136,7 +136,17 @@ pub async fn run(
     } else {
         settings.llm.max_iterations.max(1)
     };
-    let deadline = started + Duration::from_secs(600);
+    // À voix haute, une longue exploration est une panne silencieuse : 90 s au
+    // plus, puis réponse avec ce qu'on a (mesuré : 139 s d'attente sur « analyse
+    // ce dossier »).
+    let deadline = started + Duration::from_secs(if deps.voice { 90 } else { 600 });
+    // Modèle vocal facultatif : un modèle plus rapide pour la conversation.
+    let model = if deps.voice && !settings.llm.voice_model.trim().is_empty() {
+        settings.llm.voice_model.trim().to_string()
+    } else {
+        settings.llm.model.clone()
+    };
+    let mut completed = false;
     let mut cache: HashMap<String, String> = HashMap::new();
     let mut tools_used: Vec<String> = Vec::new();
     let mut final_text = String::new();
@@ -154,16 +164,32 @@ pub async fn run(
         }
 
         let call_started = Instant::now();
-        let reply = deps
+        let first_try = deps
             .llm
-            .chat(
-                &settings.llm.model,
-                &messages,
-                &specs,
-                settings.llm.temperature,
-                settings.llm.max_tokens,
-            )
-            .await?;
+            .chat(&model, &messages, &specs, settings.llm.temperature, settings.llm.max_tokens)
+            .await;
+        let reply = match first_try {
+            Ok(reply) => reply,
+            // Filet de sécurité : si le fournisseur refuse la requête (400) dès
+            // le premier appel, l'historique est suspect — on réessaie avec la
+            // seule demande plutôt que de laisser la conversation morte.
+            Err(error) if iteration == 0 && is_bad_request(&error) && messages.len() > 2 => {
+                log::warn!("[agent] requête refusée, historique ignoré pour ce tour : {error}");
+                emit(
+                    &mut events,
+                    AgentEvent::Notice {
+                        message: "L'historique de cette conversation a été ignoré (requête refusée).".into(),
+                    },
+                )
+                .await;
+                let system = messages.remove(0);
+                messages = vec![system, Message::user(request.clone())];
+                deps.llm
+                    .chat(&model, &messages, &specs, settings.llm.temperature, settings.llm.max_tokens)
+                    .await?
+            }
+            Err(error) => return Err(error),
+        };
         log::info!(
             "[agent] appel au modèle n°{} en {} ms ({} outil(s), {} caractères ; jetons : {} en entrée, {} en sortie)",
             iteration + 1,
@@ -183,6 +209,7 @@ pub async fn run(
             deps.history
                 .append(&session_id, &Message::assistant(reply.content.clone()))
                 .catch();
+            completed = true;
             break;
         }
 
@@ -273,6 +300,39 @@ pub async fn run(
         }
     }
 
+    // Limite d'étapes ou de temps atteinte : le dernier texte du modèle n'était
+    // souvent qu'une phrase d'annonce (« Je lis la documentation… »), lue telle
+    // quelle à voix haute. Un dernier appel, sans outil, lui demande de conclure
+    // avec ce qu'il a trouvé. Et la réponse entre dans l'historique : sans cela,
+    // le tour suivant voyait une question restée sans réponse.
+    if !completed {
+        emit(
+            &mut events,
+            AgentEvent::Notice { message: "Limite atteinte : je conclus avec ce que j'ai trouvé.".into() },
+        )
+        .await;
+        messages.push(Message::user(
+            "Tu as atteint la limite d'étapes pour cette demande. Réponds maintenant, sans appeler d'outil, \
+             avec ce que tu as trouvé : sois bref, et dis honnêtement ce qu'il reste à faire."
+                .to_string(),
+        ));
+        if let Ok(reply) = deps
+            .llm
+            .chat(&model, &messages, &[], settings.llm.temperature, settings.llm.max_tokens)
+            .await
+        {
+            if !reply.content.trim().is_empty() {
+                final_text = reply.content.trim().to_string();
+            }
+        }
+        if final_text.is_empty() {
+            final_text = "Je n'ai pas pu terminer cette demande dans le temps imparti.".into();
+        }
+        deps.history
+            .append(&session_id, &Message::assistant(final_text.clone()))
+            .catch();
+    }
+
     if final_text.is_empty() {
         final_text = "Je n'ai pas pu formuler de réponse à cette demande.".into();
     }
@@ -330,6 +390,11 @@ pub async fn run(
         tools_used,
         duration_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// La requête a-t-elle été refusée par le fournisseur (HTTP 400) ?
+fn is_bad_request(error: &Error) -> bool {
+    matches!(error, Error::Provider { message, .. } if message.contains("HTTP 400"))
 }
 
 async fn execute(

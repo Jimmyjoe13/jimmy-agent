@@ -504,6 +504,43 @@ plafonné à 0,007, retombe en ~2 min). Si Jimmy réagit encore à des bruits :
 activer « Garder les 40 derniers extraits audio » (Paramètres → Écoute) et
 écouter `data/audio/debug/`.
 
+**45. L'historique rechargé ne doit JAMAIS contenir d'outils (HTTP 400).**
+Cause de « HTTP 400 invalid request » en plein usage : `History::messages`
+rechargeait les messages `tool` sans leur `tool_call_id` (jamais stocké) et la
+coupure à 20 messages laissait des résultats orphelins en tête. L'API refuse
+les deux. `History::conversation` ne renvoie que les demandes et les réponses
+finales (et le contexte passe de 15 k à ~3 k jetons). `messages()` reste
+complet pour l'interface. Reproduit par le test ignoré
+`historique_avec_outils_ne_casse_pas_la_conversation` (tour 2 en échec avant le
+correctif, 3 tours OK après). Filet de sécurité : sur un 400 au premier appel,
+nouvel essai sans historique (`is_bad_request`).
+
+**46. Limite d'étapes ≠ réponse.** Quand la boucle s'arrête sans réponse sans
+outil (6 étapes ou 90 s en vocal), le dernier texte du modèle n'est qu'une
+phrase d'annonce (« Je lis la documentation… »). Un dernier appel sans outil
+lui demande de conclure ; la réponse est enregistrée dans l'historique.
+
+**47. `localhost` coûte 2,3 s sous Windows quand le port est fermé** (IPv6 puis
+IPv4). LM Studio éteint = chaque rappel de mémoire +2,3 s. `127.0.0.1` +
+`connect_timeout` de 500 ms dans `SemanticEmbedder`.
+
+**48. Bibliothèque de modèles : le catalogue public est organisé PAR
+FOURNISSEUR** (`api.json` → `opencode-go` → `models`). L'ancien code lisait une
+clé `models` à la racine : la liste était toujours vide. La liste vient
+maintenant de `GET {base_url}/models` (ce que le compte peut utiliser, 36
+modèles), enrichie par le catalogue (32/36). `ModelTest` teste comme Jimmy :
+requête simple puis avec outil — `grok-4.6` et `muse-spark-*` répondent
+« Model does not support this protocol » (HTTP 400) et sont inutilisables.
+**`id` doit rester l'identifiant COURT** (`space-bunny-free`) : une première
+version renvoyait `opencode-go/space-bunny-free` ; choisir un modèle l'aurait
+écrit dans la configuration et cassé toutes les requêtes (rattrapé par la suite
+UI, qui vérifie maintenant la valeur enregistrée).
+
+**49. La latence du fournisseur est corrélée dans le temps.** Une requête
+couverte (2e requête après 3 s) ne gagne rien. Un modèle vocal plus rapide
+(`llm.voice_model`, Paramètres → Modèles) est le seul levier ; tester avant de
+croire une latence mesurée à un instant donné.
+
 ---
 
 ## Prochaines étapes
@@ -548,7 +585,7 @@ activer « Garder les 40 derniers extraits audio » (Paramètres → Écoute) et
 .\scripts\build.ps1 -Release -Bundles   # + installateur NSIS
 .\scripts\test-happy.ps1       # test de bout en bout + chaîne audio
 .\scripts\test-happy.ps1 -SkipAudio
-.\scripts\test-ui.ps1        # 14 parcours UI sur la vraie application (CDP)
+.\scripts\test-ui.ps1        # 15 parcours UI sur la vraie application (CDP)
 .\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_ '--' --ignored --nocapture --test-threads=1
 .\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\shortcut.ps1 -Autostart   # démarrage avec Windows

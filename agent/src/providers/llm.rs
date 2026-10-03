@@ -20,11 +20,40 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelInfo {
     pub id: String,
-    /// Identifiant complet `provider/model`, celui qu'on stocke en config.
+    /// Identifiant complet `fournisseur/modèle` (compatibilité).
     pub full_id: String,
     pub name: String,
+    pub description: String,
+    pub family: String,
+    /// Fenêtre de contexte, en jetons (0 = inconnue).
     pub context: u64,
     pub free: bool,
+    pub reasoning: bool,
+    /// `None` : modèle absent du catalogue public, capacité inconnue.
+    pub tool_call: Option<bool>,
+    pub vision: bool,
+    /// Prix en dollars par million de jetons.
+    pub cost_input: f64,
+    pub cost_output: f64,
+    pub released: String,
+    /// Présent dans le catalogue public (sinon : nom et capacités inconnus).
+    pub in_catalog: bool,
+}
+
+/// Résultat du test fonctionnel d'un modèle (voir [`LlmClient::test_model`]).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelTest {
+    pub model: String,
+    /// Répond à une requête simple.
+    pub ok: bool,
+    /// Accepte une requête avec outils (ce dont Jimmy a besoin pour agir).
+    pub tools: bool,
+    pub latency_ms: u64,
+    pub tools_latency_ms: u64,
+    pub reply: String,
+    /// Vide si tout va bien.
+    pub error: String,
+    pub tested_at: String,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -45,6 +74,8 @@ pub struct LlmClient {
     base_url: String,
     api_key: String,
     session_id: String,
+    /// Catalogue public (plusieurs Mo) gardé 1 h en mémoire.
+    catalog: std::sync::Mutex<Option<(std::time::Instant, serde_json::Value)>>,
 }
 
 impl LlmClient {
@@ -58,6 +89,7 @@ impl LlmClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             session_id: session_id.to_string(),
+            catalog: std::sync::Mutex::new(None),
         })
     }
 
@@ -185,59 +217,221 @@ impl LlmClient {
         Ok(reply.content.trim().to_string())
     }
 
-    /// Catalogue des modèles OpenCode Go, mis en cache par l'appelant.
-    pub async fn list_models(&self, provider: &str) -> Result<Vec<ModelInfo>> {
-        #[derive(Deserialize)]
-        struct Catalog {
-            #[serde(default)]
-            models: std::collections::HashMap<String, CatalogModel>,
-        }
-        #[derive(Deserialize)]
-        struct CatalogModel {
-            #[serde(default)]
-            name: String,
-            #[serde(default)]
-            limit: Option<Limit>,
-            #[serde(default)]
-            cost: Option<Cost>,
-        }
-        #[derive(Deserialize)]
-        struct Limit {
-            #[serde(default)]
-            context: u64,
-        }
-        #[derive(Deserialize)]
-        struct Cost {
-            #[serde(default)]
-            input: f64,
-            #[serde(default)]
-            output: f64,
-        }
+    /// Modèles utilisables, enrichis par le catalogue public.
+    ///
+    /// La **liste vient du compte** (`GET {base_url}/models`) : c'est ce que le
+    /// fournisseur accepte réellement. Le catalogue public
+    /// (`models.opencode.ai/api.json`, organisé par fournisseur) n'ajoute que le
+    /// nom, le contexte, le prix et les capacités. L'ancienne version lisait
+    /// une clé `models` à la racine du catalogue, qui n'existe pas : la liste
+    /// était toujours vide.
+    pub async fn list_models(&self, refresh: bool) -> Result<Vec<ModelInfo>> {
+        let account = self.account_models().await;
+        let catalog = self.catalog_models(refresh).await;
+        let ids: Vec<String> = match (&account, &catalog) {
+            (Ok(ids), _) if !ids.is_empty() => ids.clone(),
+            (_, Ok(models)) => models.keys().cloned().collect(),
+            (Err(error), _) => return Err(Error::provider("OpenCode Go", error.to_string())),
+            _ => Vec::new(),
+        };
+        let catalog = catalog.unwrap_or_default();
 
+        let mut out: Vec<ModelInfo> = ids
+            .into_iter()
+            .map(|id| {
+                let entry = catalog.get(&id);
+                let text = |key: &str| {
+                    entry.and_then(|e| e.get(key)).and_then(|v| v.as_str()).unwrap_or("").to_string()
+                };
+                let flag = |key: &str| entry.and_then(|e| e.get(key)).and_then(|v| v.as_bool());
+                let cost = |key: &str| {
+                    entry
+                        .and_then(|e| e.get("cost"))
+                        .and_then(|c| c.get(key))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0)
+                };
+                let vision = entry
+                    .and_then(|e| e.get("modalities"))
+                    .and_then(|m| m.get("input"))
+                    .and_then(|i| i.as_array())
+                    .is_some_and(|inputs| inputs.iter().any(|v| v.as_str() == Some("image")));
+                let name = text("name");
+                let (cost_input, cost_output) = (cost("input"), cost("output"));
+                ModelInfo {
+                    full_id: format!("opencode-go/{id}"),
+                    name: if name.is_empty() { id.clone() } else { name },
+                    description: text("description"),
+                    family: text("family"),
+                    context: entry
+                        .and_then(|e| e.get("limit"))
+                        .and_then(|l| l.get("context"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                    free: id.contains("free") || (entry.is_some() && cost_input == 0.0 && cost_output == 0.0),
+                    reasoning: flag("reasoning").unwrap_or(false),
+                    tool_call: flag("tool_call"),
+                    vision,
+                    cost_input,
+                    cost_output,
+                    released: text("release_date"),
+                    in_catalog: entry.is_some(),
+                    id,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(out)
+    }
+
+    /// Identifiants des modèles accessibles avec cette clé.
+    async fn account_models(&self) -> Result<Vec<String>> {
         let response = self
             .http
-            .get("https://models.opencode.ai/api.json")
+            .get(format!("{}/models", self.base_url))
+            .headers(self.auth_headers())
+            .timeout(Duration::from_secs(20))
             .send()
             .await
             .map_err(|e| Error::provider("OpenCode Go", e.to_string()))?;
-        let catalog: Catalog = response
+        if !response.status().is_success() {
+            return Err(Error::provider("OpenCode Go", format!("HTTP {}", response.status())));
+        }
+        let value: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| Error::provider("OpenCode Go", e.to_string()))?;
+            .map_err(|e| Error::provider("OpenCode Go", format!("liste illisible : {e}")))?;
+        Ok(value
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|items| items.iter().filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from)).collect())
+            .unwrap_or_default())
+    }
 
-        let mut out: Vec<ModelInfo> = catalog
-            .models
-            .into_iter()
-            .map(|(id, model)| ModelInfo {
-                full_id: format!("{provider}/{id}"),
-                id,
-                name: model.name,
-                context: model.limit.map(|l| l.context).unwrap_or(0),
-                free: model.cost.map(|c| c.input == 0.0 && c.output == 0.0).unwrap_or(false),
-            })
-            .collect();
-        out.sort_by(|a, b| (&a.free, &a.name).cmp(&(&b.free, &b.name)));
-        Ok(out)
+    /// Entrées du fournisseur `opencode-go` dans le catalogue public.
+    async fn catalog_models(
+        &self,
+        refresh: bool,
+    ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+        let cached = if refresh {
+            None
+        } else {
+            self.catalog
+                .lock()
+                .ok()
+                .and_then(|c| c.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(3600)).map(|(_, v)| v.clone()))
+        };
+        let catalog = match cached {
+            Some(value) => value,
+            None => {
+                let value: serde_json::Value = self
+                    .http
+                    .get("https://models.opencode.ai/api.json")
+                    .timeout(Duration::from_secs(30))
+                    .send()
+                    .await
+                    .map_err(|e| Error::provider("catalogue des modèles", e.to_string()))?
+                    .json()
+                    .await
+                    .map_err(|e| Error::provider("catalogue des modèles", e.to_string()))?;
+                // Seul le fournisseur utile est gardé : le fichier complet
+                // décrit des centaines de fournisseurs.
+                let ours = value.get("opencode-go").cloned().unwrap_or(serde_json::Value::Null);
+                if let Ok(mut slot) = self.catalog.lock() {
+                    *slot = Some((std::time::Instant::now(), ours.clone()));
+                }
+                ours
+            }
+        };
+        Ok(catalog
+            .get("models")
+            .and_then(|m| m.as_object())
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default())
+    }
+
+    /// Teste un modèle avec **les mêmes conditions que Jimmy** : une requête
+    /// simple, puis la même requête avec un outil déclaré (`tool_choice: auto`).
+    /// Plusieurs modèles du fournisseur répondent à la première et refusent la
+    /// seconde en HTTP 400 : ils seraient inutilisables pour agir.
+    pub async fn test_model(&self, model: &str) -> ModelTest {
+        let simple = serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": "Réponds uniquement par le mot : ok" }],
+            "max_tokens": 128,
+            "stream": false,
+        });
+        let mut with_tools = simple.clone();
+        with_tools["tools"] = serde_json::json!([{
+            "type": "function",
+            "function": {
+                "name": "ping",
+                "description": "Outil de test, à ne pas utiliser.",
+                "parameters": { "type": "object", "properties": {} },
+            },
+        }]);
+        with_tools["tool_choice"] = serde_json::json!("auto");
+
+        let (plain, tools) = tokio::join!(self.timed_request(&simple), self.timed_request(&with_tools));
+        let (ok, latency_ms, reply, plain_error) = match plain {
+            Ok((ms, reply)) => (true, ms, reply, String::new()),
+            Err(error) => (false, 0, String::new(), error),
+        };
+        let (tools_ok, tools_latency_ms, tools_error) = match tools {
+            Ok((ms, _)) => (true, ms, String::new()),
+            Err(error) => (false, 0, error),
+        };
+        ModelTest {
+            model: model.to_string(),
+            ok,
+            tools: tools_ok,
+            latency_ms,
+            tools_latency_ms,
+            reply,
+            error: if !ok {
+                plain_error
+            } else if !tools_ok {
+                format!("n'accepte pas les outils : {tools_error}")
+            } else {
+                String::new()
+            },
+            tested_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Une requête chronométrée. `Ok((durée en ms, texte de la réponse))`.
+    async fn timed_request(&self, body: &serde_json::Value) -> std::result::Result<(u64, String), String> {
+        let started = std::time::Instant::now();
+        let response = self
+            .http
+            .post(format!("{}/chat/completions", self.base_url))
+            .headers(self.auth_headers())
+            .timeout(Duration::from_secs(40))
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| if e.is_timeout() { "pas de réponse en 40 s".to_string() } else { e.to_string() })?;
+        let status = response.status();
+        let raw = response.text().await.map_err(|e| e.to_string())?;
+        let elapsed = started.elapsed().as_millis() as u64;
+        if !status.is_success() {
+            // Le message du serveur (jamais la clé) : « HTTP 400 — invalid request ».
+            let message = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).map(String::from))
+                .unwrap_or_else(|| truncate(&raw, 160));
+            return Err(format!("HTTP {} — {}", status.as_u16(), truncate(&message, 160)));
+        }
+        let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("réponse illisible : {e}"))?;
+        let choice = value.get("choices").and_then(|c| c.get(0)).ok_or("aucun choix dans la réponse")?;
+        let text = choice
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        Ok((elapsed, text))
     }
 }
 

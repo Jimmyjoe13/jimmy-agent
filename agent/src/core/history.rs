@@ -116,6 +116,39 @@ impl History {
         Ok(out)
     }
 
+    /// La **conversation** d'une session, prête à être renvoyée au modèle :
+    /// les messages de l'utilisateur et les réponses finales de Jimmy, sans les
+    /// appels d'outils ni leurs résultats.
+    ///
+    /// Cause de l'erreur « HTTP 400 invalid request » vécue en usage réel :
+    /// l'historique complet était rechargé tel quel, avec deux défauts. Les
+    /// messages `tool` perdaient leur `tool_call_id` (jamais stocké), et la
+    /// troncature aux 20 derniers messages laissait des résultats d'outils
+    /// orphelins en tête de séquence. L'API refuse les deux. Les outils d'un
+    /// tour précédent n'ont d'ailleurs aucune utilité : la réponse finale les
+    /// résume, et les renvoyer faisait grossir le contexte de 3 k à 15 k jetons.
+    pub fn conversation(&self, session_id: &str, limit: usize) -> Result<Vec<Message>> {
+        let mut out: Vec<Message> = self
+            .messages(session_id, usize::MAX)?
+            .into_iter()
+            .filter(|m| match m.role {
+                Role::User => !m.content.trim().is_empty(),
+                Role::Assistant => {
+                    m.tool_calls.as_ref().map_or(true, |calls| calls.is_empty()) && !m.content.trim().is_empty()
+                }
+                _ => false,
+            })
+            .collect();
+        if out.len() > limit {
+            out.drain(..out.len() - limit);
+        }
+        // La séquence doit commencer par l'utilisateur.
+        while out.first().is_some_and(|m| m.role != Role::User) {
+            out.remove(0);
+        }
+        Ok(out)
+    }
+
     pub fn sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn.conn().prepare(
@@ -141,5 +174,98 @@ impl History {
             params![session_id],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::types::ToolCall;
+
+    fn history() -> History {
+        let db = Arc::new(Mutex::new(Db::open_in_memory().expect("db")));
+        History::new(db)
+    }
+
+    /// Un tour avec outils, tel que l'agent l'enregistre : demande, appel
+    /// d'outil, résultats, réponse finale.
+    fn tour_avec_outils(h: &History, session: &str, demande: &str, reponse: &str, outils: usize) {
+        h.append(session, &Message::user(demande)).unwrap();
+        let mut appel = Message::assistant("Je regarde.");
+        appel.tool_calls = Some(
+            (0..outils)
+                .map(|i| ToolCall {
+                    id: format!("call_{i}"),
+                    name: "list_directory".into(),
+                    arguments: serde_json::json!({ "path": "." }),
+                })
+                .collect(),
+        );
+        h.append(session, &appel).unwrap();
+        for i in 0..outils {
+            h.append(session, &Message::tool_result(format!("call_{i}"), "list_directory", "contenu")).unwrap();
+        }
+        h.append(session, &Message::assistant(reponse)).unwrap();
+    }
+
+    /// La conversation ne contient jamais d'outil : ni appel, ni résultat.
+    #[test]
+    fn la_conversation_ne_contient_aucun_outil() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        tour_avec_outils(&h, &s, "Analyse le dossier", "Voilà.", 3);
+        let conv = h.conversation(&s, 20).unwrap();
+        assert_eq!(conv.len(), 2, "{conv:?}");
+        assert_eq!(conv[0].role, Role::User);
+        assert_eq!(conv[1].role, Role::Assistant);
+        assert!(conv.iter().all(|m| m.tool_calls.is_none() && m.role != Role::Tool));
+    }
+
+    /// Le cas réel : plusieurs tours avec beaucoup d'outils, puis une fenêtre
+    /// de 20 messages qui, avant la correction, commençait par des résultats
+    /// d'outils orphelins. La séquence doit toujours commencer par l'utilisateur
+    /// et alterner sans trou.
+    #[test]
+    fn la_fenetre_ne_commence_jamais_par_un_orphelin() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        for i in 0..6 {
+            tour_avec_outils(&h, &s, &format!("Demande {i}"), &format!("Réponse {i}"), 4);
+        }
+        // L'ancienne fenêtre brute de 20 messages, pour prouver que le test
+        // couvre bien le défaut : elle débute par un résultat d'outil.
+        // 6 tours × 7 messages = 42 ; les 19 derniers débutent à l'indice 23,
+        // soit le 3e message d'un tour : un résultat d'outil.
+        let brut = h.messages(&s, 19).unwrap();
+        assert_eq!(brut[0].role, Role::Tool, "le scénario doit reproduire l'orphelin");
+
+        for limite in [1, 2, 3, 5, 20] {
+            let conv = h.conversation(&s, limite).unwrap();
+            assert!(conv.first().map_or(true, |m| m.role == Role::User), "limite {limite} : {conv:?}");
+            assert!(conv.len() <= limite);
+        }
+    }
+
+    /// Une demande restée sans réponse (limite atteinte, avant la correction)
+    /// ne casse rien et la dernière réponse est conservée.
+    #[test]
+    fn les_tours_sans_reponse_finale_sont_tolerés() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        h.append(&s, &Message::user("Première demande")).unwrap();
+        h.append(&s, &Message::user("Deuxième demande")).unwrap();
+        h.append(&s, &Message::assistant("Réponse")).unwrap();
+        let conv = h.conversation(&s, 20).unwrap();
+        assert_eq!(conv.len(), 3);
+        assert_eq!(conv[0].role, Role::User);
+    }
+
+    /// L'interface continue d'afficher l'historique complet.
+    #[test]
+    fn l_historique_complet_reste_disponible_pour_l_interface() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        tour_avec_outils(&h, &s, "Analyse", "Fini", 2);
+        assert_eq!(h.messages(&s, 500).unwrap().len(), 1 + 1 + 2 + 1);
     }
 }

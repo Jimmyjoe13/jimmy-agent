@@ -70,7 +70,7 @@ export interface Status {
   dev: boolean;
   data_dir: string;
   workspace: string;
-  llm: { model: string; base_url: string; has_key: boolean };
+  llm: { model: string; voice_model?: string; base_url: string; has_key: boolean };
   tts: {
     enabled: boolean;
     model: string;
@@ -118,11 +118,38 @@ export interface ChatMessage {
 }
 
 export interface ModelInfo {
+  /** Identifiant complet `fournisseur/modèle` (compatibilité onboarding). */
   id: string;
+  /** Identifiant à stocker et à envoyer au fournisseur. */
   model: string;
+  full_id: string;
   name: string;
+  description: string;
+  family: string;
+  /** Fenêtre de contexte en jetons (0 = inconnue). */
   context: number;
   free: boolean;
+  reasoning: boolean;
+  /** `null` : absent du catalogue public, capacité inconnue. */
+  tool_call: boolean | null;
+  vision: boolean;
+  /** Dollars par million de jetons. */
+  cost_input: number;
+  cost_output: number;
+  released: string;
+  in_catalog: boolean;
+}
+
+/** Résultat du test fonctionnel d'un modèle (requête simple, puis avec outils). */
+export interface ModelTest {
+  model: string;
+  ok: boolean;
+  tools: boolean;
+  latency_ms: number;
+  tools_latency_ms: number;
+  reply: string;
+  error: string;
+  tested_at: string;
 }
 
 export interface DoctorCheck {
@@ -140,6 +167,8 @@ export interface DoctorReport {
 
 export interface LlmSettings {
   model: string;
+  /** Modèle des échanges vocaux (vide = le modèle principal). */
+  voice_model: string;
   base_url: string;
   temperature: number | null;
   max_tokens: number;
@@ -287,7 +316,9 @@ export const api = {
   deleteSession: (sessionId: string) => invoke<void>("delete_session", { sessionId }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
-  listModels: () => invoke<ModelInfo[]>("list_models"),
+  listModels: (refresh = false) => invoke<ModelInfo[]>("list_models", { refresh }),
+  llmTestModel: (model: string) => invoke<ModelTest>("llm_test_model", { model }),
+  setLlmModel: (role: "main" | "voice", model: string) => invoke<void>("set_llm_model", { role, model }),
   completeOnboarding: (payload: {
     userName: string;
     model: string;

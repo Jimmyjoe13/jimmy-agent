@@ -684,3 +684,93 @@ async fn exporter_clips_de_test() {
         println!("clip{i} : {:.1} s", clip.len() as f32 / 16_000.0);
     }
 }
+
+/// Reproduit l'erreur « HTTP 400 invalid request » vécue en usage réel : une
+/// demande qui appelle des outils, puis une seconde dans la **même session**.
+/// L'historique rechargé contenait des messages d'outils sans leur
+/// `tool_call_id` (jamais stocké) et, après troncature à 20 messages, des
+/// résultats d'outils orphelins : l'API refuse cette séquence.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "consulte le modèle de langage réel"]
+async fn historique_avec_outils_ne_casse_pas_la_conversation() {
+    use jimmy_agent::core::types::AgentEvent;
+
+    let _ = env_logger::Builder::new().filter_level(log::LevelFilter::Info).is_test(false).try_init();
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    let session = app.history.create_session("test historique outils").expect("session");
+
+    for (n, demande) in [
+        "Utilise l'outil list_directory sur le dossier de travail puis dis-moi combien d'éléments tu y vois, en une phrase.",
+        "Merci. En une phrase, rappelle-moi ce que tu viens de trouver.",
+        "Et un dernier mot pour conclure.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
+        let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let resultat = jimmy_agent::core::agent::run(
+            app.deps(),
+            app.settings(),
+            session.clone(),
+            demande.to_string(),
+            app.tool_context(),
+            tx,
+        )
+        .await;
+        let _ = drain.await;
+        match &resultat {
+            Ok(reponse) => println!("tour {} OK ({} outil(s)) : « {} »", n + 1, reponse.tools_used.len(), reponse.text.chars().take(80).collect::<String>()),
+            Err(erreur) => println!("tour {} ÉCHEC : {erreur}", n + 1),
+        }
+        if n == 0 {
+            // Garantit que le tour 1 a bien utilisé un outil : sinon le test ne prouve rien.
+            assert!(resultat.as_ref().map(|r| !r.tools_used.is_empty()).unwrap_or(false), "le tour 1 doit appeler un outil");
+        }
+        let faute = resultat.err();
+        if faute.is_some() {
+            let _ = app.history.delete_session(&session);
+        }
+        assert!(faute.is_none(), "tour {} : {}", n + 1, faute.map(|e| e.to_string()).unwrap_or_default());
+    }
+    let _ = app.history.delete_session(&session);
+}
+
+/// Bibliothèque de modèles sur le compte réel : la liste vient du compte,
+/// enrichie par le catalogue public, et chaque modèle peut être testé dans les
+/// conditions de Jimmy (requête simple puis avec outils).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "consulte OpenCode Go et le catalogue public"]
+async fn bibliotheque_de_modeles_reelle() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    let modeles = app.llm.list_models(true).await.expect("liste des modèles");
+    let enrichis = modeles.iter().filter(|m| m.in_catalog).count();
+    println!("{} modèles, {enrichis} enrichis par le catalogue", modeles.len());
+    assert!(modeles.len() >= 20, "la liste est vide ou tronquée : {}", modeles.len());
+    assert!(enrichis * 10 >= modeles.len() * 7, "trop peu de modèles reconnus par le catalogue");
+    let actuel = app.settings().llm.model;
+    let courant = modeles.iter().find(|m| m.id == actuel).expect("le modèle configuré doit figurer dans la liste");
+    println!("modèle courant : {} — {} (contexte {}, raisonne : {})", courant.id, courant.name, courant.context, courant.reasoning);
+    assert!(courant.context > 0 && !courant.name.is_empty());
+
+    // Le modèle courant doit être fonctionnel ; un modèle inexistant doit échouer proprement.
+    let bon = app.llm.test_model(&actuel).await;
+    println!("test {} : ok={} outils={} {} ms / {} ms — {:?}", bon.model, bon.ok, bon.tools, bon.latency_ms, bon.tools_latency_ms, bon.reply);
+    assert!(bon.ok && bon.tools && bon.error.is_empty(), "le modèle courant doit fonctionner : {}", bon.error);
+
+    let faux = app.llm.test_model("modele-qui-n-existe-pas").await;
+    println!("test inexistant : ok={} erreur={}", faux.ok, faux.error);
+    assert!(!faux.ok && !faux.error.is_empty());
+
+    // Quelques autres modèles : on affiche le verdict, sans l'exiger (le fournisseur varie).
+    for id in ["grok-4.6", "muse-spark-1.3-contributor", "glm-5.3-flash", "qwen3.8-flash"] {
+        if modeles.iter().any(|m| m.id == id) {
+            let t = app.llm.test_model(id).await;
+            println!("test {id} : ok={} outils={} {} ms — {}", t.ok, t.tools, t.latency_ms, t.error);
+        }
+    }
+}

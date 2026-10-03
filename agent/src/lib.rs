@@ -547,6 +547,7 @@ impl App {
             "workspace": settings.workspace,
             "llm": {
                 "model": settings.llm.model,
+                "voice_model": settings.llm.voice_model,
                 "base_url": settings.llm.base_url,
                 "has_key": !self.secrets.opencode_api_key.is_empty(),
             },

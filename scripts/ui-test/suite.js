@@ -170,6 +170,63 @@ async function step(name, fn) {
     return `${follow} s, ${pause} ms`;
   });
 
+  await step("Paramètres : bibliothèque de modèles (liste, test, refus, choix vocal)", async () => {
+    await nav("Paramètres");
+    await p.waitForSelector(".model-row", { timeout: 40000 });
+    const total = await p.locator(".model-row").count();
+    expect(total >= 20, `${total} modèles listés (attendu ≥ 20)`);
+    expect((await p.locator(".model-row.is-main").count()) === 1, "le modèle principal n'est pas repéré dans la liste");
+    const ids = await p.$$eval(".model-row code", (els) => els.map((e) => e.textContent ?? ""));
+    expect(!ids.some((id) => id.includes("/")), `identifiants avec fournisseur : ${ids.filter((i) => i.includes("/")).slice(0, 2).join(", ")}`);
+    const main = (await p.locator(".model-current code").first().textContent()) ?? "";
+
+    try {
+      // Test réel du modèle principal : il doit fonctionner, outils compris.
+      const row = p.locator(".model-row.is-main");
+      await row.locator("button", { hasText: "Tester" }).click();
+      await row.locator(".model-test.good, .model-test.warn, .model-test.bad").waitFor({ timeout: 90000 });
+      expect((await row.locator(".model-test.good").count()) === 1, `le modèle principal « ${main} » devrait fonctionner`);
+
+      // Recherche.
+      const search = p.locator(".model-toolbar input[type=search]");
+      await search.fill("glm");
+      const filtered = await p.locator(".model-row").count();
+      expect(filtered > 0 && filtered < total, `recherche « glm » : ${filtered} sur ${total}`);
+      await search.fill("");
+
+      // Un modèle que le fournisseur refuse ne peut pas devenir le modèle principal.
+      const grok = p.locator(".model-row", { hasText: "grok-4.6" });
+      if ((await grok.count()) > 0) {
+        await grok.locator("button", { hasText: "Principal" }).click();
+        await p.waitForFunction(
+          () => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("ne répond pas")),
+          null,
+          { timeout: 90000 },
+        );
+        const after = (await p.locator(".model-current code").first().textContent()) ?? "";
+        expect(after === main, `le modèle principal a changé alors que le test a échoué : ${after}`);
+      }
+
+      // Choix d'un modèle vocal fonctionnel, puis retrait.
+      const flash = p.locator(".model-row", { hasText: "glm-5.3-flash" });
+      if ((await flash.count()) > 0) {
+        await flash.locator("button", { hasText: "Vocal" }).click();
+        await p.waitForSelector(".model-row.is-voice", { timeout: 90000 });
+        const current = (await p.locator(".model-current").textContent()) ?? "";
+        expect(current.includes("glm-5.3-flash"), `modèle vocal non affiché : ${current}`);
+        // La valeur réellement enregistrée doit être l'identifiant court, jamais « fournisseur/modèle ».
+        const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm.voice_model);
+        expect(saved === "glm-5.3-flash", `modèle vocal enregistré : « ${saved} »`);
+        await p.locator(".model-current button", { hasText: "Retirer" }).click();
+        await p.waitForSelector(".model-row.is-voice", { state: "detached", timeout: 15000 });
+      }
+    } finally {
+      // La suite ne doit jamais laisser un modèle vocal modifié dans ta configuration.
+      await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("set_llm_model", { role: "voice", model: "" }));
+    }
+    return `${total} modèles, principal « ${main} » testé`;
+  });
+
   await step("Historique : ouvrir une session", async () => {
     await nav("Historique");
     await p.waitForSelector(".list-row", { timeout: 5000 });

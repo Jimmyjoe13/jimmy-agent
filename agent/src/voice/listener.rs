@@ -370,7 +370,9 @@ async fn answer_command(
         }
         Err(error) => {
             emit(events, AgentEvent::Failed { message: error.to_string() }).await;
-            app.speak(&format!("Désolé, je n'ai pas pu faire ça : {error}.")).await;
+            // Dit à voix haute : court et compréhensible. Le JSON du fournisseur
+            // était lu en entier (« HTTP 400 Bad Request — {"error"… »).
+            app.speak(&spoken_error(&error)).await;
             false
         }
     }
@@ -480,6 +482,20 @@ pub fn vad_threshold(noise_floor: f32, learned_floor: f32, ceiling: f32) -> f32 
 /// à une voix douce (0,005 à 0,03 mesuré).
 fn learn_from_false_alarm(learned: f32, level: f32) -> f32 {
     learned.max(level * 1.25).min(0.007)
+}
+
+/// Message d'erreur dit à voix haute. Le détail technique (codes HTTP, JSON du
+/// fournisseur) reste dans le chat et dans le journal.
+pub fn spoken_error(error: &crate::Error) -> String {
+    use crate::Error;
+    let raison = match error {
+        Error::Provider { .. } => "le service du modèle n'a pas répondu correctement",
+        Error::Timeout => "la demande a pris trop de temps",
+        Error::PermissionDenied(_) => "je n'ai pas la permission de faire ça",
+        Error::Http(_) => "la connexion a échoué",
+        _ => "une erreur est survenue",
+    };
+    format!("Désolé, {raison}. Les détails sont dans le chat.")
 }
 
 /// Retire le « Oui ? » de Jimmy capté par le micro en tête de commande.
@@ -592,6 +608,18 @@ mod tests {
         assert_eq!(strip_cue_echo("oui, quelle heure est-il"), "quelle heure est-il");
         assert_eq!(strip_cue_echo("Ouistiti en vue"), "Ouistiti en vue");
         assert_eq!(strip_cue_echo("Quelle heure est-il ?"), "Quelle heure est-il ?");
+    }
+
+    #[test]
+    fn l_erreur_dite_a_voix_haute_est_courte_et_sans_json() {
+        let erreur = crate::Error::provider(
+            "OpenCode Go",
+            "HTTP 400 Bad Request — {\"error\":{\"type\":\"invalid_request_error\"}}",
+        );
+        let dit = spoken_error(&erreur);
+        assert!(!dit.contains('{') && !dit.contains("HTTP") && !dit.contains("400"), "{dit}");
+        assert!(dit.chars().count() < 100, "{dit}");
+        assert!(spoken_error(&crate::Error::Timeout).contains("trop de temps"));
     }
 
     #[test]

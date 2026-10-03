@@ -198,21 +198,64 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> st
     Ok(())
 }
 
+/// Modèles du compte OpenCode Go, enrichis par le catalogue public.
+/// `refresh` : ignore le cache d'une heure.
 #[tauri::command]
-pub async fn list_models(state: State<'_, AppState>) -> std::result::Result<Vec<serde_json::Value>, String> {
-    let models = state.app.llm.list_models("opencode-go").await.map_err(err)?;
+pub async fn list_models(
+    state: State<'_, AppState>,
+    refresh: Option<bool>,
+) -> std::result::Result<Vec<serde_json::Value>, String> {
+    let models = state.app.llm.list_models(refresh.unwrap_or(false)).await.map_err(err)?;
     Ok(models
         .into_iter()
         .map(|m| {
-            serde_json::json!({
-                "id": m.full_id,
-                "model": m.id,
-                "name": m.name,
-                "context": m.context,
-                "free": m.free
-            })
+            let mut value = serde_json::to_value(&m).unwrap_or_default();
+            // `id` est l'identifiant **court**, celui qu'on enregistre et qu'on
+            // envoie au fournisseur. (Une première version le remplaçait par
+            // `fournisseur/modèle` : choisir un modèle aurait écrit
+            // « opencode-go/xxx » dans la configuration et cassé toutes les
+            // requêtes.) `model` reste un alias pour l'onboarding.
+            value["model"] = serde_json::json!(m.id);
+            value
         })
         .collect())
+}
+
+/// Teste un modèle dans les conditions de Jimmy (requête simple, puis avec outils).
+#[tauri::command]
+pub async fn llm_test_model(
+    state: State<'_, AppState>,
+    model: String,
+) -> std::result::Result<jimmy_agent::providers::llm::ModelTest, String> {
+    let model = model.trim().to_string();
+    if model.is_empty() {
+        return Err("modèle vide".into());
+    }
+    Ok(state.app.llm.test_model(&model).await)
+}
+
+/// Choisit le modèle principal (`main`) ou le modèle vocal (`voice`, vide = le
+/// même que le principal). S'applique immédiatement, sans redémarrage.
+#[tauri::command]
+pub async fn set_llm_model(
+    state: State<'_, AppState>,
+    role: String,
+    model: String,
+) -> std::result::Result<(), String> {
+    let model = model.trim().to_string();
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    match role.as_str() {
+        "main" => {
+            if model.is_empty() {
+                return Err("le modèle principal ne peut pas être vide".into());
+            }
+            settings.llm.model = model;
+        }
+        "voice" => settings.llm.voice_model = model,
+        other => return Err(format!("rôle inconnu : {other}")),
+    }
+    app.save_settings(settings).map_err(err)
 }
 
 #[tauri::command]

@@ -2,12 +2,14 @@
 import { api, type Settings, type StartupMode } from "../api";
 import { QUALITY_LABEL, attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
+import { modelsPanel } from "./models";
 
 export function settingsView(ctx: AppContext): HTMLElement {
   const container = h("section", { class: "view" });
   let settings: Settings | null = null;
 
   const modelInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const voiceModelInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const temperatureInput = h("input", {
     class: "field",
     type: "number",
@@ -37,6 +39,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings = loaded;
 
     modelInput.value = settings.llm.model;
+    voiceModelInput.value = settings.llm.voice_model ?? "";
     temperatureInput.value = String(settings.llm.temperature ?? "");
     workspaceInput.value = settings.workspace;
 
@@ -106,9 +109,26 @@ export function settingsView(ctx: AppContext): HTMLElement {
     render();
   }
 
+  // Construit une seule fois : la liste, les tests et le tri survivent aux
+  // re-rendus de la page (retour depuis les permissions, rechargement).
+  const modelsCard = modelsPanel(ctx, {
+    onApplied: (role, model) => {
+      // Le choix est déjà enregistré côté Rust : les champs et la copie locale
+      // suivent, sinon « Enregistrer » remettrait l'ancien modèle.
+      if (role === "main") {
+        modelInput.value = model;
+        if (settings) settings.llm.model = model;
+      } else {
+        voiceModelInput.value = model;
+        if (settings) settings.llm.voice_model = model;
+      }
+    },
+  });
+
   async function persist() {
     if (!settings) return;
     settings.llm.model = modelInput.value.trim() || settings.llm.model;
+    settings.llm.voice_model = voiceModelInput.value.trim();
     settings.llm.temperature = temperatureInput.value === "" ? null : Number(temperatureInput.value);
     settings.workspace = workspaceInput.value.trim();
     settings.tts.voice = voiceSelect.value;
@@ -161,10 +181,12 @@ export function settingsView(ctx: AppContext): HTMLElement {
       card(
         "Modèle de langage",
         h("p", { class: "note" }, "Fournisseur : OpenCode Go (API compatible OpenAI)."),
-        field("Modèle", modelInput, "space-bunny-free, mimo-v2.6-pro, gpt-6-luna…"),
+        field("Modèle principal", modelInput, "space-bunny-free, mimo-v2.6-pro, gpt-6-luna…"),
+        field("Modèle vocal (vide = le même)", voiceModelInput, "un modèle plus rapide pour les échanges à voix haute"),
         field("Température (vide = réglage du fournisseur)", temperatureInput),
         field("Dossier de travail par défaut", workspaceInput, ctx.status.workspace),
       ),
+      modelsCard,
       card(
         "Voix de sortie",
         h("p", { class: "note" }, "Synthèse Fish Audio via OpenRouter. L'audio ne transite que par le réseau vers ce service."),

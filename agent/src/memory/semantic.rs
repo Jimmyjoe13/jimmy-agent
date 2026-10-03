@@ -48,7 +48,11 @@ impl SemanticEmbedder {
     /// `base_url` du type `http://localhost:1234/v1`. Renvoie `None` si l'URL
     /// ou le modèle sont vides (embeddings sémantiques désactivés).
     pub fn new(base_url: &str, model: &str) -> Option<Self> {
-        let base_url = base_url.trim().trim_end_matches('/');
+        // « localhost » → 127.0.0.1 : sous Windows, une connexion vers un port
+        // fermé de `localhost` tente d'abord IPv6 puis IPv4 et met ~2,3 s à
+        // échouer (mesuré : chaque rappel de mémoire coûtait 2,3 s quand LM
+        // Studio était éteint). En adresse numérique, le refus est immédiat.
+        let base_url = base_url.trim().trim_end_matches('/').replace("://localhost", "://127.0.0.1");
         if base_url.is_empty() || model.trim().is_empty() {
             return None;
         }
@@ -56,6 +60,7 @@ impl SemanticEmbedder {
         // au-delà, mieux vaut répondre avec le hachage que faire attendre.
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(4))
+            .connect_timeout(Duration::from_millis(500))
             .build()
             .ok()?;
         Some(SemanticEmbedder {
@@ -124,5 +129,20 @@ impl SemanticEmbedder {
             }
         }
         Ok(vector)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localhost_devient_une_adresse_numerique() {
+        let e = SemanticEmbedder::new("http://localhost:1234/v1", "modele").unwrap();
+        assert_eq!(e.endpoint, "http://127.0.0.1:1234/v1/embeddings");
+        // Une autre machine n'est pas touchée.
+        let e = SemanticEmbedder::new("http://lm-studio.local:1234/v1/", "modele").unwrap();
+        assert_eq!(e.endpoint, "http://lm-studio.local:1234/v1/embeddings");
+        assert!(SemanticEmbedder::new("", "modele").is_none());
     }
 }
