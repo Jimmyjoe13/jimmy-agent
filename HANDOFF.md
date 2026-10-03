@@ -3,8 +3,9 @@
 État du prototype au **3 octobre 2026**, fin de la session « avatar +
 fonctionnalités ».
 
-**Objectif de la prochaine session :** trancher les deux décisions du lot 6
-(modèle STT par défaut, embeddings), puis **utiliser Jimmy au quotidien**.
+**Objectif de la prochaine session :** compiler la release, **utiliser Jimmy
+au quotidien**, et vérifier en conditions réelles ce que les tests ne voient
+pas (écho de « Oui ? », serveur MCP du catalogue).
 Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
@@ -31,11 +32,13 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | Skins | `/skin` renard → arctique → fennec → « licorne » refusé, rendu vérifié |
 | Sons d'état | `cargo test --test audio sons_d_etat -- --ignored` : 3 sons en cache, « Oui ? » relu en 267 ms |
 | MCP | `cargo test --test mcp` : serveur Node réel via `cmd /C`, noms normalisés, `isError` remonté |
-| Tests | 37 unitaires + 3 MCP, tous verts (`cargo test --workspace`) |
+| Tests | 37 unitaires + 3 MCP + 1 mémoire, tous verts (`cargo test --workspace`) |
+| Deux whisper-server | `--test audio commande_transcrite -- --ignored` : phrase Fish Audio transcrite par `small` en 3 s |
+| Mémoire sémantique | `--test memory_semantic -- --ignored` : « véhicule » retrouve « voiture » (0,50), le hachage ne trouve rien |
 
 ---
 
-# Fait pendant cette session (commits 4ebac03 → 8421e6a)
+# Fait pendant cette session (commits 4ebac03 → 368dbfa)
 
 ## Avatar
 
@@ -69,8 +72,8 @@ traînerait ; le MSAA 4× suffit en `high`.
 | **Sons d'état** | **Réel.** « Oui ? » / « C'est prêt. » / « Oups… » synthétisés avec la voix TTS courante, cache `data/audio/cues/`. Réglage `tts.cues`. | `agent/src/voice/cues.rs` |
 | **MCP** | **Réel en stdio.** Outils exposés au modèle, `mcp_add_server`, connexion au démarrage. Le client existait mais n'était branché nulle part. | `agent/src/tools/mcp.rs`, `agent/src/mcp/mod.rs` |
 | MCP HTTP | Non fait. Le stdio couvre presque tout le catalogue. | `McpRegistry::ensure` |
-| Mémoire vectorielle | Inchangée (hashing trick). **Décision attendue**, voir étapes. | `memory/embed.rs` |
-| STT `small-q5` | Inchangé. **Décision attendue**, voir étapes. | `stt.rs:25` |
+| **Mémoire sémantique** | **Réel.** Embeddings LM Studio (`localhost:1234`, modèle de SynaptiQ, 384 dim), table `memory_semantic`, réindexation au démarrage, seuil 0,35. LM Studio éteint → hachage, pause de 60 s avant de retenter. | `memory/semantic.rs`, `MemoryStore::recall_semantic` |
+| **Deux whisper-server** | **Réel.** `base` (8178) pour le wake word, `small` (8179) pour la commande ; repli sur `base` si le second ne démarre pas. Réglable dans Paramètres. | `App::start_voice`, `App::transcribe_command` |
 | Permissions | Globales. MCP passe par EXÉCUTION, cible `mcp:<serveur>` : un serveur précis peut être interdit par `deny_commands`. | `permissions.rs` |
 
 **Comportement des sons, choisi exprès :** « Oui ? » ne joue que si
@@ -111,8 +114,8 @@ Ce n'est pas un bug. `voice::KNOWN_PHRASES` liste les trois formes observées,
 et un test unitaire (`pas_de_faux_positif_sur_jai`) garantit que « j'ai besoin »
 ne réveille pas Jimmy.
 
-**6. Un seul `whisper-server` à la fois.**
-Il occupe le port 8178. Une instance de Jimmy lancée en arrière-plan empêche le
+**6. Un seul `whisper-server` par port.**
+Deux serveurs tournent désormais : 8178 (wake word) et 8179 (commande). Une instance de Jimmy lancée en arrière-plan empêche le
 démarrage. Vérifier avec `Get-Process whisper`.
 
 **7. `frontendDist` ne doit apparaître qu'une seule fois.**
@@ -221,17 +224,14 @@ chercher **l'appelant**, pas seulement la définition.
 
 ## Prochaines étapes
 
-### Décisions à prendre (lot 6)
+### Décisions prises (lot 6, 3 octobre 2026)
 
-1. **STT `small-q5` par défaut ?** Le wake word et la commande partagent le
-   même modèle, par conception (un seul `whisper-server`). `small` transcrit
-   mieux mais coûte ~3 s de plus **sur chaque fenêtre de wake word**. Options :
-   garder `base` ; passer à `small` ; ou deux serveurs (`base` pour le wake
-   word, `small` pour la commande, ~180 Mo de RAM en plus).
-2. **Embeddings sémantiques ?** Piste : l'endpoint `/v1/embeddings` de LM
-   Studio (`localhost:1234`), déjà utilisé par SynaptiQ. Mais Jimmy
-   dépendrait alors d'un service lancé à côté. Garder le hashing trick en
-   repli si LM Studio ne répond pas.
+- **STT : deux serveurs** plutôt que `small` partout (+3 s sur chaque
+  fenêtre de wake word) ou `base` partout (commandes moins bien transcrites).
+  Coût : ~180 Mo de RAM.
+- **Embeddings : LM Studio**, même modèle que SynaptiQ, avec repli sur le
+  hachage. Ne pas retirer le hachage : c'est lui qui garde la mémoire
+  utilisable quand LM Studio est éteint.
 
 ### Ensuite
 
@@ -241,10 +241,11 @@ chercher **l'appelant**, pas seulement la définition.
    @modelcontextprotocol/server-filesystem <dossier>`).
 5. Vue MCP dans l'interface (le statut expose déjà `mcp.servers` et
    `mcp.tools`).
-6. `collect_utterance` (`listener.rs`) ajoute à chaque pas les 900 dernières
-   ms alors que le pas fait 450 ms : chaque morceau d'audio entre **deux fois**
-   dans le tampon. Whisper s'en accommode visiblement, mais c'est à vérifier
-   avant d'accuser le modèle d'une mauvaise transcription.
+6. Le test `commande_transcrite` rend « Quelle est la météo… » par « et la
+   météo… » : le début de phrase se perd. Probablement le rééchantillonnage
+   sommaire du test, peut-être le VAD de whisper-server. À vérifier au micro
+   réel avant de toucher aux réglages. (Le double ajout d'audio de
+   `collect_utterance` est corrigé.)
 
 ### Différé
 
