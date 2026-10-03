@@ -147,3 +147,38 @@ fn pcm_brut_est_decodable() {
     assert_eq!(&wav[0..4], b"RIFF");
     assert!(!bytes.is_empty());
 }
+/// Les sons d'état doivent être synthétisés une fois, mis en cache, puis lus
+/// depuis le disque sans nouvel appel réseau.
+#[tokio::test]
+#[ignore = "consulte Fish Audio et ouvre le périphérique de sortie"]
+async fn sons_d_etat_en_cache_et_lus() {
+    use jimmy_agent::voice::cues::{self, Cue};
+
+    let Some(app) = app_de_test() else {
+        panic!("environnement de test indisponible");
+    };
+    if app.secrets.openrouter_api_key.is_empty() {
+        panic!("OPENROUTER_API_KEY absente");
+    }
+
+    // 1. Première passe : synthèse réseau et écriture du cache.
+    cues::warm(&app).await;
+    let dossier = app.paths.audio_dir().join("cues");
+    let fichiers: Vec<_> = std::fs::read_dir(&dossier)
+        .expect("le cache doit exister")
+        .filter_map(|e| e.ok())
+        .collect();
+    println!("cache : {} fichiers dans {}", fichiers.len(), dossier.display());
+    assert_eq!(fichiers.len(), Cue::ALL.len(), "un fichier par son");
+    for fichier in &fichiers {
+        let taille = fichier.metadata().map(|m| m.len()).unwrap_or(0);
+        println!("  {} — {taille} octets", fichier.file_name().to_string_lossy());
+        assert!(taille > 4_000, "son trop court pour être audible");
+    }
+
+    // 2. Seconde passe : lecture depuis le cache, donc quasi instantanée.
+    let debut = std::time::Instant::now();
+    cues::play(&app, Cue::Listening).await;
+    println!("« {} » lu en {:?} (lecture comprise)", Cue::Listening.phrase(), debut.elapsed());
+    assert!(debut.elapsed() < std::time::Duration::from_secs(4));
+}

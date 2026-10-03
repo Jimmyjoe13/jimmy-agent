@@ -54,6 +54,9 @@ pub struct TtsSettings {
     pub voice: String,
     /// Vitesse de lecture simulée (utilisée pour l'estimation de durée).
     pub chars_per_minute: f32,
+    /// Sons d'état (« Oui ? », « C'est prêt. », « Oups… »), voir `voice::cues`.
+    #[serde(default = "default_true")]
+    pub cues: bool,
 }
 
 impl Default for TtsSettings {
@@ -64,6 +67,7 @@ impl Default for TtsSettings {
             model: "fish-audio/s2.1-pro-free:free".into(),
             voice: "5567200c7d8341738f0892bbacd3be3c".into(),
             chars_per_minute: 1000.0,
+            cues: true,
         }
     }
 }

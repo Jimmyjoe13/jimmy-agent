@@ -128,6 +128,7 @@ export interface TtsSettings {
   model: string;
   voice: string;
   chars_per_minute: number;
+  cues: boolean;
 }
 
 export interface SttSettings {

@@ -25,6 +25,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const startupSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const synaptiqUrl = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const synaptiqEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const cuesEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
 
   async function load() {
     const loaded = await guard(() => api.getSettings(), "paramètres");
@@ -72,6 +73,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
 
     synaptiqUrl.value = settings.synaptiq.base_url;
     synaptiqEnabled.checked = settings.synaptiq.enabled;
+    cuesEnabled.checked = settings.tts.cues;
 
     render();
   }
@@ -89,6 +91,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.avatar.skin = skinSelect.value;
     settings.synaptiq.base_url = synaptiqUrl.value.trim();
     settings.synaptiq.enabled = synaptiqEnabled.checked;
+    settings.tts.cues = cuesEnabled.checked;
 
     await guard(() => api.saveSettings(settings as Settings), "enregistrement");
     await ctx.refreshStatus();
@@ -125,6 +128,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
         "Voix de sortie",
         h("p", { class: "note" }, "Synthèse Fish Audio via OpenRouter. L'audio ne transite que par le réseau vers ce service."),
         field("Voix", voiceSelect),
+        toggle("Sons d'état (« Oui ? », « C'est prêt. », « Oups… »)", cuesEnabled),
       ),
       card(
         "Écoute",

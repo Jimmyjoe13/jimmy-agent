@@ -36,5 +36,10 @@ if (-not (Test-Path $vcvars)) { throw "vcvars64.bat introuvable dans $installPat
 # On construit une ligne de commande unique : `vcvars64` n'expose que des
 # variables d'environnement, il doit donc s'exécuter dans le même shell.
 $cmdLine = "`"$vcvars`" >nul 2>nul && set `"PATH=$cargoBin;%PATH%`" && " + ($Command -join ' ')
+# PowerShell 5.1 : si l'appelant redirige stderr (`> log 2>&1`), chaque ligne
+# écrite sur stderr par une commande native (le « Compiling » de cargo, par
+# exemple) devient une ErrorRecord. Avec 'Stop', le script s'arrêterait sur
+# un build réussi. Seul le code de sortie fait foi.
+$ErrorActionPreference = 'Continue'
 & cmd.exe /d /s /c $cmdLine
 exit $LASTEXITCODE

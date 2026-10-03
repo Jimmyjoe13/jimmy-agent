@@ -31,6 +31,11 @@ use crate::App;
 
 /// Durée maximale d'une phrase : au-delà, on transcrit ce qu'on a.
 const MAX_UTTERANCE: Duration = Duration::from_secs(12);
+/// Durée minimale d'écoute avant qu'un silence puisse clore la phrase.
+const MIN_UTTERANCE: Duration = Duration::from_millis(600);
+/// Après le son « Oui ? », l'utilisateur n'a pas encore commencé à parler :
+/// le silence initial ne doit pas clore l'écoute.
+const AFTER_CUE_GRACE: Duration = Duration::from_millis(3500);
 
 impl App {
     /// Démarre la boucle d'écoute. Ne rend pas la main : elle tourne jusqu'à
@@ -78,9 +83,20 @@ impl App {
 
                 // 2. Le wake word est passé : on attend la fin de la phrase.
                 emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: text.clone() }).await;
-                let command = collect_utterance(&self, &runtime, window_samples, rate, hop, end_of_speech)
-                    .await
-                    .unwrap_or_default();
+                let command = if strip_wake_word(&text, &settings.stt.wake_word).trim().is_empty() {
+                    // « Jimmy » seul, suivi d'une pause : Jimmy répond « Oui ? »,
+                    // puis écoute. Le micro est purgé après le son, sinon sa
+                    // propre voix (haut-parleur → micro) entrerait dans la
+                    // commande. Délai de grâce : laisser le temps de commencer.
+                    super::cues::play(&self, super::cues::Cue::Listening).await;
+                    runtime.drain();
+                    collect_utterance(&self, &runtime, 0, rate, hop, end_of_speech, AFTER_CUE_GRACE).await
+                } else {
+                    // La commande suit déjà le wake word : aucun son, il
+                    // couperait la parole.
+                    collect_utterance(&self, &runtime, window_samples, rate, hop, end_of_speech, MIN_UTTERANCE).await
+                }
+                .unwrap_or_default();
                 let command = strip_wake_word(&command, &settings.stt.wake_word);
                 if command.trim().is_empty() {
                     emit(&events, AgentEvent::Notice { message: "rien d comprehensible dans la phrase".into() }).await;
@@ -128,6 +144,7 @@ async fn collect_utterance(
     rate: u32,
     hop: Duration,
     end_of_speech: Duration,
+    min_duration: Duration,
 ) -> Option<String> {
     let mut buffer: Vec<f32> = runtime.take_window(initial_samples);
     let started = Instant::now();
@@ -146,7 +163,7 @@ async fn collect_utterance(
         );
         silence = if talking { Duration::ZERO } else { silence + hop };
         buffer.extend_from_slice(&recent);
-        if silence >= end_of_speech && started.elapsed() > Duration::from_millis(600) {
+        if silence >= end_of_speech && started.elapsed() > min_duration {
             break;
         }
     }

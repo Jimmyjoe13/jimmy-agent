@@ -29,6 +29,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+pub mod cues;
 pub mod listener;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

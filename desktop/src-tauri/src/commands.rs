@@ -15,6 +15,7 @@ use jimmy_agent::config::{Secrets, Settings, StartupMode};
 use jimmy_agent::core::types::{AgentEvent, AvatarState};
 use jimmy_agent::paths::load_dotenv;
 use jimmy_agent::providers::tts::TtsVoice;
+use jimmy_agent::voice::cues::{self, Cue};
 use jimmy_agent::voice::{matches_wake_word, strip_wake_word, VoiceRuntime};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, WebviewWindow};
@@ -73,6 +74,7 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
     let tool_context = app.tool_context();
     let window_label = state.window.clone();
     let avatar = app.avatar.clone();
+    let cue_app = app.clone();
     let answer_session = session_id.clone();
 
     tauri::async_runtime::spawn(async move {
@@ -111,6 +113,11 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         // Le relais doit être vidé avant de rendre la main, sinon la fenêtre
         // peut fermer avant d'avoir reçu les derniers événements.
         let _ = relay.await;
+
+        // Son d'état : le chat texte ne parle pas, un « C'est prêt. » signale
+        // la réponse quand la fenêtre n'est pas sous les yeux.
+        let cue = if outcome.is_ok() { Cue::Answer } else { Cue::Error };
+        cues::play(&cue_app, cue).await;
 
         if let Err(error) = outcome {
             log::error!("[agent] {error}");
@@ -358,6 +365,11 @@ pub async fn voice_start(
 ) -> std::result::Result<(), String> {
     let app = state.app.clone();
     app.start_voice(&runtime).await.map_err(err)?;
+
+    // Pré-génère les sons d'état en tâche de fond : le premier « Oui ? » doit
+    // être immédiat, pas attendre un aller-retour réseau.
+    let warm_app = app.clone();
+    tauri::async_runtime::spawn(async move { cues::warm(&warm_app).await });
 
     let handle = state.window.clone();
     let avatar = app.avatar.clone();
