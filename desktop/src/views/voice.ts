@@ -7,61 +7,97 @@
  */
 import { api } from "../api";
 import { Recorder } from "../audio";
-import { attempt, guard, h, mount, toast } from "../ui";
+import { QUALITY_LABEL, attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
+import { card } from "./settings";
 
 export function voiceView(ctx: AppContext): HTMLElement {
   const recorder = new Recorder();
   let meterTimer = 0;
-  let listening = false;
 
-  const listenState = h("span", { class: "listen-state off" }, "arrêtée");
-  const listenButton = h(
-    "button",
-    { class: "primary", onclick: () => void toggleListening() },
-    "Activer l'écoute",
-  );
+  // ── Écoute permanente : état lu côté Rust, jamais deviné ──────────────────
+  const listenState = h("span", { class: "listen-state off" }, "…");
+  const listenButton = h("button", { class: "primary", onclick: () => void toggleListening() }, "…");
+  const servers = h("div", { class: "note" }, "");
+  const heard = h("div", { class: "heard" });
+  // Vumètre de l'écoute permanente : la preuve que le micro capte.
+  const liveMeter = h("div", { class: "meter active", title: "Niveau du micro" }, h("div", { class: "meter-fill" }));
+  const livePoll = window.setInterval(async () => {
+    if (!ctx.voice?.running) return;
+    const status = await api.voiceStatus().catch(() => null);
+    if (!status) return;
+    // Échelle perceptive : la parole à distance tourne autour de 0,005-0,02.
+    const level = Math.min(1, Math.sqrt(status.level / 0.05));
+    (liveMeter.firstElementChild as HTMLElement).style.width = `${level * 100}%`;
+  }, 300);
+  ctx.onCleanup(() => {
+    window.clearInterval(livePoll);
+    window.clearInterval(meterTimer);
+    // Quitter la vue pendant un enregistrement libère le micro de la fenêtre.
+    if (recorder.active) void recorder.stop();
+  });
 
-  async function toggleListening() {
-    if (listening) {
-      await attempt(() => api.voiceStop(), "arrêt de l'écoute");
-      listening = false;
-      listenButton.textContent = "Activer l'écoute";
-      listenButton.className = "primary";
-      listenState.textContent = "arrêtée";
-      listenState.className = "listen-state off";
-      return;
-    }
-    listenButton.setAttribute("disabled", "");
-    listenButton.textContent = "Démarrage…";
-    // `attempt` et non `guard` : la commande ne retourne rien, donc `undefined`
-    // ne dit rien du résultat.
-    const ok = await attempt(() => api.voiceStart(), "démarrage de l'écoute");
+  function renderListening() {
+    const voice = ctx.voice;
+    const running = Boolean(voice?.running);
+    listenState.textContent = running ? "active" : "arrêtée";
+    listenState.className = `listen-state ${running ? "on" : "off"}`;
+    listenButton.textContent = running ? "Couper l'écoute" : "Activer l'écoute";
+    listenButton.className = running ? "ghost" : "primary";
     listenButton.removeAttribute("disabled");
-    if (!ok) {
-      listenButton.textContent = "Activer l'écoute";
+    liveMeter.style.display = running ? "" : "none";
+    if (!voice) {
+      servers.textContent = "État de l'écoute indisponible.";
       return;
     }
-    listening = true;
-    listenButton.textContent = "Désactiver l'écoute";
-    listenButton.className = "ghost";
-    listenState.textContent = "active";
-    listenState.className = "listen-state on";
-    void ctx.refreshStatus();
+    const ready = (ok: boolean) => (ok ? "prêt" : running ? "indisponible" : "au repos");
+    mount(
+      servers,
+      "Mot d'éveil : ",
+      h("code", {}, voice.wakeModel),
+      ` (${ready(voice.wakeReady)}) · commande : `,
+      h("code", {}, voice.commandModel || voice.wakeModel),
+      ` (${ready(voice.commandReady || (!voice.commandModel && voice.wakeReady))})`,
+      voice.deviceRate ? ` · micro à ${voice.deviceRate} Hz` : "",
+    );
   }
 
+  async function toggleListening() {
+    const running = Boolean(ctx.voice?.running);
+    listenButton.setAttribute("disabled", "");
+    listenButton.textContent = running ? "Arrêt…" : "Démarrage… (chargement des modèles)";
+    const ok = running
+      ? await attempt(() => api.voiceStop(), "arrêt de l'écoute")
+      : await attempt(() => api.voiceStart(), "démarrage de l'écoute");
+    await ctx.refreshStatus();
+    renderListening();
+    if (ok && !running) toast(`Écoute active — dis « ${capitalize(ctx.status.stt.wake_word)} ».`);
+  }
+
+  function emptyHeard() {
+    mount(heard, h("p", { class: "hint" }, "Les phrases transcrites par l'écoute s'affichent ici, en direct."));
+  }
+
+  // Fil « ce que Jimmy entend » : le retour qui manquait pour savoir si le
+  // micro capte, et si le mot d'éveil est reconnu.
+  ctx.onEvent((event) => {
+    if (event.type !== "heard") return;
+    heard.querySelector(".hint")?.remove();
+    heard.prepend(
+      h(
+        "div",
+        { class: `heard-line ${event.matched ? "matched" : ""}` },
+        h("span", { class: "heard-tag" }, event.matched ? "réveil" : "entendu"),
+        h("span", {}, event.text ?? ""),
+      ),
+    );
+    while (heard.childElementCount > 8) heard.lastElementChild?.remove();
+  });
+
+  // ── Test de reconnaissance (micro de la fenêtre) ──────────────────────────
   const meter = h("div", { class: "meter" }, h("div", { class: "meter-fill" }));
   const transcript = h("div", { class: "transcript" }, "Aucune transcription.");
-  const recordButton = h(
-    "button",
-    { class: "primary", onclick: () => void toggleRecording() },
-    "Enregistrer",
-  );
-  const ttsInput = h("input", {
-    class: "field",
-    type: "text",
-    value: "Bonjour, je suis Jimmy.",
-  }) as HTMLInputElement;
+  const recordButton = h("button", { class: "primary", onclick: () => void toggleRecording() }, "Enregistrer");
 
   async function toggleRecording() {
     if (!recorder.active) {
@@ -70,38 +106,44 @@ export function voiceView(ctx: AppContext): HTMLElement {
       recordButton.textContent = "Arrêter et transcrire";
       meter.classList.add("active");
       meterTimer = window.setInterval(() => {
-        (meter.firstElementChild as HTMLElement).style.width = `${recorder.getLevel() * 100}%`;
+        (meter.firstElementChild as HTMLElement).style.width = `${Math.min(1, recorder.getLevel() * 4) * 100}%`;
       }, 60);
       return;
     }
-
     window.clearInterval(meterTimer);
     meter.classList.remove("active");
+    recordButton.setAttribute("disabled", "");
     recordButton.textContent = "Transcription…";
     const result = await recorder.stop();
-    recordButton.textContent = "Enregistrer";
-
     if (result.wav.length === 0) {
       transcript.textContent = "Rien n'a été capturé.";
-      return;
+    } else {
+      transcript.textContent = "Transcription en cours (le premier essai charge les modèles)…";
+      // Les serveurs démarrent à la demande côté Rust : pas besoin d'avoir
+      // activé l'écoute permanente.
+      const text = await guard(() => api.sttTranscribe(result.wav), "transcription");
+      transcript.textContent = text === undefined ? "Transcription impossible." : text || "(silence)";
     }
-    await ctx.refreshStatus();
-    if (!ctx.status.stt.enabled) {
-      toast("La reconnaissance vocale est désactivée dans les paramètres.", "error");
-      transcript.textContent = "Reconnaissance vocale désactivée.";
-      return;
-    }
-    transcript.textContent = "Transcription en cours…";
-    const text = await guard(() => api.sttTranscribe(result.wav), "transcription");
-    transcript.textContent = text ?? "Transcription impossible.";
-    if (text) void api.avatarSay(text);
+    recordButton.removeAttribute("disabled");
+    recordButton.textContent = "Enregistrer";
   }
 
-  const wakeInput = h("input", {
-    class: "field",
-    type: "text",
-    value: "J'y mise, analyse ce dossier",
-  }) as HTMLInputElement;
+  // ── Synthèse vocale ───────────────────────────────────────────────────────
+  const ttsInput = h("input", { class: "field", type: "text", value: "Bonjour, je suis Jimmy." }) as HTMLInputElement;
+  const ttsButton = h("button", { class: "primary", onclick: () => void speak() }, "Lire");
+
+  async function speak() {
+    const text = ttsInput.value.trim();
+    if (!text) return;
+    ttsButton.setAttribute("disabled", "");
+    ttsButton.textContent = "Synthèse…";
+    await guard(() => api.ttsPreview(text), "synthèse vocale");
+    ttsButton.removeAttribute("disabled");
+    ttsButton.textContent = "Lire";
+  }
+
+  // ── Mot d'activation ──────────────────────────────────────────────────────
+  const wakeInput = h("input", { class: "field", type: "text", value: "J'y mise, analyse ce dossier" }) as HTMLInputElement;
   const wakeResult = h("div", { class: "note" }, "—");
 
   async function testWake() {
@@ -111,110 +153,70 @@ export function voiceView(ctx: AppContext): HTMLElement {
     );
     if (!result) return;
     wakeResult.textContent = result.matched
-      ? `Détecté — commande retenue : « ${result.command} »`
+      ? `Détecté — commande retenue : « ${result.command || "(aucune)"} »`
       : "Non détecté : cette phrase ne commence pas par le mot d'activation.";
   }
 
-  void api.voiceDevices().then((devices) => {
-    deviceList.textContent =
-      devices.length > 0 ? devices.join(" · ") : "Aucun microphone détecté par Windows.";
-  });
-
   const deviceList = h("div", { class: "note" }, "Recherche des microphones…");
+  void api
+    .voiceDevices()
+    .then((devices) => {
+      deviceList.textContent =
+        devices.length > 0 ? `Microphones : ${devices.join(" · ")}` : "Aucun microphone détecté par Windows.";
+    })
+    .catch(() => {
+      deviceList.textContent = "Liste des microphones indisponible.";
+    });
+
+  emptyHeard();
+  renderListening();
+  void ctx.refreshStatus().then(renderListening);
+
+  const voiceLabel =
+    ctx.status.tts.voices.find((v) => v.id === ctx.status.tts.voice)?.label ?? ctx.status.tts.voice;
 
   return h(
     "section",
     { class: "view" },
-    h("header", { class: "view-header" }, h("h2", {}, "Voix")),
-    h(
-      "section",
-      { class: "card" },
-      h("h3", {}, "Écoute permanente"),
+    card(
+      "Écoute permanente",
       h(
         "p",
         { class: "note" },
-        "Quand l'écoute est active, Jimmy ouvre le microphone, reste en veille et attend « ",
-        h("code", {}, ctx.status.stt.wake_word),
-        " ». Rien n'est envoyé sur le réseau : la reconnaissance tourne en local.",
+        "Jimmy garde le micro ouvert et attend « ",
+        h("strong", {}, capitalize(ctx.status.stt.wake_word)),
+        " ». La reconnaissance tourne en local : rien n'est envoyé sur le réseau. Si tu la laisses active, l'écoute reprend toute seule au prochain lancement.",
       ),
       h("div", { class: "row" }, listenButton, listenState),
+      liveMeter,
+      servers,
+      h("h4", {}, "Ce que Jimmy entend"),
+      heard,
     ),
-    h(
-      "section",
-      { class: "card" },
-      h("h3", {}, "Reconnaissance vocale"),
-      h(
-        "p",
-        { class: "note" },
-        "Modèle : ",
-        h("code", {}, ctx.status.stt.model),
-        " · langue : ",
-        h("code", {}, ctx.status.stt.language),
-      ),
+    card(
+      "Tester la reconnaissance",
+      h("p", { class: "note" }, "Enregistre une phrase avec le micro de la fenêtre, puis lis ce que Whisper en comprend."),
       meter,
       h(
         "div",
         { class: "row" },
         recordButton,
-        h(
-          "button",
-          {
-            class: "ghost",
-            onclick: () => {
-              transcript.textContent = "Aucune transcription.";
-            },
-          },
-          "Effacer",
-        ),
+        h("button", { class: "ghost", onclick: () => (transcript.textContent = "Aucune transcription.") }, "Effacer"),
       ),
       transcript,
       deviceList,
     ),
-    h(
-      "section",
-      { class: "card" },
-      h("h3", {}, "Synthèse vocale"),
-      h(
-        "p",
-        { class: "note" },
-        "Voix : ",
-        h(
-          "code",
-          {},
-          ctx.status.tts.voices.find((v) => v.id === ctx.status.tts.voice)?.label ??
-            ctx.status.tts.voice,
-        ),
-        " · modèle : ",
-        h("code", {}, ctx.status.tts.model),
-      ),
-      h(
-        "div",
-        { class: "row" },
-        ttsInput,
-        h(
-          "button",
-          {
-            class: "primary",
-            onclick: async () => {
-              const text = ttsInput.value.trim();
-              if (!text) return;
-              const result = await guard(() => api.ttsPreview(text), "synthèse vocale");
-              if (result) toast(`Audio généré : ${(result.bytes / 1024).toFixed(0)} Ko`);
-            },
-          },
-          "Lire",
-        ),
-      ),
+    card(
+      "Synthèse vocale",
+      h("p", { class: "note" }, "Voix : ", h("code", {}, voiceLabel), " · modèle : ", h("code", {}, ctx.status.tts.model)),
+      h("div", { class: "row" }, ttsInput, ttsButton),
     ),
-    h(
-      "section",
-      { class: "card" },
-      h("h3", {}, "Mot d'activation"),
+    card(
+      "Mot d'activation",
       h(
         "p",
         { class: "note" },
-        "Le wake word est reconnu localement. Comme Whisper approxime les mots courts, ",
-        "le détecteur accepte ses variantes courantes et une distance d'édition bornée.",
+        "Whisper approxime les mots courts : le détecteur accepte les variantes courantes (« J'y mise »…) et une petite distance d'édition.",
       ),
       h("div", { class: "row" }, wakeInput, h("button", { class: "ghost", onclick: () => void testWake() }, "Tester")),
       wakeResult,
@@ -228,13 +230,13 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
   const container = h("section", { class: "view onboarding" });
   const status = ctx.status;
 
-  const nameInput = h("input", { class: "field", type: "text", value: "Jimmy" }) as HTMLInputElement;
+  const nameInput = h("input", { class: "field", type: "text", placeholder: "Ton prénom" }) as HTMLInputElement;
   const modelSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
   const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
 
-  qualitySelect.append(...["low", "medium", "high"].map((level) => h("option", { value: level }, level)));
+  qualitySelect.append(...["low", "medium", "high"].map((level) => h("option", { value: level }, QUALITY_LABEL[level])));
   qualitySelect.value = status.avatar.quality;
   languageSelect.append(
     ...["fr", "en", "es", "de", "it"].map((lang) => h("option", { value: lang }, lang)),
@@ -249,7 +251,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
   modelSelect.append(
     h("option", { value: status.llm.model }, `${status.llm.model} (modèle actuel)`),
   );
-  void api.listModels().then((models) => {
+  void api.listModels().catch(() => []).then((models) => {
     for (const model of models.slice(0, 80)) {
       if (model.model !== status.llm.model) {
         modelSelect.append(
@@ -272,7 +274,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       ],
     },
     {
-      title: "Comment tu veux m'appeler ?",
+      title: "Comment tu t'appelles ?",
       body: [h("p", {}, "C'est le prénom que j'utiliserai pour m'adresser à toi."), h("div", { class: "row" }, nameInput)],
     },
     {
@@ -305,7 +307,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
     {
       title: "Qualité de l'avatar",
       body: [
-        h("p", {}, "« low » pour un portable modeste, « high » si tu as une machine récente."),
+        h("p", {}, "« Basse » pour un portable modeste, « Haute » si tu as une machine récente."),
         h("div", { class: "row" }, qualitySelect),
         h(
           "button",
@@ -331,7 +333,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       title: "C'est prêt.",
       body: [
         h("p", {}, "En terminant, j'active l'écoute : j'ouvrirai le micro et resterai en veille."),
-        h("p", {}, "Clique ensuite sur mon avatar pour revenir ici, ou dis simplement « Jimmy »."),
+        h("p", {}, `Clique ensuite sur mon avatar pour revenir ici, ou dis simplement « ${capitalize(status.stt.wake_word)} ».`),
         h(
           "p",
           { class: "note" },
@@ -340,7 +342,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
         h(
           "p",
           { class: "note" },
-          "Pour couper l'écoute : page Voix → « Désactiver l'écoute ». Rien n'est envoyé sur le réseau.",
+          "Pour couper l'écoute : page Voix → « Couper l'écoute ». Rien n'est envoyé sur le réseau.",
         ),
       ],
     },
@@ -366,10 +368,11 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
                 render();
                 return;
               }
-              await guard(
+              // L'écran ne se ferme que si l'enregistrement a réussi.
+              const done = await guard(
                 () =>
                   api.completeOnboarding({
-                    userName: nameInput.value,
+                    userName: nameInput.value.trim(),
                     model: (modelSelect as HTMLSelectElement).value,
                     voice: (voiceSelect as HTMLSelectElement).value,
                     quality: (qualitySelect as HTMLSelectElement).value,
@@ -377,6 +380,8 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
                   }),
                 "finalisation",
               );
+              if (!done) return;
+              ctx.status = done;
               onDone();
             },
           },

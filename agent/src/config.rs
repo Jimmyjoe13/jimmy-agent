@@ -135,6 +135,10 @@ pub struct VoiceSettings {
     pub vad_threshold: f32,
     /// Nombre de millisecondes de silence qui clôturent une phrase.
     pub end_of_speech_ms: u64,
+    /// L'écoute reprend au lancement de Jimmy. Mis à jour quand l'utilisateur
+    /// active ou coupe l'écoute : Jimmy reste comme on l'a laissé.
+    #[serde(default)]
+    pub listen_on_start: bool,
 }
 
 impl Default for VoiceSettings {
@@ -145,6 +149,7 @@ impl Default for VoiceSettings {
             input_sample_rate: 16_000,
             vad_threshold: 0.012,
             end_of_speech_ms: 900,
+            listen_on_start: false,
         }
     }
 }

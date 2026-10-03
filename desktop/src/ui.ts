@@ -121,6 +121,29 @@ export async function attempt(
   }
 }
 
+/** Libellés français partagés par les vues. */
+export const QUALITY_LABEL: Record<string, string> = { low: "Basse", medium: "Moyenne", high: "Haute" };
+export const MEMORY_KIND_LABEL: Record<string, string> = {
+  semantic: "fait",
+  procedural: "règle",
+  episodic: "épisode",
+};
+export const STATE_LABEL: Record<string, string> = {
+  idle: "prêt",
+  listening: "j'écoute",
+  thinking: "je réfléchis",
+  speaking: "je parle",
+  executing: "j'agis",
+  success: "c'est fait",
+  error: "il y a un souci",
+  waiting: "j'attends",
+};
+
+/** « jimmy » → « Jimmy » (affichage du mot d'activation). */
+export function capitalize(word: string): string {
+  return word ? word[0].toUpperCase() + word.slice(1) : word;
+}
+
 export function formatTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";

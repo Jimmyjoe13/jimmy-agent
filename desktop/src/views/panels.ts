@@ -1,6 +1,6 @@
 /** Vues Mémoire, Skills, Skin et Diagnostic. */
 import { api, type DoctorReport, type Memory, type Skill } from "../api";
-import { attempt, formatTime, guard, h, mount, toast } from "../ui";
+import { MEMORY_KIND_LABEL, QUALITY_LABEL, STATE_LABEL, attempt, formatTime, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { card } from "./settings";
 
@@ -33,7 +33,7 @@ export function memoryView(ctx: AppContext): HTMLElement {
           h(
             "div",
             {},
-            h("span", { class: `tag kind-${memory.kind}` }, memory.kind),
+            h("span", { class: `tag kind-${memory.kind}` }, MEMORY_KIND_LABEL[memory.kind] ?? memory.kind),
             h("p", {}, memory.content),
             h(
               "div",
@@ -49,7 +49,9 @@ export function memoryView(ctx: AppContext): HTMLElement {
               {
                 class: "danger",
                 onclick: async () => {
-                  await guard(() => api.memoryForget(memory.id), "oubli");
+                  if (!window.confirm("Oublier ce souvenir ? Jimmy ne pourra plus s'en servir.")) return;
+                  if (!(await attempt(() => api.memoryForget(memory.id), "oubli"))) return;
+                  await ctx.refreshStatus();
                   await reload();
                 },
               },
@@ -66,7 +68,6 @@ export function memoryView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("h2", {}, "Mémoire"),
       h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
     ),
     card(
@@ -74,13 +75,15 @@ export function memoryView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Stockée localement : vecteurs de 512 dimensions et index plein texte, sans service externe.",
-        ctx.status.memory.has_fts ? " Recherche lexicale active." : " Recherche lexicale indisponible : seul le vecteur est utilisé.",
+        "Stockée sur cette machine. ",
+        ctx.status.memory.semantic_model
+          ? "Recherche par le sens via LM Studio (repli automatique sur la recherche par mots si LM Studio est éteint)."
+          : "Recherche par mots (aucun modèle d'embeddings configuré).",
       ),
       h(
         "div",
         { class: "stat-row" },
-        stat(String(ctx.status.memory.count), "souvenirs"),
+        stat(String(ctx.status.memory.count), ctx.status.memory.count > 1 ? "souvenirs" : "souvenir"),
         stat(String(ctx.status.tools.length), "outils"),
         stat(String(ctx.status.skills), "skills"),
       ),
@@ -138,7 +141,6 @@ export function skillsView(): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("h2", {}, "Skills"),
       h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
     ),
     card(
@@ -169,6 +171,8 @@ export function skinView(ctx: AppContext): HTMLElement {
             // `attempt` et non `guard` : la commande ne renvoie rien (piège 13).
             if (!(await attempt(() => api.avatarSkin(skin.id), "skin"))) return;
             await ctx.refreshStatus();
+            // Re-rendu : le bouton du skin actif doit changer d'apparence.
+            ctx.navigate("skin");
             toast(`Skin « ${skin.label} » appliqué`);
           },
         },
@@ -186,27 +190,36 @@ export function skinView(ctx: AppContext): HTMLElement {
         {
           class: ctx.status.avatar.quality === level ? "primary" : "ghost",
           onclick: async () => {
-            await guard(() => api.avatarQuality(level), "qualité");
+            if (!(await attempt(() => api.avatarQuality(level), "qualité"))) return;
             await ctx.refreshStatus();
-            toast(`Qualité « ${level} » appliquée`);
+            ctx.navigate("skin");
+            toast(`Qualité « ${QUALITY_LABEL[level]} » appliquée`);
           },
         },
-        level,
+        QUALITY_LABEL[level],
       ),
     ),
   );
 
+  const bubbleInput = h("input", { class: "field", value: "Bonjour, je suis Jimmy." }) as HTMLInputElement;
+
   return h(
     "section",
     { class: "view" },
-    h("header", { class: "view-header" }, h("h2", {}, "Skin")),
+    ctx.status.avatar.running
+      ? null
+      : h(
+          "div",
+          { class: "warn-note" },
+          "L'avatar est arrêté : les changements seront appliqués à son prochain démarrage (Paramètres → Avatar).",
+        ),
     card(
       "Skin actif",
       skinButtons,
       h(
         "p",
         { class: "note" },
-        "Jimmy est l'identité ; le renard n'est qu'un apparence. L'architecture prévoit d'autres skins sans changer l'agent.",
+        "Jimmy est l'identité, le skin n'est qu'une apparence : le changer ne touche ni à la mémoire ni aux réglages.",
       ),
     ),
     card("Qualité graphique", h("p", { class: "note" }, "Appliquée immédiatement à l'avatar Godot."), qualityButtons),
@@ -222,10 +235,10 @@ export function skinView(ctx: AppContext): HTMLElement {
               {
                 class: "state-chip",
                 onclick: async () => {
-                  await guard(() => api.avatarState(state as never, ""), "état");
+                  await attempt(() => api.avatarState(state as never, ""), "état");
                 },
               },
-              state,
+              STATE_LABEL[state] ?? state,
             ),
         ),
       ),
@@ -237,17 +250,15 @@ export function skinView(ctx: AppContext): HTMLElement {
     ),
     card(
       "Test de la bulle",
-      h("input", { class: "field", id: "bubble-text", value: "Bonjour, je suis Jimmy." }) as HTMLElement,
       h(
-        "button",
-        {
-          class: "ghost",
-          onclick: () => {
-            const input = document.getElementById("bubble-text") as HTMLInputElement | null;
-            if (input) void guard(() => api.avatarSay(input.value), "bulle");
-          },
-        },
-        "Afficher dans la bulle",
+        "div",
+        { class: "row" },
+        bubbleInput,
+        h(
+          "button",
+          { class: "ghost", onclick: () => void attempt(() => api.avatarSay(bubbleInput.value), "bulle") },
+          "Afficher dans la bulle",
+        ),
       ),
     ),
   );
@@ -297,29 +308,33 @@ export function diagnosticView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("h2", {}, "Diagnostic"),
       h(
         "div",
         { class: "row" },
-        h("button", { class: "ghost", onclick: () => void showPaths() }, "Chemins"),
         h(
           "button",
           {
-            class: "primary",
+            class: "ghost",
             onclick: async () => {
-              await guard(() => api.reloadSecrets(), "secrets");
-              toast("Secrets rechargés depuis .env");
+              const result = await guard(() => api.reloadSecrets(), "secrets");
+              if (!result) return;
+              toast(
+                result.missing.length
+                  ? `Secrets rechargés — manquants : ${result.missing.join(", ")}`
+                  : "Secrets rechargés depuis .env",
+                result.missing.length ? "error" : "info",
+              );
               await ctx.refreshStatus();
               await run();
             },
           },
           "Recharger .env",
         ),
-        h("button", { class: "ghost", onclick: () => void run() }, "Lancer"),
+        h("button", { class: "primary", onclick: () => void run() }, "Relancer le diagnostic"),
       ),
     ),
     card("Vérifications", report),
-    card("Fichiers", paths),
+    card("Fichiers", h("p", { class: "note" }, "Journal : data/logs/jimmy.log"), paths),
   );
   void run();
   void showPaths();

@@ -28,6 +28,7 @@ export interface AgentEvent {
     | "skill"
     | "final"
     | "notice"
+    | "heard"
     | "failed";
   state?: AvatarState;
   detail?: string;
@@ -40,6 +41,22 @@ export interface AgentEvent {
   action?: string;
   text?: string;
   message?: string;
+  /** `heard` : le mot d'activation a été reconnu dans la transcription. */
+  matched?: boolean;
+}
+
+/** État réel de l'écoute, lu côté Rust (`voice_status`). */
+export interface VoiceStatus {
+  running: boolean;
+  deviceRate: number | null;
+  wakeWord: string;
+  wakeModel: string;
+  commandModel: string;
+  wakeReady: boolean;
+  commandReady: boolean;
+  listenOnStart: boolean;
+  /** Niveau RMS du micro (300 dernières ms). */
+  level: number;
 }
 
 export interface Status {
@@ -72,7 +89,7 @@ export interface Status {
     port: number;
     running: boolean;
   };
-  memory: { enabled: boolean; count: number; has_fts: boolean };
+  memory: { enabled: boolean; count: number; has_fts: boolean; semantic_model: string | null };
   synaptiq: { enabled: boolean; configured: boolean; base_url: string };
   permissions: { capability: string; granted: boolean }[];
   tools: string[];
@@ -151,6 +168,7 @@ export interface VoiceSettings {
   input_sample_rate: number;
   vad_threshold: number;
   end_of_speech_ms: number;
+  listen_on_start: boolean;
 }
 
 export interface AvatarSettings {
@@ -279,6 +297,7 @@ export const api = {
   voiceDevices: () => invoke<string[]>("voice_devices"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   sttTranscribe: (wav: number[]) => invoke<string>("stt_transcribe", { wav }),
   avatarStart: () => invoke<void>("avatar_start"),
   avatarStop: () => invoke<void>("avatar_stop"),

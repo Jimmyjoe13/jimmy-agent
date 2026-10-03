@@ -210,6 +210,9 @@ pub enum AgentEvent {
     Final { text: String },
     /// Erreur non fatale, Jimmy continue.
     Notice { message: String },
+    /// Ce que l'écoute a transcrit (fenêtre du wake word). `matched` : le mot
+    /// d'activation y a été reconnu. Sert au retour visuel de la vue Voix.
+    Heard { text: String, matched: bool },
     /// Erreur fatale pour cette demande.
     Failed { message: String },
 }

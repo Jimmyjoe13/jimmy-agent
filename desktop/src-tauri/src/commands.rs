@@ -363,7 +363,34 @@ pub async fn voice_start(
     state: State<'_, AppState>,
     runtime: State<'_, Arc<VoiceRuntime>>,
 ) -> std::result::Result<(), String> {
-    let app = state.app.clone();
+    start_listening(state.app.clone(), runtime.inner().clone(), state.window.clone()).await?;
+    remember_listening(&state.app, true);
+    Ok(())
+}
+
+/// Mémorise le choix de l'utilisateur pour le prochain lancement.
+fn remember_listening(app: &jimmy_agent::App, on: bool) {
+    let mut settings = app.settings();
+    if settings.voice.listen_on_start != on {
+        settings.voice.listen_on_start = on;
+        if let Err(error) = app.save_settings(settings) {
+            log::warn!("[voice] préférence d'écoute non enregistrée : {error}");
+        }
+    }
+}
+
+/// Démarre micro + boucle d'écoute + relais d'événements. Idempotent : si
+/// l'écoute tourne déjà, ne lance **pas** une seconde boucle (avant, chaque
+/// clic en ajoutait une sur le même micro). Utilisé par la commande et par la
+/// reprise automatique au lancement.
+pub async fn start_listening(
+    app: Arc<jimmy_agent::App>,
+    runtime: Arc<VoiceRuntime>,
+    window: Option<WebviewWindow>,
+) -> std::result::Result<(), String> {
+    if runtime.is_running() {
+        return Ok(());
+    }
     app.start_voice(&runtime).await.map_err(err)?;
 
     // Pré-génère les sons d'état en tâche de fond : le premier « Oui ? » doit
@@ -371,7 +398,7 @@ pub async fn voice_start(
     let warm_app = app.clone();
     tauri::async_runtime::spawn(async move { cues::warm(&warm_app).await });
 
-    let handle = state.window.clone();
+    let handle = window;
     let avatar = app.avatar.clone();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
 
@@ -393,7 +420,6 @@ pub async fn voice_start(
     });
 
     let app_for_loop = app.clone();
-    let runtime = runtime.inner().clone();
     tauri::async_runtime::spawn(async move {
         let _ = app_for_loop.spawn_voice_listener(runtime, tx).await;
         relay.abort();
@@ -404,15 +430,52 @@ pub async fn voice_start(
 /// Coupe l'écoute et libère le relais d'événements.
 #[tauri::command]
 pub async fn voice_stop(
+    state: State<'_, AppState>,
     runtime: State<'_, Arc<VoiceRuntime>>,
 ) -> std::result::Result<(), String> {
     runtime.stop();
+    remember_listening(&state.app, false);
+    let _ = state.app.avatar.set_state(AvatarState::Idle, "").await;
     Ok(())
+}
+
+/// État réel de l'écoute. L'interface s'y fie au lieu de garder son propre
+/// drapeau, qui retombait à « arrêtée » à chaque changement de vue.
+#[tauri::command]
+pub async fn voice_status(
+    state: State<'_, AppState>,
+    runtime: State<'_, Arc<VoiceRuntime>>,
+) -> std::result::Result<serde_json::Value, String> {
+    let app = state.app.clone();
+    let settings = app.settings();
+    let wake_ready = match app.stt.lock().await.as_ref() {
+        Some(stt) => stt.health().await,
+        None => false,
+    };
+    let command_ready = match app.stt_command.lock().await.as_ref() {
+        Some(stt) => stt.health().await,
+        None => false,
+    };
+    Ok(serde_json::json!({
+        "running": runtime.is_running(),
+        "deviceRate": runtime.device_rate(),
+        "wakeWord": settings.stt.wake_word,
+        "wakeModel": settings.stt.model,
+        "commandModel": settings.stt.command_model,
+        "wakeReady": wake_ready,
+        "commandReady": command_ready,
+        "listenOnStart": settings.voice.listen_on_start,
+        // Niveau du micro sur les 300 dernières ms (vumètre de la vue Voix).
+        "level": runtime.level(4_800),
+    }))
 }
 
 /// Transcrit un WAV 16 kHz envoyé par l'interface (onboarding, test du micro).
 #[tauri::command]
 pub async fn stt_transcribe(state: State<'_, AppState>, wav: Vec<u8>) -> std::result::Result<String, String> {
+    // Les serveurs démarrent à la demande : tester la transcription ne doit
+    // pas exiger d'avoir activé l'écoute permanente.
+    state.app.ensure_stt().await.map_err(err)?;
     // Une phrase libre, comme une commande : modèle précis si disponible.
     state.app.transcribe_command(wav).await.map_err(err)
 }

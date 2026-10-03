@@ -29,6 +29,10 @@ pub struct Stt {
     http: reqwest::Client,
     endpoint: String,
     language: String,
+    /// Texte de contexte passé à Whisper (`prompt`). Y mettre le nom de
+    /// l'assistant l'oriente vers la bonne orthographe : sans lui, « Jimmy »
+    /// sortait en « Guimmi » ou « J'y mise ».
+    prompt: String,
     child: Option<Child>,
 }
 
@@ -48,8 +52,15 @@ impl Stt {
             http,
             endpoint: format!("http://127.0.0.1:{port}/inference"),
             language: language.to_string(),
+            prompt: String::new(),
             child: None,
         })
+    }
+
+    /// Contexte de transcription (voir le champ `prompt`).
+    pub fn with_prompt(mut self, prompt: &str) -> Self {
+        self.prompt = prompt.trim().to_string();
+        self
     }
 
     pub fn set_language(&mut self, language: &str) {
@@ -144,6 +155,11 @@ impl Stt {
             .text("temperature", "0.0")
             .text("language", self.language.clone())
             .text("response_format", "json");
+        let form = if self.prompt.is_empty() {
+            form
+        } else {
+            form.text("prompt", self.prompt.clone())
+        };
         let response = self
             .http
             .post(&self.endpoint)

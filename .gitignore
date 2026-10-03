@@ -46,4 +46,4 @@ dist-ssr/
 # ── Système ────────────────────────────────────────────────────────────────
 Thumbs.db
 desktop.ini
-.DS_Store
+.DS_Store/data/ui-test/

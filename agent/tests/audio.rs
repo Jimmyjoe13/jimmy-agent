@@ -128,7 +128,11 @@ async fn ecoute_permanente_demarre() {
 
     println!("micro ouvert, whisper-server prêt");
     runtime.stop();
-    app.stt.lock().await.as_mut().map(|s| s.shutdown());
+    // `shutdown` est asynchrone : sans `.await`, le serveur n'était jamais arrêté.
+    let mut garde = app.stt.lock().await;
+    if let Some(stt) = garde.as_mut() {
+        stt.shutdown().await;
+    }
 }
 
 /// Le PCM brut de Fish Audio doit être décodable sans dépendance.
@@ -238,4 +242,152 @@ async fn commande_transcrite_par_le_modele_precis() {
             stt.shutdown().await;
         }
     }
+}
+
+/// Diagnostic : niveau RMS réel du micro (après mixage mono 16 kHz) pendant
+/// que Jimmy parle sur les haut-parleurs. Sert à régler le seuil du VAD.
+#[tokio::test]
+#[ignore = "ouvre le micro, consulte Fish Audio, joue du son"]
+async fn niveau_du_micro_pendant_la_parole() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    let settings = app.settings();
+    let runtime = Arc::new(VoiceRuntime::new(16_000));
+    runtime.start().expect("micro");
+    let speech = app
+        .tts
+        .speak(
+            &app.secrets.openrouter_api_key,
+            &settings.tts.model,
+            &settings.tts.voice,
+            "Jimmy, quelle heure est-il ?",
+            settings.tts.chars_per_minute,
+        )
+        .await
+        .expect("synthèse");
+    // Silence de référence, puis lecture.
+    let rms = |w: &[f32]| (w.iter().map(|s| s * s).sum::<f32>() / w.len().max(1) as f32).sqrt();
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    println!("silence : RMS {:.4}", rms(&runtime.take_window(8_000)));
+    let bytes = speech.bytes.clone();
+    let rate = speech.sample_rate;
+    let lecture = std::thread::spawn(move || play_bytes(&bytes, rate));
+    let mut max = 0f32;
+    for _ in 0..12 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let level = rms(&runtime.take_window(4_000));
+        max = max.max(level);
+        println!("pendant la parole : RMS {level:.4}");
+    }
+    let _ = lecture.join();
+    println!("maximum : {max:.4} (seuil VAD actuel : {})", settings.voice.vad_threshold);
+    runtime.stop();
+}
+
+/// Écoute de bout en bout, sans micro : une phrase synthétisée est injectée
+/// dans le tampon comme si elle venait du micro, atténuée pour imiter un micro
+/// peu sensible, sur un bruit de fond. La vraie boucle d'écoute doit :
+/// détecter la parole (VAD adaptatif), reconnaître « Jimmy », transcrire la
+/// commande avec le modèle précis, faire répondre l'agent.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_reconnait_jimmy_et_repond() {
+    use jimmy_agent::core::types::AgentEvent;
+
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let settings = app.settings();
+    let debut_test = chrono::Utc::now().to_rfc3339();
+
+    // Phrase synthétisée → mono 16 kHz, ramenée à un RMS de 0,008 (en dessous
+    // de l'ancien seuil fixe de 0,012 : c'est le cas du micro intégré).
+    let speech = app
+        .tts
+        .speak(
+            &app.secrets.openrouter_api_key,
+            &settings.tts.model,
+            &settings.tts.voice,
+            "Jimmy, quelle heure est-il ?",
+            settings.tts.chars_per_minute,
+        )
+        .await
+        .expect("synthèse");
+    let source: Vec<f32> = speech
+        .bytes
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+        .collect();
+    let ratio = speech.sample_rate as f64 / 16_000.0;
+    let mut phrase: Vec<f32> = (0..(source.len() as f64 / ratio) as usize)
+        .map(|i| source[(i as f64 * ratio) as usize])
+        .collect();
+    let rms = (phrase.iter().map(|s| s * s).sum::<f32>() / phrase.len() as f32).sqrt();
+    for s in phrase.iter_mut() {
+        *s *= 0.008 / rms;
+    }
+
+    // Bruit de fond faible et déterministe (RMS ≈ 0,0015).
+    let mut graine: u32 = 12345;
+    let mut bruit = move |n: usize| -> Vec<f32> {
+        (0..n)
+            .map(|_| {
+                graine = graine.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                ((graine >> 16) as f32 / 32768.0 - 1.0) * 0.0026
+            })
+            .collect()
+    };
+
+    let runtime = Arc::new(VoiceRuntime::new(16_000));
+    runtime.start_without_device();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
+    let ecoute = app.clone().spawn_voice_listener(runtime.clone(), tx);
+
+    // Alimentation en temps réel, par blocs de 100 ms : 2 s de fond, la
+    // phrase, puis 4 s de fond pour la fin de phrase.
+    let injecteur = runtime.clone();
+    let alimentation = tokio::spawn(async move {
+        let mut flux = bruit(32_000);
+        flux.extend_from_slice(&phrase);
+        flux.extend(bruit(64_000));
+        for bloc in flux.chunks(1_600) {
+            injecteur.inject(bloc);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+
+    let mut entendu_reveil = false;
+    let mut reponse = String::new();
+    let limite = tokio::time::Instant::now() + std::time::Duration::from_secs(150);
+    while let Ok(Some(event)) = tokio::time::timeout_at(limite, rx.recv()).await {
+        match &event {
+            AgentEvent::Heard { text, matched } => {
+                println!("entendu ({}) : « {text} »", if *matched { "réveil" } else { "rien" });
+                entendu_reveil |= *matched;
+            }
+            AgentEvent::State { state, detail } => println!("état : {state:?} {detail}"),
+            AgentEvent::Final { text } => {
+                println!("réponse : « {text} »");
+                reponse = text.clone();
+                break;
+            }
+            AgentEvent::Failed { message } => panic!("échec de l'agent : {message}"),
+            _ => {}
+        }
+    }
+    runtime.stop();
+    alimentation.abort();
+    ecoute.abort();
+
+    // Nettoyage : la session vocale créée par le test sort de l'historique.
+    if let Ok(sessions) = app.history.sessions(20) {
+        for s in sessions.iter().filter(|s| s.title == "Session vocale" && s.created_at >= debut_test) {
+            let _ = app.history.delete_session(&s.id);
+        }
+    }
+
+    assert!(entendu_reveil, "le mot d'éveil n'a pas été reconnu");
+    assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu");
 }

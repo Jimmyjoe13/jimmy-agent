@@ -1,6 +1,6 @@
 /** Vue Paramètres : modèle, voix, permissions, démarrage, diagnostic. */
 import { api, type Settings, type StartupMode } from "../api";
-import { attempt, guard, h, mount, toast } from "../ui";
+import { QUALITY_LABEL, attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 
 export function settingsView(ctx: AppContext): HTMLElement {
@@ -19,7 +19,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const sttSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const commandSelect = h("select", { class: "field" }) as HTMLSelectElement;
-  const languageInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const wakeInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
   const skinSelect = h("select", { class: "field" }) as HTMLSelectElement;
@@ -56,12 +56,16 @@ export function settingsView(ctx: AppContext): HTMLElement {
     }
     commandSelect.value = settings.stt.command_model;
 
-    languageInput.value = settings.stt.language;
+    mount(languageSelect);
+    for (const [code, label] of LANGUAGES) {
+      languageSelect.append(h("option", { value: code }, label));
+    }
+    languageSelect.value = settings.stt.language;
     wakeInput.value = settings.stt.wake_word;
 
     mount(qualitySelect);
     for (const level of ["low", "medium", "high"]) {
-      qualitySelect.append(h("option", { value: level }, level));
+      qualitySelect.append(h("option", { value: level }, QUALITY_LABEL[level]));
     }
     qualitySelect.value = settings.avatar.quality;
 
@@ -94,7 +98,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.tts.voice = voiceSelect.value;
     settings.stt.model = sttSelect.value;
     settings.stt.command_model = commandSelect.value;
-    settings.stt.language = languageInput.value.trim();
+    settings.stt.language = languageSelect.value;
     settings.stt.wake_word = wakeInput.value.trim() || "jimmy";
     settings.avatar.quality = qualitySelect.value;
     settings.avatar.skin = skinSelect.value;
@@ -102,13 +106,22 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.synaptiq.enabled = synaptiqEnabled.checked;
     settings.tts.cues = cuesEnabled.checked;
 
-    await guard(() => api.saveSettings(settings as Settings), "enregistrement");
+    const before = ctx.status.stt;
+    if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
     await ctx.refreshStatus();
-    toast("Paramètres enregistrés");
+    const sttChanged =
+      before.model !== settings.stt.model ||
+      before.command_model !== settings.stt.command_model ||
+      before.language !== settings.stt.language;
+    toast(
+      sttChanged && ctx.voice?.running
+        ? "Paramètres enregistrés — coupe et relance l'écoute (page Voix) pour appliquer les modèles."
+        : "Paramètres enregistrés",
+    );
   }
 
   async function applyStartup() {
-    await guard(() => api.setStartup(startupSelect.value as StartupMode), "démarrage automatique");
+    if (!(await attempt(() => api.setStartup(startupSelect.value as StartupMode), "démarrage automatique"))) return;
     await persist();
   }
 
@@ -117,12 +130,12 @@ export function settingsView(ctx: AppContext): HTMLElement {
       container,
       h(
         "header",
-        { class: "view-header" },
-        h("h2", {}, "Paramètres"),
+        { class: "view-header sticky" },
+        h("p", { class: "note" }, "Les changements ne sont appliqués qu'après « Enregistrer »."),
         h(
           "div",
           { class: "row" },
-          h("button", { class: "ghost", onclick: () => void load() }, "Recharger"),
+          h("button", { class: "ghost", onclick: () => void load() }, "Annuler"),
           h("button", { class: "primary", onclick: () => void persist() }, "Enregistrer"),
         ),
       ),
@@ -147,14 +160,14 @@ export function settingsView(ctx: AppContext): HTMLElement {
           "whisper.cpp tourne en local : l'audio n'est jamais envoyé dans le cloud.",
         ),
         field("Modèle du wake word (rapide)", sttSelect),
-        field("Modèle de la commande (précis, au prochain démarrage de l'écoute)", commandSelect),
-        field("Langue", languageInput, "fr"),
+        field("Modèle de la commande (précis)", commandSelect),
+        field("Langue", languageSelect),
         field("Mot d'activation", wakeInput, "jimmy"),
       ),
       card(
         "Avatar",
         h("p", { class: "note" }, "Rendu 3D par Godot, sur un serveur HTTP local."),
-        field("Qualité graphique", qualitySelect, "low / medium / high"),
+        field("Qualité graphique", qualitySelect),
         field("Skin", skinSelect),
         h(
           "div",
@@ -178,8 +191,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
             {
               class: "ghost",
               onclick: async () => {
-                await guard(() => api.avatarStop(), "avatar");
+                if (!(await attempt(() => api.avatarStop(), "avatar"))) return;
                 await ctx.refreshStatus();
+                toast("Avatar arrêté");
               },
             },
             "Arrêter l'avatar",
@@ -242,21 +256,24 @@ export function settingsView(ctx: AppContext): HTMLElement {
       const rule = permissions[key];
       const checkbox = h("input", { type: "checkbox" }) as HTMLInputElement;
       checkbox.checked = rule.granted;
+      const label = h("span", {}, rule.granted ? "accordé" : "refusé");
       checkbox.addEventListener("change", () => {
         rule.granted = checkbox.checked;
+        // Le libellé suivait l'état initial et ne changeait jamais.
+        label.textContent = checkbox.checked ? "accordé" : "refusé";
       });
       return h(
         "div",
         { class: "permission-row" },
         h("strong", {}, key),
-        h("label", { class: "toggle" }, checkbox, h("span", {}, rule.granted ? "accordé" : "refusé")),
+        h("label", { class: "toggle" }, checkbox, label),
         h(
           "details",
           {},
           h("summary", {}, "motifs autorisés"),
           h(
             "div",
-            { class: "note" },
+            { class: "note pre" },
             `chemins : ${rule.allow_paths.join(", ") || "tous"}\ninterdits : ${rule.deny_commands.join(", ") || "aucun"}`,
           ),
         ),
@@ -283,7 +300,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
           {
             class: "primary",
             onclick: async () => {
-              await guard(() => api.savePermissions(permissions), "permissions");
+              if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
               await ctx.refreshStatus();
               render();
               toast("Permissions enregistrées");
@@ -298,6 +315,16 @@ export function settingsView(ctx: AppContext): HTMLElement {
   void load();
   return container;
 }
+
+/** Langues proposées pour la reconnaissance vocale (codes Whisper). */
+const LANGUAGES: [string, string][] = [
+  ["fr", "Français"],
+  ["en", "Anglais"],
+  ["es", "Espagnol"],
+  ["de", "Allemand"],
+  ["it", "Italien"],
+  ["auto", "Détection automatique"],
+];
 
 export function card(title: string, ...children: (Node | string | null | false)[]): HTMLElement {
   return h("section", { class: "card" }, h("h3", {}, title), ...children);

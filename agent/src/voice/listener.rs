@@ -52,55 +52,83 @@ impl App {
             let end_of_speech = Duration::from_millis(settings.voice.end_of_speech_ms);
             let hop = Duration::from_millis(450);
 
-            let mut last_beat = Instant::now();
+            // Une seule boucle par démarrage du micro : si l'écoute est
+            // arrêtée puis relancée, la génération change et cette boucle-ci
+            // s'arrête, même si `is_running` est de nouveau vrai.
+            let generation = runtime.generation();
+            let alive = |runtime: &VoiceRuntime| runtime.is_running() && runtime.generation() == generation;
             log::info!("[voice] écoute démarrée — mot d'activation « {} »", settings.stt.wake_word);
 
-            while runtime.is_running() {
-                tokio::time::sleep(hop).await;
-                if last_beat.elapsed() > Duration::from_secs(300) {
-                    emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
-                    last_beat = Instant::now();
-                    continue;
-                }
-                last_beat = Instant::now();
+            let window_samples = (rate as f64 * wake_window.as_secs_f64()) as usize;
+            // Le VAD regarde le passé récent (2 pas) : sur toute la fenêtre de
+            // 2,4 s, un « Jimmy » de 0,5 s était dilué sous le seuil.
+            let recent_samples = (rate as f64 * hop.as_secs_f64() * 2.0) as usize;
 
-                let window_samples = (rate as f64 * wake_window.as_secs_f64()) as usize;
-                if !runtime.voice_activity(window_samples, settings.voice.vad_threshold) {
+            // VAD adaptatif : le seuil suit le bruit de fond mesuré (3×),
+            // plafonné par le réglage. Un seuil fixe de 0,012 ne se
+            // déclenchait jamais sur un micro peu sensible (micro intégré
+            // mesuré à 0,002 au repos, 0,004 avec de la parole à distance).
+            let mut noise_floor: f32 = 0.002;
+
+            while alive(&runtime) {
+                tokio::time::sleep(hop).await;
+                let level = runtime.level(recent_samples);
+                let threshold = vad_threshold(noise_floor, settings.voice.vad_threshold);
+                if level <= threshold {
+                    // Pas de parole : le bruit de fond s'adapte (lentement).
+                    if level > 0.0 {
+                        noise_floor = noise_floor * 0.9 + level * 0.1;
+                    }
                     continue;
                 }
+                *self.last_vad_threshold.lock().unwrap() = threshold;
 
                 // 1. Fenêtre courte : le wake word est-il là ?
                 let Some(text) = transcribe(&self, &runtime, window_samples, rate).await else {
                     continue;
                 };
-                if text.is_empty() {
+                if text.is_empty() || !alive(&runtime) {
                     continue;
                 }
-                if !matches_wake_word(&text, &settings.stt.wake_word) {
-                    log::trace!("[voice] parole sans wake word : « {text} »");
+                let matched = matches_wake_word(&text, &settings.stt.wake_word);
+                emit(&events, AgentEvent::Heard { text: text.clone(), matched }).await;
+                if !matched {
+                    log::debug!("[voice] parole sans wake word : « {text} »");
                     continue;
                 }
+                log::info!("[voice] wake word entendu : « {text} »");
 
                 // 2. Le wake word est passé : on attend la fin de la phrase.
                 emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: text.clone() }).await;
-                let command = if strip_wake_word(&text, &settings.stt.wake_word).trim().is_empty() {
-                    // « Jimmy » seul, suivi d'une pause : Jimmy répond « Oui ? »,
-                    // puis écoute. Le micro est purgé après le son, sinon sa
-                    // propre voix (haut-parleur → micro) entrerait dans la
-                    // commande. Délai de grâce : laisser le temps de commencer.
+                // On écoute d'abord la phrase jusqu'au silence, à partir de la
+                // fenêtre qui contient le nom. Piège corrigé : la détection
+                // tombe souvent *pendant* la phrase (la fenêtre ne contient
+                // encore que « Jimmy »). Conclure « Jimmy seul » faisait jouer
+                // « Oui ? » puis purger le micro… en effaçant la commande en
+                // train d'être dite.
+                let utterance =
+                    collect_utterance(&self, &runtime, window_samples, rate, hop, end_of_speech, MIN_UTTERANCE, threshold)
+                        .await
+                        .unwrap_or_default();
+                let command = if strip_wake_word(&utterance, &settings.stt.wake_word).trim().is_empty() {
+                    // Vraiment « Jimmy » seul, suivi d'une pause : Jimmy répond
+                    // « Oui ? », puis écoute. Le micro est purgé après le son
+                    // (sa propre voix ne doit pas entrer dans la commande), et
+                    // un délai de grâce laisse le temps de commencer à parler.
                     super::cues::play(&self, super::cues::Cue::Listening).await;
                     runtime.drain();
-                    collect_utterance(&self, &runtime, 0, rate, hop, end_of_speech, AFTER_CUE_GRACE).await
+                    collect_utterance(&self, &runtime, 0, rate, hop, end_of_speech, AFTER_CUE_GRACE, threshold)
+                        .await
+                        .unwrap_or_default()
                 } else {
-                    // La commande suit déjà le wake word : aucun son, il
-                    // couperait la parole.
-                    collect_utterance(&self, &runtime, window_samples, rate, hop, end_of_speech, MIN_UTTERANCE).await
-                }
-                .unwrap_or_default();
+                    utterance
+                };
                 let command = strip_wake_word(&command, &settings.stt.wake_word);
                 if command.trim().is_empty() {
-                    emit(&events, AgentEvent::Notice { message: "rien d comprehensible dans la phrase".into() }).await;
+                    emit(&events, AgentEvent::Notice { message: "Je n'ai rien compris après « Jimmy ».".into() }).await;
                     emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
+                    // Sinon le même « Jimmy » serait redétecté au tour suivant.
+                    runtime.drain();
                     continue;
                 }
                 log::info!("[voice] commande : « {command} »");
@@ -130,10 +158,19 @@ impl App {
                         speak(&self, &format!("Désolé, je n'ai pas pu faire ça : {error}.")).await;
                     }
                 }
+                // Le tampon contient maintenant la voix de Jimmy lui-même
+                // (haut-parleur → micro) : s'il prononce « Jimmy », il se
+                // redéclencherait. On repart d'un tampon vide.
+                runtime.drain();
             }
             log::info!("[voice] écoute arrêtée");
         })
     }
+}
+
+/// Seuil de parole : 3× le bruit de fond, entre 0,0035 et le plafond réglé.
+pub fn vad_threshold(noise_floor: f32, ceiling: f32) -> f32 {
+    (noise_floor * 3.0).clamp(0.0035, ceiling.max(0.0035))
 }
 
 /// Accumule des échantillons jusqu'au silence, puis transcrit la phrase entière.
@@ -145,6 +182,7 @@ async fn collect_utterance(
     hop: Duration,
     end_of_speech: Duration,
     min_duration: Duration,
+    threshold: f32,
 ) -> Option<String> {
     let mut buffer: Vec<f32> = runtime.take_window(initial_samples);
     let started = Instant::now();
@@ -160,10 +198,9 @@ async fn collect_utterance(
         if recent.is_empty() {
             break;
         }
-        let talking = crate::providers::stt::is_speech(
-            &recent,
-            app.settings().voice.vad_threshold * 1.4,
-        );
+        // Même seuil que celui qui a déclenché l'écoute : la fin de phrase
+        // est détectée relativement au bruit de ce micro-ci.
+        let talking = crate::providers::stt::is_speech(&recent, threshold);
         silence = if talking { Duration::ZERO } else { silence + hop };
         let fresh = recent.len().saturating_sub(step);
         buffer.extend_from_slice(&recent[fresh..]);

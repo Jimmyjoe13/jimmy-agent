@@ -39,10 +39,44 @@ fn show_main(state: tauri::State<'_, AppState>) {
     }
 }
 
-pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+/// Journal écrit à la fois sur stderr et dans `data/logs/jimmy.log`.
+///
+/// La release est une application fenêtrée, sans console : sur stderr seul,
+/// tous les logs étaient perdus, et une panne de l'écoute était impossible à
+/// diagnostiquer.
+struct Tee(std::fs::File);
 
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+fn init_logging(paths: &Paths) {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    let dir = paths.data.join("logs");
+    let file = std::fs::create_dir_all(&dir).ok().and_then(|_| {
+        let path = dir.join("jimmy.log");
+        // Rotation minimale : au-delà de 5 Mo, l'ancien journal devient .1.
+        if std::fs::metadata(&path).map(|m| m.len() > 5 * 1024 * 1024).unwrap_or(false) {
+            let _ = std::fs::rename(&path, dir.join("jimmy.log.1"));
+        }
+        std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
+    });
+    if let Some(file) = file {
+        builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
+    }
+    builder.init();
+}
+
+pub fn run() {
     let paths = Paths::discover().expect("chemins Jimmy introuvables");
+    init_logging(&paths);
 
     // Le `.env` est chargé avant tout : les secrets doivent exister avant la
     // construction de l'application, sinon les clients tourneraient à vide. Les
@@ -103,8 +137,23 @@ pub fn run() {
                     log::warn!("[bridge] {error}");
                 }
 
+                let window_for_voice = state.window.clone();
                 handle.manage(state);
-                handle.manage(Arc::new(VoiceRuntime::new(settings.voice.input_sample_rate)));
+                let runtime = Arc::new(VoiceRuntime::new(settings.voice.input_sample_rate));
+                handle.manage(runtime.clone());
+
+                // Reprise de l'écoute : si l'utilisateur l'avait laissée
+                // active, Jimmy l'est de nouveau au lancement. Avant, il
+                // restait sourd jusqu'à un passage par la vue Voix.
+                if settings.voice.listen_on_start && settings.voice.enabled && settings.stt.enabled {
+                    let app_for_voice = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match commands::start_listening(app_for_voice, runtime, window_for_voice).await {
+                            Ok(()) => log::info!("[voice] écoute reprise au lancement"),
+                            Err(error) => log::warn!("[voice] reprise de l'écoute impossible : {error}"),
+                        }
+                    });
+                }
 
                 // L'avatar démarre ici, et non dans la commande `bootstrap` :
                 // Jimmy doit être sur le bureau même si l'interface n'a pas
@@ -189,6 +238,7 @@ pub fn run() {
                 commands::avatar_say,
                 commands::avatar_quality,
                 commands::avatar_skin,
+                commands::voice_status,
                 commands::wake_word_test,
                 commands::wake_word_strip,
                 commands::doctor,

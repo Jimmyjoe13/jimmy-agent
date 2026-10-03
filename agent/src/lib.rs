@@ -57,7 +57,20 @@ pub struct App {
     /// Second serveur, modèle précis, réservé à la commande. `None` = la
     /// commande passe par `stt` (repli).
     pub stt_command: tokio::sync::Mutex<Option<Stt>>,
+    /// Dernier seuil de VAD utilisé par l'écoute (diagnostic, vue Voix).
+    pub last_vad_threshold: Mutex<f32>,
     pub godot: tokio::sync::Mutex<Option<tokio::process::Child>>,
+}
+
+/// Contexte donné à Whisper : le nom de l'assistant, capitalisé, en début
+/// de phrase. « jimmy » → « Jimmy, ».
+pub fn whisper_prompt(wake_word: &str) -> String {
+    let word = wake_word.trim();
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}, ", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
 }
 
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.
@@ -145,6 +158,7 @@ impl App {
             synaptiq,
             stt: tokio::sync::Mutex::new(None),
             stt_command: tokio::sync::Mutex::new(None),
+            last_vad_threshold: Mutex::new(0.0),
             godot: tokio::sync::Mutex::new(None),
         }))
     }
@@ -263,44 +277,89 @@ impl App {
     }
 
     /// Démarre whisper.cpp et la capture microphone.
+    /// Démarre les serveurs de reconnaissance (si besoin) puis le micro.
+    ///
+    /// Renvoie une erreur si la voix est désactivée : avant, la fonction
+    /// réussissait sans rien ouvrir et l'interface affichait « active ».
     pub async fn start_voice(&self, runtime: &voice::VoiceRuntime) -> Result<()> {
         let settings = self.settings();
         if !settings.voice.enabled || !settings.stt.enabled {
-            return Ok(());
+            return Err(Error::Voice(
+                "la voix ou la reconnaissance vocale est désactivée dans les paramètres".into(),
+            ));
+        }
+        self.ensure_stt().await?;
+        runtime.start()
+    }
+
+    /// Démarre les serveurs whisper s'ils ne tournent pas déjà. Idempotent.
+    ///
+    /// Piège corrigé : remplacer un client `Stt` existant le détruisait, et
+    /// son `kill_on_drop` tuait le serveur que le nouveau client venait de
+    /// juger « déjà actif ». Au second démarrage de l'écoute, plus de
+    /// reconnaissance. On garde désormais le client tant qu'il répond.
+    pub async fn ensure_stt(&self) -> Result<()> {
+        let settings = self.settings();
+        if !settings.stt.enabled {
+            return Err(Error::Stt("la reconnaissance vocale est désactivée".into()));
         }
         let server_exe = self.paths.whisper_dir().join("Release").join(&settings.stt.server_exe);
-        let model = self
-            .paths
-            .whisper_dir()
-            .join("models")
-            .join(&settings.stt.model);
-        let mut stt = providers::Stt::new(settings.stt.port, &settings.stt.language)?;
-        stt.ensure_server(&server_exe, &model, settings.stt.threads).await?;
+        let models = self.paths.whisper_dir().join("models");
+
         {
             let mut guard = self.stt.lock().await;
-            *guard = Some(stt);
+            let healthy = match guard.as_ref() {
+                Some(stt) => stt.health().await,
+                None => false,
+            };
+            if !healthy {
+                if let Some(mut old) = guard.take() {
+                    old.shutdown().await;
+                }
+                let mut stt = providers::Stt::new(settings.stt.port, &settings.stt.language)?
+                    .with_prompt(&whisper_prompt(&settings.stt.wake_word));
+                stt.ensure_server(&server_exe, &models.join(&settings.stt.model), settings.stt.threads)
+                    .await?;
+                *guard = Some(stt);
+            }
         }
 
         // Second serveur pour la commande. Son échec n'est pas bloquant : la
         // commande retombe sur le modèle du wake word.
         let command_model = settings.stt.command_model.trim();
-        if !command_model.is_empty() && command_model != settings.stt.model {
-            let path = self.paths.whisper_dir().join("models").join(command_model);
-            let started = async {
-                let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?;
-                stt.ensure_server(&server_exe, &path, settings.stt.threads).await?;
-                Ok::<_, Error>(stt)
-            }
-            .await;
-            match started {
-                Ok(stt) => {
-                    log::info!("[stt] commande : {command_model} (port {})", settings.stt.command_port);
-                    *self.stt_command.lock().await = Some(stt);
-                }
-                Err(error) => log::warn!("[stt] modèle de commande indisponible, repli sur {} : {error}", settings.stt.model),
-            }
+        if command_model.is_empty() || command_model == settings.stt.model {
+            return Ok(());
         }
-        runtime.start()
+        let mut guard = self.stt_command.lock().await;
+        let healthy = match guard.as_ref() {
+            Some(stt) => stt.health().await,
+            None => false,
+        };
+        if healthy {
+            return Ok(());
+        }
+        if let Some(mut old) = guard.take() {
+            old.shutdown().await;
+        }
+        let started = async {
+            let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?
+                .with_prompt(&whisper_prompt(&settings.stt.wake_word));
+            stt.ensure_server(&server_exe, &models.join(command_model), settings.stt.threads)
+                .await?;
+            Ok::<_, Error>(stt)
+        }
+        .await;
+        match started {
+            Ok(stt) => {
+                log::info!("[stt] commande : {command_model} (port {})", settings.stt.command_port);
+                *guard = Some(stt);
+            }
+            Err(error) => log::warn!(
+                "[stt] modèle de commande indisponible, repli sur {} : {error}",
+                settings.stt.model
+            ),
+        }
+        Ok(())
     }
 
     /// Transcrit une commande avec le modèle précis, ou le modèle du wake

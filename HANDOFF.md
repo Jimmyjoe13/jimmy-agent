@@ -3,9 +3,9 @@
 État du prototype au **3 octobre 2026**, fin de la session « avatar +
 fonctionnalités ».
 
-**Objectif de la prochaine session :** compiler la release, **utiliser Jimmy
-au quotidien**, et vérifier en conditions réelles ce que les tests ne voient
-pas (écho de « Oui ? », serveur MCP du catalogue).
+**Objectif de la prochaine session :** **utiliser Jimmy au quotidien** à la
+voix, et vérifier en conditions réelles ce que les tests ne voient pas
+(serveur MCP du catalogue, voix humaine à distance du micro intégré).
 Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
@@ -35,6 +35,9 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | Tests | 37 unitaires + 3 MCP + 1 mémoire, tous verts (`cargo test --workspace`) |
 | Deux whisper-server | `--test audio commande_transcrite -- --ignored` : phrase Fish Audio transcrite par `small` en 3 s |
 | Mémoire sémantique | `--test memory_semantic -- --ignored` : « véhicule » retrouve « voiture » (0,50), le hachage ne trouve rien |
+| **Écoute de bout en bout** | `--test audio ecoute_reconnait -- --ignored` : phrase injectée à RMS 0,008 → « Jimmy? » reconnu → « quelle heure est-il ? » → réponse de l'agent, 24 s |
+| **Interface** | `scripts\test-ui.ps1` : 12 parcours sur la vraie application (CDP), 0 erreur JS |
+| Tests | 43 unitaires (dont mixage micro et mot d'éveil phonétique) |
 
 ---
 
@@ -84,6 +87,49 @@ En vocal, réponse et erreur sont déjà dites à voix haute ; « C'est prêt. �
 « Oups » ne servent qu'au chat texte.
 
 ---
+
+# Audit écoute + interface (3 octobre 2026, fin de journée)
+
+## Pourquoi l'écoute ne marchait pas — quatre causes cumulées
+
+1. **Capture micro fausse** (`voice/mod.rs`). Le flux cpal est entrelacé et à
+   la fréquence du périphérique (ici 48 kHz **stéréo**). Il était stocké tel
+   quel puis lu comme du mono 16 kHz : Whisper recevait un son ralenti, et la
+   fenêtre de 2,4 s du mot d'éveil n'en contenait que 0,4 s. Désormais
+   `Downmixer` convertit en mono 16 kHz **dans la callback** ; le tampon est
+   toujours au format d'analyse.
+2. **Seuil de VAD fixe trop haut** (0,012). Micro intégré mesuré : 0,002 au
+   repos. VAD adaptatif : 3 × bruit de fond, entre 0,0035 et le réglage.
+3. **« Jimmy » mal orthographié par Whisper** (« Guimmi »). Prompt Whisper
+   « Jimmy, » sur chaque inférence + comparaison phonétique (`phonetic`) +
+   interjections acceptées (« hé Jimmy »).
+4. **Détection en cours de phrase** : la fenêtre ne contenait que « Jimmy »,
+   le code concluait « Jimmy seul », jouait « Oui ? » et purgeait le micro…
+   pendant que la commande était dite. On écoute maintenant la phrase jusqu'au
+   silence avant de décider.
+
+Plus : relancer l'écoute **tuait les serveurs whisper** (piège 24), plusieurs
+boucles d'écoute pouvaient tourner sur le même micro (compteur de
+génération), et l'écoute ne reprenait jamais au lancement
+(`voice.listen_on_start`, mis à jour par les boutons).
+
+## Interface — corrigé
+
+- **Vues empilées** : `render()` faisait `content.append` → chaque navigation
+  ajoutait une vue sous les précédentes (10 vues montées après un tour).
+- Écouteurs d'événements jamais retirés (un de plus à chaque passage par le
+  chat) ; remplacés par `ctx.onEvent` / `ctx.onCleanup`, libérés à la sortie.
+- Journal d'activité du chat jamais inséré dans la page.
+- Réponse : bulle « Jimmy réfléchit » + bouton occupé jusqu'à la réponse
+  (avant : libéré au bout de 400 ms). Pastille d'état globale, retour à « prêt ».
+- Libellés « Jimmy/Vous » en double dans les bulles ; titres en double.
+- État de l'écoute deviné par la vue (retombait à « arrêtée ») → `voice_status`.
+- Vue Voix : fil « Ce que Jimmy entend » (événement `heard`), vumètre en
+  direct, état des deux serveurs ; « Enregistrer » marche sans écoute active.
+- Toasts de succès affichés même en cas d'échec (`guard` sur des `void`).
+- Onboarding : prénom pré-rempli « Jimmy », fermeture même si l'enregistrement
+  échouait. Libellés anglais traduits (qualité, états, types de souvenirs).
+- Logs de la release perdus (application sans console) → `data/logs/jimmy.log`.
 
 ## Pièges connus
 
@@ -220,6 +266,30 @@ chemin.
 skin des Paramètres jamais poussés à Godot. Avant de dire « c'est en place »,
 chercher **l'appelant**, pas seulement la définition.
 
+**23. Un flux micro cpal est entrelacé, à la fréquence du périphérique.**
+Ne jamais stocker `data` tel quel : mixer les canaux et rééchantillonner à la
+capture (`Downmixer`). Le casque Jabra sort en 16 kHz mono, le micro intégré
+en 48 kHz stéréo : les deux doivent marcher.
+
+**24. Remplacer un client `Stt` tue son serveur.**
+`kill_on_drop` : écraser `app.stt` détruit l'ancien client et son processus,
+même si le nouveau venait de le juger « déjà actif ». `ensure_stt` garde le
+client tant qu'il répond.
+
+**25. Le micro intégré n'entend pas les haut-parleurs (annulation d'écho).**
+Mesuré : 0,004 au maximum pendant la synthèse. Impossible de tester l'écoute
+en faisant parler Jimmy. Tester par injection : `start_without_device` +
+`inject` (test `ecoute_reconnait_jimmy_et_repond`).
+
+**26. Le débogage distant de WebView2 ne doit jamais rester ouvert.**
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` donne le
+contrôle total de l'interface à tout processus local. `test-ui.ps1` relance
+toujours Jimmy sans ce port à la fin.
+
+**27. Un `heredoc` bash avec une apostrophe dans un script Python casse.**
+Pour patcher des fichiers contenant du français, écrire le script dans un
+fichier (scratchpad) plutôt que `python3 - <<'EOF'`.
+
 ---
 
 ## Prochaines étapes
@@ -236,16 +306,15 @@ chercher **l'appelant**, pas seulement la définition.
 ### Ensuite
 
 3. **Utiliser Jimmy au quotidien une semaine** — le seul test qui compte.
-4. Vérifier en conditions réelles le son « Oui ? » (écho haut-parleur → micro
-   selon la machine) et un serveur MCP réel (`npx -y
-   @modelcontextprotocol/server-filesystem <dossier>`).
+4. Vérifier en conditions réelles un serveur MCP du catalogue (`npx -y
+   @modelcontextprotocol/server-filesystem <dossier>`) et l'écoute à voix
+   humaine, à distance du micro intégré (regarder le vumètre de la vue Voix).
 5. Vue MCP dans l'interface (le statut expose déjà `mcp.servers` et
    `mcp.tools`).
-6. Le test `commande_transcrite` rend « Quelle est la météo… » par « et la
-   météo… » : le début de phrase se perd. Probablement le rééchantillonnage
-   sommaire du test, peut-être le VAD de whisper-server. À vérifier au micro
-   réel avant de toucher aux réglages. (Le double ajout d'audio de
-   `collect_utterance` est corrigé.)
+6. Serveurs whisper orphelins : si Jimmy est tué brutalement, ses
+   `whisper-server` survivent et sont réutilisés au lancement suivant (le
+   contrôle de santé les trouve). Sans gravité, mais un orphelin lancé avec un
+   autre modèle serait réutilisé tel quel.
 
 ### Différé
 
@@ -265,6 +334,8 @@ chercher **l'appelant**, pas seulement la définition.
 .\scripts\build.ps1 -Release -Bundles   # + installateur NSIS
 .\scripts\test-happy.ps1       # test de bout en bout + chaîne audio
 .\scripts\test-happy.ps1 -SkipAudio
+.\scripts\test-ui.ps1        # 12 parcours UI sur la vraie application (CDP)
+.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_reconnait '--' --ignored --nocapture
 .\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\shortcut.ps1 -Autostart   # démarrage avec Windows
 .\scripts\with-msvc.ps1 cargo test

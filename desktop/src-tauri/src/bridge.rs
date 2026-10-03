@@ -23,13 +23,18 @@ pub fn router(state: AppState) -> Router {
 
 async fn open_ui(state: axum::extract::State<AppState>) -> Json<serde_json::Value> {
     log::info!("[bridge] ouverture de l'interface demandée par l'avatar");
-    let handle = state.app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    });
+    // Le résultat est rapporté : avant, la route répondait `ok` même quand la
+    // fenêtre n'avait pas pu s'afficher (piège 15).
+    let Some(window) = state.app_handle.get_webview_window("main") else {
+        log::warn!("[bridge] fenêtre principale introuvable");
+        return Json(serde_json::json!({ "ok": false, "error": "fenêtre principale introuvable" }));
+    };
+    if let Err(error) = window.show() {
+        log::warn!("[bridge] affichage impossible : {error}");
+        return Json(serde_json::json!({ "ok": false, "error": error.to_string() }));
+    }
+    let _ = window.unminimize();
+    let _ = window.set_focus();
     Json(serde_json::json!({ "ok": true }))
 }
 

@@ -1,6 +1,6 @@
 /** Vue Historique : les sessions passées, en local. */
 import { api, type Session } from "../api";
-import { formatTime, h, mount, guard } from "../ui";
+import { attempt, formatTime, h, mount, guard } from "../ui";
 import type { AppContext } from "../context";
 
 export function historyView(ctx: AppContext): HTMLElement {
@@ -52,8 +52,9 @@ export function historyView(ctx: AppContext): HTMLElement {
           {
             class: "danger",
             onclick: async () => {
-              if (!window.confirm(`Supprimer la session « ${session.title} » ?`)) return;
-              await guard(() => api.deleteSession(session.id), "suppression");
+              if (!window.confirm(`Supprimer la session « ${session.title || "Sans titre"} » ?`)) return;
+              if (!(await attempt(() => api.deleteSession(session.id), "suppression"))) return;
+              if (ctx.lastSessionId === session.id) ctx.lastSessionId = null;
               await reload();
             },
           },
@@ -71,13 +72,8 @@ export function historyView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("h2", {}, "Historique"),
+      h("p", { class: "note" }, "Tout est stocké sur cette machine, dans la base locale de Jimmy."),
       h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
-    ),
-    h(
-      "p",
-      { class: "note" },
-      "Tout est stocké sur cette machine, dans la base locale de Jimmy.",
     ),
     list,
   );

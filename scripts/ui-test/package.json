@@ -1,0 +1,8 @@
+{
+  "name": "jimmy-ui-test",
+  "private": true,
+  "description": "Tests de bout en bout de l'interface de Jimmy, pilotée par CDP (WebView2).",
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

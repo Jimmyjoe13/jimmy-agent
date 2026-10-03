@@ -26,7 +26,7 @@
 //! française compte plus que la latence.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub mod cues;
@@ -68,9 +68,17 @@ pub struct VoiceRuntime {
     capture: Mutex<Option<Capture>>,
     running: Arc<AtomicBool>,
     sample_rate: u32,
-    /// Réservoir d'échantillons partagé avec la callback.
+    /// Réservoir d'échantillons partagé avec la callback, **toujours en mono
+    /// à `sample_rate`** : la conversion se fait à la capture.
     buffer: Arc<Mutex<VecDeque<f32>>>,
+    /// Incrémenté à chaque démarrage. Une boucle d'écoute s'arrête dès que la
+    /// génération change : un arrêt suivi d'un redémarrage rapide ne laisse
+    /// jamais deux boucles sur le même micro.
+    generation: AtomicU64,
 }
+
+/// Taille du réservoir, en secondes d'audio.
+const BUFFER_SECONDS: usize = 30;
 
 impl VoiceRuntime {
     pub fn new(sample_rate: u32) -> Self {
@@ -78,8 +86,14 @@ impl VoiceRuntime {
             capture: Mutex::new(None),
             running: Arc::new(AtomicBool::new(false)),
             sample_rate,
-            buffer: Arc::new(Mutex::new(VecDeque::with_capacity(sample_rate as usize * 30))),
+            buffer: Arc::new(Mutex::new(VecDeque::with_capacity(sample_rate as usize * BUFFER_SECONDS))),
+            generation: AtomicU64::new(0),
         }
+    }
+
+    /// Génération courante (voir le champ `generation`).
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     pub fn is_running(&self) -> bool {
@@ -100,42 +114,63 @@ impl VoiceRuntime {
             .map_err(|e| Error::Voice(format!("configuration micro indisponible : {e}")))?;
         let stream_config: cpal::StreamConfig = supported.config();
         let device_rate = stream_config.sample_rate.0;
+        let channels = stream_config.channels;
 
+        // Le tampon repart de zéro : de l'audio d'une session précédente ne
+        // doit pas être pris pour un wake word.
+        self.buffer.lock().unwrap().clear();
         let buffer = self.buffer.clone();
-        let err_fn = |_err| {};
+        let target = self.sample_rate;
+        let err_fn = |error| log::warn!("[voice] flux micro : {error}");
+        // Piège corrigé : le flux est **entrelacé** (G D G D… en stéréo) et à
+        // la fréquence du périphérique (souvent 48 kHz). Il était stocké tel
+        // quel puis découpé comme du mono 16 kHz : Whisper recevait un son
+        // ralenti, et la fenêtre de 2,4 s n'en contenait que 0,4 s.
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    push(&buffer, data.iter().map(|s| *s as f32 / 32768.0).collect::<Vec<_>>());
-                },
-                err_fn,
-                None,
-            ),
-            cpal::SampleFormat::I8 => device.build_input_stream(
-                &stream_config,
-                move |data: &[i8], _: &cpal::InputCallbackInfo| {
-                    push(&buffer, data.iter().map(|s| *s as f32 / 128.0).collect::<Vec<_>>());
-                },
-                err_fn,
-                None,
-            ),
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    push(&buffer, data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0).collect::<Vec<_>>());
-                },
-                err_fn,
-                None,
-            ),
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    push(&buffer, data.to_vec());
-                },
-                err_fn,
-                None,
-            ),
+            cpal::SampleFormat::I16 => {
+                let mut mixer = Downmixer::new(channels, device_rate, target);
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        push(&buffer, mixer.process(data.iter().map(|s| *s as f32 / 32768.0)));
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::I8 => {
+                let mut mixer = Downmixer::new(channels, device_rate, target);
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i8], _: &cpal::InputCallbackInfo| {
+                        push(&buffer, mixer.process(data.iter().map(|s| *s as f32 / 128.0)));
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::U16 => {
+                let mut mixer = Downmixer::new(channels, device_rate, target);
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        push(&buffer, mixer.process(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0)));
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::F32 => {
+                let mut mixer = Downmixer::new(channels, device_rate, target);
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        push(&buffer, mixer.process(data.iter().copied()));
+                    },
+                    err_fn,
+                    None,
+                )
+            }
             other => {
                 return Err(Error::Voice(format!(
                     "format de micro non géré : {other:?}"
@@ -148,7 +183,7 @@ impl VoiceRuntime {
             .play()
             .map_err(|e| Error::Voice(format!("démarrage du flux impossible : {e}")))?;
         log::info!(
-            "[voice] micro ouvert — périphérique à {device_rate} Hz, analyse à {} Hz",
+            "[voice] micro ouvert — périphérique à {device_rate} Hz, {channels} canal(aux), analyse en mono à {} Hz",
             self.sample_rate
         );
 
@@ -157,6 +192,7 @@ impl VoiceRuntime {
             device_rate,
             _device: device,
         });
+        self.generation.fetch_add(1, Ordering::Relaxed);
         self.running.store(true, Ordering::Relaxed);
         Ok(())
     }
@@ -178,21 +214,15 @@ impl VoiceRuntime {
         }
     }
 
-    /// Tire les derniers échantillons du réservoir et les rééchantillonne.
+    /// Les `samples` derniers échantillons (mono, `sample_rate`), sans les
+    /// consommer. Vide si le réservoir n'en contient pas encore autant.
     pub fn take_window(&self, samples: usize) -> Vec<f32> {
         let buffer = self.buffer.lock().unwrap();
-        if buffer.len() < samples {
+        if samples == 0 || buffer.len() < samples {
             return Vec::new();
         }
         let start = buffer.len() - samples;
-        let raw: Vec<f32> = buffer.iter().skip(start).copied().collect();
-        drop(buffer);
-        let device_rate = self.device_rate();
-        if device_rate == self.sample_rate {
-            raw
-        } else {
-            resample(&raw, device_rate, self.sample_rate)
-        }
+        buffer.iter().skip(start).copied().collect()
     }
 
     /// Consomme tout le buffered pour repartir d'une base propre.
@@ -205,26 +235,112 @@ impl VoiceRuntime {
         !window.is_empty() && is_speech(&window, threshold)
     }
 
+    /// Niveau RMS des `samples` derniers échantillons (0 si pas assez
+    /// d'audio). Sert au VAD adaptatif et au vumètre de l'interface.
+    pub fn level(&self, samples: usize) -> f32 {
+        let window = self.take_window(samples);
+        if window.is_empty() {
+            return 0.0;
+        }
+        (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt()
+    }
+
+    /// Tests uniquement : marque l'écoute comme active sans ouvrir de micro.
+    /// Combiné à [`VoiceRuntime::inject`], il fait tourner la vraie boucle
+    /// d'écoute sur un audio connu.
+    #[doc(hidden)]
+    pub fn start_without_device(&self) {
+        self.buffer.lock().unwrap().clear();
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.running.store(true, Ordering::Relaxed);
+    }
+
+    /// Tests uniquement : ajoute de l'audio (mono, `sample_rate`) au tampon,
+    /// comme s'il venait du micro.
+    #[doc(hidden)]
+    pub fn inject(&self, samples: &[f32]) {
+        push(&self.buffer, samples.to_vec());
+    }
+
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    fn device_rate(&self) -> u32 {
-        self.capture
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| c.device_rate)
-            .unwrap_or(self.sample_rate)
+    /// Fréquence réelle du périphérique (diagnostic).
+    pub fn device_rate(&self) -> Option<u32> {
+        self.capture.lock().unwrap().as_ref().map(|c| c.device_rate)
+    }
+}
+
+/// Ramène le flux du micro au format d'analyse : mono, `target` Hz.
+///
+/// Mixage : moyenne des canaux de chaque trame. Rééchantillonnage : moyenne
+/// des échantillons tombant dans chaque période de sortie (filtre « boîte »),
+/// avec une phase conservée d'une callback à l'autre — pas de dérive ni de
+/// coupure entre deux blocs.
+pub struct Downmixer {
+    channels: usize,
+    /// Échantillons d'entrée par échantillon de sortie (48 kHz → 16 kHz : 3).
+    step: f64,
+    phase: f64,
+    sum: f32,
+    count: u32,
+    frame_sum: f32,
+    frame_fill: usize,
+}
+
+impl Downmixer {
+    pub fn new(channels: u16, device_rate: u32, target_rate: u32) -> Self {
+        Downmixer {
+            channels: channels.max(1) as usize,
+            step: device_rate.max(1) as f64 / target_rate.max(1) as f64,
+            phase: 0.0,
+            sum: 0.0,
+            count: 0,
+            frame_sum: 0.0,
+            frame_fill: 0,
+        }
+    }
+
+    pub fn process(&mut self, interleaved: impl Iterator<Item = f32>) -> Vec<f32> {
+        let mut out = Vec::new();
+        for sample in interleaved {
+            self.frame_sum += sample;
+            self.frame_fill += 1;
+            if self.frame_fill < self.channels {
+                continue;
+            }
+            let mono = self.frame_sum / self.channels as f32;
+            self.frame_sum = 0.0;
+            self.frame_fill = 0;
+
+            self.sum += mono;
+            self.count += 1;
+            self.phase += 1.0;
+            if self.phase >= self.step {
+                let value = self.sum / self.count as f32;
+                // Fréquence d'entrée < cible : on répète l'échantillon.
+                while self.phase >= self.step {
+                    out.push(value);
+                    self.phase -= self.step;
+                }
+                self.sum = 0.0;
+                self.count = 0;
+            }
+        }
+        out
     }
 }
 
 fn push(buffer: &Arc<Mutex<VecDeque<f32>>>, samples: Vec<f32>) {
+    if samples.is_empty() {
+        return;
+    }
     let mut buffer = buffer.lock().unwrap();
     // On borne le réservoir : au-delà de 30 s, les échantillons sont périmés.
     let limit = buffer.capacity();
     for sample in samples {
-        if buffer.len() == limit {
+        if buffer.len() >= limit {
             buffer.pop_front();
         }
         buffer.push_back(sample);
@@ -257,16 +373,75 @@ pub fn find_wake_prefix(transcript: &str, wake_word: &str) -> Option<usize> {
     if tokens.is_empty() {
         return None;
     }
-    if tokens[0] == target || levenshtein(tokens[0], &target) <= tolerance_for(&target) {
-        return Some(1);
+    // On accepte une interjection d'appel devant le nom : « hé Jimmy »,
+    // « ok Jimmy ». Au-delà, un « Jimmy » en milieu de phrase n'est pas un
+    // appel.
+    let start = if tokens.len() > 1 && CALL_WORDS.contains(&tokens[0]) { 1 } else { 0 };
+    let rest = &tokens[start..];
+
+    let target_key = phonetic(&target);
+    let first = rest[0];
+    if first == target
+        || levenshtein(first, &target) <= tolerance_for(&target)
+        // Comparaison par la prononciation : Whisper écrit « Guimmi »,
+        // « Gimmy » ou « Djimi » pour « Jimmy ». Tous donnent la clé « jimi ».
+        || levenshtein(&phonetic(first), &target_key) <= tolerance_for(&target_key).min(1)
+    {
+        return Some(start + 1);
     }
     for phrase in KNOWN_PHRASES {
         let parts: Vec<&str> = phrase.split(' ').collect();
-        if tokens.len() >= parts.len() && tokens[..parts.len()] == *parts {
-            return Some(parts.len());
+        if rest.len() >= parts.len() && rest[..parts.len()] == *parts {
+            return Some(start + parts.len());
         }
     }
     None
+}
+
+/// Interjections qui peuvent précéder le nom (« hé Jimmy »).
+const CALL_WORDS: &[&str] = &["he", "hey", "ok", "okay", "eh", "dis", "allo", "bonjour", "salut"];
+
+/// Clé phonétique (français) d'un mot normalisé : ce qui s'entend, pas ce qui
+/// s'écrit. `gu`+voyelle → `g`, `g`+e/i/y → `j`, `dj` → `j`, `y` → `i`,
+/// `ph` → `f`, `h` muet supprimé, lettres doublées fusionnées.
+pub fn phonetic(word: &str) -> String {
+    let chars: Vec<char> = word.chars().collect();
+    let mut out: Vec<char> = Vec::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        let mapped = match c {
+            'g' if next == Some('u') && matches!(chars.get(i + 2), Some('e' | 'i' | 'y')) => {
+                i += 1; // « gu » devant e/i : le u ne s'entend pas
+                'g'
+            }
+            'g' if matches!(next, Some('e' | 'i' | 'y')) => 'j',
+            'd' if next == Some('j') => {
+                i += 1;
+                'j'
+            }
+            'p' if next == Some('h') => {
+                i += 1;
+                'f'
+            }
+            'c' if next == Some('h') => {
+                i += 1;
+                's'
+            }
+            'h' => {
+                i += 1;
+                continue;
+            }
+            'y' => 'i',
+            other => other,
+        };
+        if out.last() != Some(&mapped) {
+            out.push(mapped);
+        }
+        i += 1;
+    }
+    out.into_iter().collect()
 }
 
 /// Normalise une reconnaissance pour comparer au mot d'activation.
@@ -501,6 +676,63 @@ fn decode_wav(bytes: &[u8]) -> Result<Vec<f32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stéréo 48 kHz → mono 16 kHz : une seconde d'entrée doit donner une
+    /// seconde de sortie, et un signal identique sur les deux canaux doit
+    /// garder son amplitude.
+    #[test]
+    fn variantes_phonetiques_du_nom() {
+        // Rendus réels de Whisper pour « Jimmy » (mesurés sur ce projet).
+        for transcript in ["Guimmi, quelle heure est-il ?", "Gimmy ouvre le dossier", "Djimi, analyse ça", "Jimi"] {
+            assert!(matches_wake_word(transcript, "jimmy"), "{transcript}");
+        }
+        assert_eq!(strip_wake_word("Guimmi, quelle heure est-il ?", "jimmy"), "quelle heure est-il ?");
+    }
+
+    #[test]
+    fn interjection_avant_le_nom() {
+        assert!(matches_wake_word("Hé Jimmy, ouvre mes notes", "jimmy"));
+        assert_eq!(strip_wake_word("Ok Jimmy, ouvre mes notes", "jimmy"), "ouvre mes notes");
+    }
+
+    #[test]
+    fn pas_de_faux_positif_phonetique() {
+        for transcript in ["Gimou.", "J'ai besoin d'aide", "Jamais de la vie", "Salut tout le monde", "Il est midi"] {
+            assert!(!matches_wake_word(transcript, "jimmy"), "{transcript}");
+        }
+    }
+
+    #[test]
+    fn stereo_48k_vers_mono_16k() {
+        let mut mixer = Downmixer::new(2, 48_000, 16_000);
+        let mut out = Vec::new();
+        // Plusieurs callbacks de tailles irrégulières : la phase doit tenir.
+        let frames: Vec<f32> = (0..48_000).flat_map(|_| [0.5f32, 0.5]).collect();
+        for chunk in frames.chunks(882) {
+            out.extend(mixer.process(chunk.iter().copied()));
+        }
+        assert_eq!(out.len(), 16_000);
+        assert!(out.iter().all(|v| (v - 0.5).abs() < 1e-6));
+    }
+
+    /// 44,1 kHz mono → 16 kHz : rapport non entier, aucune dérive.
+    #[test]
+    fn mono_44k_vers_16k_sans_derive() {
+        let mut mixer = Downmixer::new(1, 44_100, 16_000);
+        let mut total = 0;
+        for _ in 0..10 {
+            total += mixer.process(std::iter::repeat(0.1f32).take(44_100)).len();
+        }
+        assert!((159_999..=160_001).contains(&total), "{total}");
+    }
+
+    /// Canaux opposés : le mixage les annule (moyenne, pas somme).
+    #[test]
+    fn canaux_moyennes() {
+        let mut mixer = Downmixer::new(2, 16_000, 16_000);
+        let out = mixer.process([1.0f32, -1.0, 0.4, 0.4].into_iter());
+        assert_eq!(out, vec![0.0, 0.4]);
+    }
 
     #[test]
     fn wake_word_exact() {
