@@ -10,6 +10,7 @@ import { Recorder } from "../audio";
 import { QUALITY_LABEL, attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { card } from "./settings";
+import { voicesPanel } from "./voices";
 
 export function voiceView(ctx: AppContext): HTMLElement {
   const recorder = new Recorder();
@@ -218,8 +219,9 @@ export function voiceView(ctx: AppContext): HTMLElement {
   renderListening();
   void ctx.refreshStatus().then(renderListening);
 
-  const voiceLabel =
-    ctx.status.tts.voices.find((v) => v.id === ctx.status.tts.voice)?.label ?? ctx.status.tts.voice;
+  // Bibliothèque de voix : ici, dans l'onglet Voix, là où on la cherche (elle
+  // était enterrée dans les Paramètres, sous la liste des modèles).
+  const voices = voicesPanel({ onApplied: () => void ctx.refreshStatus() });
 
   return h(
     "section",
@@ -241,6 +243,17 @@ export function voiceView(ctx: AppContext): HTMLElement {
       heard,
     ),
     card(
+      "Voix de Jimmy",
+      h(
+        "p",
+        { class: "note" },
+        "La voix avec laquelle Jimmy te parle (Fish Audio). « Écouter » lit une phrase d'essai ; « Choisir » l'applique tout de suite. Cherche dans le catalogue pour en ajouter d'autres.",
+      ),
+      voices,
+      h("h4", {}, "Lire un texte avec la voix actuelle"),
+      h("div", { class: "row" }, ttsInput, ttsButton),
+    ),
+    card(
       "Tester la reconnaissance",
       h("p", { class: "note" }, "Enregistre une phrase avec le micro de la fenêtre, puis lis ce que Whisper en comprend."),
       meter,
@@ -252,11 +265,6 @@ export function voiceView(ctx: AppContext): HTMLElement {
       ),
       transcript,
       deviceList,
-    ),
-    card(
-      "Synthèse vocale",
-      h("p", { class: "note" }, "Voix : ", h("code", {}, voiceLabel), " · modèle : ", h("code", {}, ctx.status.tts.model)),
-      h("div", { class: "row" }, ttsInput, ttsButton),
     ),
     card(
       "Mot d'activation",

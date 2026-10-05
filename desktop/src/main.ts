@@ -46,10 +46,23 @@ async function main() {
   let scope: (() => void)[] = [];
   const handlers = new Set<(event: AgentEvent) => void>();
 
+  // Ctrl+K : la recherche de sessions depuis n'importe quelle vue (façon
+  // Codex). Un écouteur global unique, enregistré au démarrage : il ne
+  // s'empile pas avec la navigation (piège 11).
+  window.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      route = "history";
+      render();
+    }
+  });
+
+
   const ctx: AppContext = {
     status: bootstrap.status,
     voice: null,
     lastSessionId: null,
+    pendingProject: null,
     navigate: (next) => {
       route = next;
       render();
@@ -126,6 +139,9 @@ async function main() {
       toast(event.message ?? "Échec", "error");
     }
     if (event.type === "notice" && event.message) toast(event.message, "info");
+    // Conversation vocale : le Chat l'adopte, même si l'utilisateur est sur
+    // un autre onglet à ce moment-là.
+    if (event.type === "spoken" && event.sessionId) ctx.lastSessionId = event.sessionId;
     for (const handler of handlers) handler(event);
   });
 
@@ -177,7 +193,11 @@ async function main() {
           `${info.memory.count} souvenir${info.memory.count > 1 ? "s" : ""}`,
           info.memory.enabled,
         ),
-        statusLine("Synaptiq", info.synaptiq.configured ? "connecté" : "inactif", info.synaptiq.configured),
+        statusLine(
+          "Vault Obsidian",
+          info.vault.enabled ? `${info.vault.notes} notes` : "inactif",
+          info.vault.enabled,
+        ),
         statusLine("Outils", String(info.tools.length), true),
       ),
     );

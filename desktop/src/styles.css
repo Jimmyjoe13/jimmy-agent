@@ -587,7 +587,7 @@ textarea:focus {
   color: var(--accent);
 }
 
-.activity-line.synaptiq .activity-kind {
+.activity-line.vault .activity-kind {
   color: #a78bfa;
 }
 
@@ -605,6 +605,7 @@ textarea:focus {
 }
 
 .composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -629,6 +630,218 @@ textarea:focus {
   margin-right: auto;
   color: var(--text-dim);
   font-size: 11.5px;
+}
+
+/* ── Mentions « @ » (classes propres à ce composant) ─────────────────────── */
+
+.mention-menu {
+  position: absolute;
+  bottom: calc(100% - 2px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  z-index: 60;
+}
+
+.mention-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-item.active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.mention-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mention-path {
+  font-size: 11px;
+  color: var(--text-dim, #777);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Chemins cliquables et aperçu (classes propres au Chat) ─────────────── */
+
+.msg-path {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  padding: 1px 6px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-path:hover {
+  border-color: var(--accent, #888);
+}
+
+.file-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.file-modal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(860px, 92vw);
+  max-height: 86vh;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.file-modal-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.file-modal-head strong {
+  margin-right: auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-modal-body {
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 120px;
+  max-height: 70vh;
+}
+
+.file-modal-text {
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.file-modal-line {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-modal-line.target {
+  background: rgba(255, 200, 0, 0.35);
+  border-radius: 4px;
+}
+
+.file-modal-note {
+  color: var(--text-dim, #777);
+  font-size: 12px;
+  margin: 4px 2px;
+}
+
+.file-modal-line.add {
+  background: rgba(0, 160, 0, 0.16);
+}
+
+.file-modal-line.del {
+  background: rgba(200, 0, 0, 0.16);
+}
+
+/* ── Bloc « travaux » sous une réponse du Chat ─────────────────────────── */
+
+.work-block {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.work-kicker {
+  font-size: 11.5px;
+  color: var(--text-dim, #777);
+  font-weight: 600;
+}
+
+.work-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.work-file {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-file:hover {
+  border-color: var(--accent, #888);
+}
+
+.work-diff {
+  font-size: 11px;
+}
+
+/* ── Historique groupé et cherchable ────────────────────────────────────── */
+
+.history-group {
+  margin-top: 14px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-dim, #777);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border, #ddd);
+}
+
+.history-search {
+  max-width: 320px;
 }
 
 /* ── Listes ────────────────────────────────────────────────────────────────── */
@@ -1296,4 +1509,383 @@ button.small {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #37405480;
+}
+
+/* Sous-onglets d'une vue (Skills / Serveurs MCP), calés à gauche de l'en-tête. */
+.subtabs {
+  margin-right: auto;
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.subtab {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.badge.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.mcp-tools {
+  margin: 8px 0 2px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.mcp-tools li {
+  margin: 3px 0;
+}
+
+.mcp-tools code {
+  color: var(--text);
+}
+
+/* Bibliothèque de voix : même allure que les modèles, classes distinctes
+   (les sélecteurs du panneau des modèles ne doivent pas les compter). */
+.voices-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voice-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #12151b;
+}
+
+.voice-current > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.voice-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "id actions";
+  gap: 6px 14px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #12151b;
+}
+
+.voice-row.is-main {
+  border-color: rgba(245, 158, 11, 0.6);
+  background: var(--accent-soft);
+}
+
+.voice-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+/* ── Chat : projet de la conversation et explorateur de fichiers ─────────── */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.project-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.project-kicker {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.project-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-caret {
+  color: var(--text-dim);
+}
+
+.project-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 380px;
+  max-height: 380px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+/* Sans cette règle, `display: flex` l'emporte sur l'attribut `hidden` :
+   le menu restait affiché en permanence (attrapé par test-ui). */
+.project-menu[hidden] {
+  display: none;
+}
+
+.project-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-item:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.project-item.current {
+  background: var(--accent-soft);
+}
+
+.project-item.open strong {
+  color: var(--accent);
+}
+
+.project-item[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-item .row-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-sep {
+  margin: 6px 10px 2px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.files-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+}
+
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.explorer {
+  width: 300px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.explorer[hidden] {
+  display: none;
+}
+
+.explorer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorer-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tree-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tree-row.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tree-row.dir .tree-name {
+  font-weight: 600;
+}
+
+.tree-caret {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-empty {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.explorer-preview {
+  max-height: 48%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.explorer-preview[hidden] {
+  display: none;
+}
+
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preview-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-text {
+  margin: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #12151b;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* Arrêt d'urgence du Chat (équivalent du « STOP » vocal). */
+.stop-button {
+  border: 1px solid var(--ko);
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--ko);
+  font-weight: 600;
+}
+
+.stop-button:hover {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.stop-button[hidden] {
+  display: none;
 }

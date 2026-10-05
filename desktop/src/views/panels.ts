@@ -1,5 +1,5 @@
 /** Vues Mémoire, Skills, Skin et Diagnostic. */
-import { api, type DoctorReport, type Memory, type Skill } from "../api";
+import { api, type DoctorReport, type McpServerStatus, type Memory, type Skill } from "../api";
 import { MEMORY_KIND_LABEL, QUALITY_LABEL, STATE_LABEL, attempt, formatTime, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { card, toggle } from "./settings";
@@ -98,10 +98,95 @@ function stat(value: string, label: string): HTMLElement {
   return h("div", { class: "stat" }, h("strong", {}, value), h("span", {}, label));
 }
 
-/** Skills : les procédures que Jimmy sait appliquer, et qu'il peut créer. */
+/** Libellé et classe de l'état d'un serveur MCP. */
+const MCP_STATE: Record<McpServerStatus["state"], { label: string; cls: string }> = {
+  connected: { label: "connecté", cls: "ok" },
+  stopped: { label: "arrêté", cls: "" },
+  busy: { label: "occupé", cls: "warn" },
+  disabled: { label: "désactivé", cls: "" },
+};
+
+/**
+ * Skills : deux sous-onglets. « Skills » : les procédures que Jimmy sait
+ * appliquer, et qu'il peut créer. « Serveurs MCP » : les serveurs connectés
+ * (ajoutés en config ou par Jimmy via `mcp_add_server`) et leurs outils.
+ */
 export function skillsView(): HTMLElement {
   const container = h("section", { class: "view" });
+  const skillsPane = h("div", {});
+  const mcpPane = h("div", {});
+  let tab: "skills" | "mcp" = "skills";
+  const tabButtons = {
+    skills: h("button", { class: "subtab", role: "tab", onclick: () => select("skills") }, "Skills"),
+    mcp: h("button", { class: "subtab", role: "tab", onclick: () => select("mcp") }, "Serveurs MCP"),
+  };
+
+  function select(next: "skills" | "mcp") {
+    tab = next;
+    for (const [key, button] of Object.entries(tabButtons)) {
+      const active = key === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    }
+    skillsPane.hidden = tab !== "skills";
+    mcpPane.hidden = tab !== "mcp";
+    void (tab === "skills" ? reload() : reloadMcp());
+  }
+
   const list = h("div", { class: "list" });
+  const mcpList = h("div", { class: "list" });
+
+  /** Serveurs MCP : état réel, commande (secrets masqués) et outils. */
+  async function reloadMcp() {
+    const servers = await guard(() => api.mcpServers(), "serveurs MCP");
+    if (!servers) return;
+    if (servers.length === 0) {
+      mount(
+        mcpList,
+        h(
+          "div",
+          { class: "empty" },
+          h("p", {}, "Aucun serveur MCP."),
+          h("p", { class: "hint" }, "Demande à Jimmy : « connecte-toi au serveur MCP … ». Il l'ajoutera lui-même."),
+        ),
+      );
+      return;
+    }
+    mount(mcpList);
+    for (const server of servers) {
+      const state = MCP_STATE[server.state] ?? { label: server.state, cls: "" };
+      const count = server.tools.length;
+      mcpList.append(
+        h(
+          "details",
+          { class: "list-row skill mcp-server" },
+          h(
+            "summary",
+            {},
+            h("strong", {}, server.name),
+            " ",
+            h("span", { class: `badge ${state.cls}` }, state.label),
+            " ",
+            h("span", { class: "row-meta" }, `${count} outil${count > 1 ? "s" : ""} · ${server.transport}`),
+          ),
+          h("p", { class: "row-meta" }, "Commande"),
+          h("pre", {}, server.launch || "—"),
+          server.envKeys.length
+            ? h("p", { class: "row-meta" }, `Variables d'environnement : ${server.envKeys.join(", ")}`)
+            : null,
+          count
+            ? h(
+                "ul",
+                { class: "mcp-tools" },
+                ...server.tools.map((tool) =>
+                  h("li", {}, h("code", {}, tool.name), tool.description ? ` — ${tool.description}` : ""),
+                ),
+              )
+            : h("p", { class: "note" }, "Aucun outil enregistré (serveur pas encore lancé ou en panne)."),
+        ),
+      );
+    }
+  }
 
   async function reload() {
     const skills = await guard(() => api.skillsList(), "skills");
@@ -137,12 +222,7 @@ export function skillsView(): HTMLElement {
   }
 
   mount(
-    container,
-    h(
-      "header",
-      { class: "view-header" },
-      h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
-    ),
+    skillsPane,
     card(
       "Répertoire",
       h(
@@ -153,7 +233,30 @@ export function skillsView(): HTMLElement {
       list,
     ),
   );
-  void reload();
+  mount(
+    mcpPane,
+    card(
+      "Serveurs connectés",
+      h(
+        "p",
+        { class: "note" },
+        "Les outils de ces serveurs sont proposés à Jimmy comme les siens. Les clés présentes dans les commandes sont masquées.",
+      ),
+      mcpList,
+    ),
+  );
+  mount(
+    container,
+    h(
+      "header",
+      { class: "view-header" },
+      h("div", { class: "subtabs", role: "tablist" }, tabButtons.skills, tabButtons.mcp),
+      h("button", { class: "ghost", onclick: () => void (tab === "skills" ? reload() : reloadMcp()) }, "Actualiser"),
+    ),
+    skillsPane,
+    mcpPane,
+  );
+  select("skills");
   return container;
 }
 

@@ -6,6 +6,7 @@
 
 mod bridge;
 mod commands;
+mod explorer;
 
 use std::sync::Arc;
 
@@ -106,6 +107,9 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+            // Sélecteur de dossier natif (« Ouvrir un projet » dans le Chat),
+            // appelé uniquement depuis Rust (`explorer::pick_folder`).
+            .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_single_instance::init(|app, _, _| {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
@@ -189,6 +193,14 @@ pub fn run() {
                     });
                 }
 
+                // Croissance : revue périodique du journal d'expérience, en
+                // tâche de fond (un appel de rédaction, aucun outil — la
+                // session « Revue » ne peut rien appliquer).
+                {
+                    let app_for_growth = app.clone();
+                    tauri::async_runtime::spawn(jimmy_agent::growth::review_loop(app_for_growth));
+                }
+
                 if !settings.ui.first_run_done {
                     // Premier lancement : on montre l'interface pour l'onboarding.
                     if let Some(window) = handle.get_webview_window("main") {
@@ -227,6 +239,21 @@ pub fn run() {
                 commands::memory_forget,
                 commands::skills_list,
                 commands::skill_read,
+                commands::mcp_servers,
+                commands::agent_stop,
+                commands::tts_voices,
+                commands::tts_search_voices,
+                commands::tts_set_voice,
+                commands::tts_remove_voice,
+                explorer::fs_list,
+                explorer::fs_preview,
+                explorer::fs_open,
+                explorer::fs_reveal,
+                explorer::fs_search,
+                explorer::fs_diff,
+                explorer::pick_folder,
+                explorer::projects_recent,
+                explorer::session_set_project,
                 commands::tts_preview,
                 commands::voice_devices,
                 commands::voice_start,

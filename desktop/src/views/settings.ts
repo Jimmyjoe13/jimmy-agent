@@ -18,7 +18,6 @@ export function settingsView(ctx: AppContext): HTMLElement {
     max: "2",
   }) as HTMLInputElement;
   const workspaceInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
-  const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const sttSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const commandSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
@@ -26,8 +25,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
   const skinSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const startupSelect = h("select", { class: "field" }) as HTMLSelectElement;
-  const synaptiqUrl = h("input", { class: "field", type: "text" }) as HTMLInputElement;
-  const synaptiqEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const vaultPathInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const vaultFolderInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const vaultEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
   const cuesEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
   const followSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const pauseInput = h("input", { class: "field", type: "number", min: "400", max: "1500", step: "50" }) as HTMLInputElement;
@@ -43,11 +43,6 @@ export function settingsView(ctx: AppContext): HTMLElement {
     temperatureInput.value = String(settings.llm.temperature ?? "");
     workspaceInput.value = settings.workspace;
 
-    mount(voiceSelect);
-    for (const voice of ctx.status.tts.voices) {
-      voiceSelect.append(h("option", { value: voice.id }, `${voice.label} — ${voice.description}`));
-    }
-    voiceSelect.value = settings.tts.voice;
 
     mount(sttSelect);
     for (const model of ctx.status.stt.models) {
@@ -89,8 +84,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
     );
     startupSelect.value = settings.startup;
 
-    synaptiqUrl.value = settings.synaptiq.base_url;
-    synaptiqEnabled.checked = settings.synaptiq.enabled;
+    vaultPathInput.value = settings.memory.vault_path;
+    vaultFolderInput.value = settings.memory.vault_folder;
+    vaultEnabled.checked = settings.memory.vault_enabled;
     cuesEnabled.checked = settings.tts.cues;
 
     mount(followSelect);
@@ -131,15 +127,17 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.llm.voice_model = voiceModelInput.value.trim();
     settings.llm.temperature = temperatureInput.value === "" ? null : Number(temperatureInput.value);
     settings.workspace = workspaceInput.value.trim();
-    settings.tts.voice = voiceSelect.value;
+    // `settings.tts.voice` et `library` se choisissent dans l'onglet Voix
+    // (enregistrés aussitôt côté Rust) : rien à relire dans ce formulaire.
     settings.stt.model = sttSelect.value;
     settings.stt.command_model = commandSelect.value;
     settings.stt.language = languageSelect.value;
     settings.stt.wake_word = wakeInput.value.trim() || "jimmy";
     settings.avatar.quality = qualitySelect.value;
     settings.avatar.skin = skinSelect.value;
-    settings.synaptiq.base_url = synaptiqUrl.value.trim();
-    settings.synaptiq.enabled = synaptiqEnabled.checked;
+    settings.memory.vault_path = vaultPathInput.value.trim();
+    settings.memory.vault_folder = vaultFolderInput.value.trim() || "0_Inbox/Jimmy";
+    settings.memory.vault_enabled = vaultEnabled.checked;
     settings.tts.cues = cuesEnabled.checked;
     settings.voice.follow_up_ms = Number(followSelect.value) * 1000;
     settings.voice.end_of_speech_ms = Math.min(1500, Math.max(400, Number(pauseInput.value) || 700));
@@ -190,7 +188,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
       card(
         "Voix de sortie",
         h("p", { class: "note" }, "Synthèse Fish Audio via OpenRouter. L'audio ne transite que par le réseau vers ce service."),
-        field("Voix", voiceSelect),
+        h("p", { class: "note" }, "La voix de Jimmy se choisit dans l'onglet ", h("strong", {}, "Voix"), "."),
         toggle("Sons d'état (« Oui ? » quand tu dis son nom, « Oups… » en cas d'échec)", cuesEnabled),
       ),
       card(
@@ -259,14 +257,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
         ),
       ),
       card(
-        "Synaptiq",
+        "Vault Obsidian",
         h(
           "p",
           { class: "note" },
-          "Instance locale de réflexion. Jimmy ne la consulte que lorsqu'une demande fait référence à un contexte antérieur.",
+          "Mémoire persistante de Jimmy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimmy lit tout le vault et écrit dans son dossier.",
         ),
-        toggle("Activer Synaptiq", synaptiqEnabled),
-        field("Adresse de l'API", synaptiqUrl),
+        toggle("Connecter le vault Obsidian", vaultEnabled),
+        field("Chemin du vault", vaultPathInput),
+        field("Dossier des souvenirs de Jimmy", vaultFolderInput),
       ),
       card(
         "Permissions",

@@ -29,4 +29,5 @@ reqwest.workspace = true
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
 env_logger.workspace = true

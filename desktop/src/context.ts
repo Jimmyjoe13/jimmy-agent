@@ -10,8 +10,12 @@ export interface AppContext {
   status: Status;
   /** État réel de l'écoute (null tant qu'il n'a pas été lu). */
   voice: VoiceStatus | null;
-  /** Session ouverte dans le chat (reprise depuis l'historique). */
+  /** Session ouverte dans le chat (reprise depuis l'historique, ou la
+   *  conversation vocale en cours). */
   lastSessionId: string | null;
+  /** Projet choisi pour une conversation pas encore commencée : gardé ici
+   *  pour survivre à un changement d'onglet. */
+  pendingProject: string | null;
   navigate: (route: Route) => void;
   /** Relit l'état (statut général + écoute) et met à jour la barre latérale. */
   refreshStatus: () => Promise<void>;

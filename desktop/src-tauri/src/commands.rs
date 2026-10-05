@@ -14,6 +14,7 @@ use std::sync::Arc;
 use jimmy_agent::config::{Secrets, Settings, StartupMode};
 use jimmy_agent::core::types::{AgentEvent, AvatarState};
 use jimmy_agent::paths::load_dotenv;
+use jimmy_agent::providers::tts::VoiceInfo;
 use jimmy_agent::providers::tts::TtsVoice;
 use jimmy_agent::voice::cues::{self, Cue};
 use jimmy_agent::voice::{matches_wake_word, strip_wake_word, VoiceRuntime};
@@ -50,10 +51,19 @@ pub async fn status(state: State<'_, AppState>) -> std::result::Result<serde_jso
 
 // ── Conversation ─────────────────────────────────────────────────────────────
 
+/// Tauri ne renomme que les arguments de premier niveau : les champs d'une
+/// structure imbriquée arrivent tels que l'interface les écrit (`sessionId`).
+/// Sans `rename_all`, `sessionId` était ignoré et chaque message ouvrait une
+/// session neuve : Jimmy perdait le fil (piège 59).
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
+    #[serde(alias = "session_id")]
     pub session_id: Option<String>,
     pub message: String,
+    /// Projet choisi avant le premier message d'une conversation neuve.
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 #[tauri::command]
@@ -66,12 +76,19 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
 
     let session_id = match request.session_id {
         Some(id) if !id.is_empty() => id,
-        _ => app.history.create_session("Nouvelle session").map_err(err)?,
+        _ => {
+            let id = app.history.create_session("Nouvelle session").map_err(err)?;
+            if let Some(project) = request.project.as_deref().filter(|p| std::path::Path::new(p).is_dir()) {
+                app.history.set_project(&id, Some(project)).map_err(err)?;
+            }
+            id
+        }
     };
 
-    let settings = app.settings();
+    // Projet de la conversation : l'agent y travaille ; sans projet, le
+    // dossier par défaut (même règle que la voix, `App::session_context`).
+    let (settings, tool_context) = app.session_context(&session_id);
     let deps = app.deps();
-    let tool_context = app.tool_context();
     let window_label = state.window.clone();
     let avatar = app.avatar.clone();
     let cue_app = app.clone();
@@ -101,21 +118,42 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
             }
         });
 
-        let outcome = jimmy_agent::core::agent::run(
-            deps,
-            settings,
-            answer_session,
-            message,
-            tool_context,
-            tx,
-        )
-        .await;
+        // Interruptible : « STOP » à la voix ou bouton « Arrêter » du Chat.
+        let stop_session = answer_session.clone();
+        let outcome = cue_app
+            .cancellable(jimmy_agent::core::agent::run(
+                deps,
+                settings,
+                answer_session,
+                message,
+                tool_context,
+                tx,
+            ))
+            .await;
         // Le relais doit être vidé avant de rendre la main, sinon la fenêtre
         // peut fermer avant d'avoir reçu les derniers événements.
         let _ = relay.await;
 
         // Jimmy lit sa réponse à voix haute, comme en vocal. (Avant : un son
         // « C'est prêt. » joué deux fois trop vite, et aucune voix.)
+        // Arrêt d'urgence : ni erreur ni son d'échec ; la conversation note que
+        // la tâche n'est pas finie, et le Chat affiche l'arrêt.
+        if let Err(jimmy_agent::error::Error::Cancelled) = &outcome {
+            log::info!("[agent] tâche du Chat arrêtée à la demande de l'utilisateur");
+            let _ = cue_app.history.append(
+                &stop_session,
+                &jimmy_agent::core::types::Message::assistant("(Tâche arrêtée à la demande de l'utilisateur, avant la fin.)"),
+            );
+            if let Some(window) = &window_label {
+                let _ = window.emit(
+                    "agent-event",
+                    AgentEvent::Final { text: "Arrêté à ta demande. Dis-moi quoi faire.".into() },
+                );
+            }
+            let _ = avatar.set_state(AvatarState::Idle, "").await;
+            return;
+        }
+
         match &outcome {
             Ok(answer) => cue_app.speak(&answer.text).await,
             Err(_) => cues::play(&cue_app, Cue::Error).await,
@@ -147,7 +185,7 @@ pub async fn sessions(state: State<'_, AppState>) -> std::result::Result<Vec<ser
             serde_json::json!({
                 "id": s.id, "title": s.title,
                 "createdAt": s.created_at, "updatedAt": s.updated_at,
-                "messageCount": s.message_count
+                "messageCount": s.message_count, "project": s.project
             })
         })
         .collect())
@@ -360,6 +398,82 @@ pub async fn skills_list(state: State<'_, AppState>) -> std::result::Result<Vec<
         .collect())
 }
 
+// ── Bibliothèque de voix ─────────────────────────────────────────────────────
+
+/// Un identifiant de voix Fish Audio : 32 caractères hexadécimaux. Rien
+/// d'autre n'est envoyé au service ni écrit dans la configuration.
+fn is_voice_id(id: &str) -> bool {
+    id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Voix actuelle, voix prédéfinies et voix ajoutées par l'utilisateur.
+#[tauri::command]
+pub async fn tts_voices(state: State<'_, AppState>) -> std::result::Result<serde_json::Value, String> {
+    let settings = state.app.settings();
+    let presets: Vec<VoiceInfo> = TtsVoice::PRESETS.iter().map(|v| v.info()).collect();
+    Ok(serde_json::json!({
+        "current": settings.tts.voice,
+        "presets": presets,
+        "library": settings.tts.library,
+    }))
+}
+
+/// Recherche dans le catalogue public de Fish Audio, dans la langue d'écoute.
+#[tauri::command]
+pub async fn tts_search_voices(
+    state: State<'_, AppState>,
+    query: String,
+) -> std::result::Result<Vec<VoiceInfo>, String> {
+    let language = state.app.settings().stt.language;
+    // « auto » ou vide : toutes les langues.
+    let language = if language.len() == 2 { language } else { String::new() };
+    state.app.tts.search_voices(&query, &language).await.map_err(err)
+}
+
+/// Choisit la voix de Jimmy ; une voix du catalogue rejoint la bibliothèque.
+#[tauri::command]
+pub async fn tts_set_voice(state: State<'_, AppState>, voice: VoiceInfo) -> std::result::Result<(), String> {
+    if !is_voice_id(&voice.id) {
+        return Err("identifiant de voix invalide".into());
+    }
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    let known = TtsVoice::from_id(&voice.id).is_some() || settings.tts.library.iter().any(|v| v.id == voice.id);
+    if !known {
+        settings.tts.library.push(voice.clone());
+    }
+    settings.tts.voice = voice.id;
+    app.save_settings(settings).map_err(err)
+}
+
+/// Retire une voix de la bibliothèque. Si c'était la voix de Jimmy, il
+/// revient à la voix par défaut. Renvoie la voix désormais utilisée.
+#[tauri::command]
+pub async fn tts_remove_voice(state: State<'_, AppState>, id: String) -> std::result::Result<String, String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    settings.tts.library.retain(|v| v.id != id);
+    if settings.tts.voice == id {
+        settings.tts.voice = TtsVoice::NARRATEUR.id.to_string();
+    }
+    let current = settings.tts.voice.clone();
+    app.save_settings(settings).map_err(err)?;
+    Ok(current)
+}
+
+/// Arrêt d'urgence (bouton « Arrêter » du Chat) : la tâche en cours est
+/// abandonnée et Jimmy se tait. Renvoie `true` s'il y avait quelque chose à arrêter.
+#[tauri::command]
+pub async fn agent_stop(state: State<'_, AppState>) -> std::result::Result<bool, String> {
+    Ok(state.app.request_stop())
+}
+
+/// Serveurs MCP connectés ou configurés, secrets masqués.
+#[tauri::command]
+pub async fn mcp_servers(state: State<'_, AppState>) -> std::result::Result<Vec<jimmy_agent::mcp::McpServerStatus>, String> {
+    Ok(state.app.mcp_overview())
+}
+
 #[tauri::command]
 pub async fn skill_read(state: State<'_, AppState>, name: String) -> std::result::Result<String, String> {
     state.app.skills.load(&name).map(|s| s.body).map_err(err)
@@ -367,22 +481,29 @@ pub async fn skill_read(state: State<'_, AppState>, name: String) -> std::result
 
 // ── Voix ─────────────────────────────────────────────────────────────────────
 
+/// Essai de synthèse. `voice` : une autre voix que celle de Jimmy, pour
+/// l'écouter avant de la choisir (bibliothèque de voix).
 #[tauri::command]
 pub async fn tts_preview(
     state: State<'_, AppState>,
     text: String,
+    voice: Option<String>,
 ) -> std::result::Result<serde_json::Value, String> {
     let app = state.app.clone();
     let settings = app.settings();
     if !settings.tts.enabled {
         return Err("la synthèse vocale est désactivée".into());
     }
+    let voice = voice.filter(|v| !v.trim().is_empty()).unwrap_or_else(|| settings.tts.voice.clone());
+    if !is_voice_id(&voice) {
+        return Err("identifiant de voix invalide".into());
+    }
     let speech = app
         .tts
         .speak(
             &app.secrets.openrouter_api_key,
             &settings.tts.model,
-            &settings.tts.voice,
+            &voice,
             &text,
             settings.tts.chars_per_minute,
         )
@@ -665,16 +786,24 @@ pub async fn doctor(state: State<'_, AppState>) -> std::result::Result<serde_jso
         app.avatar.is_up().await,
         "l'avatar ne répond pas",
     ));
-    match &app.synaptiq {
-        Some(client) => checks.push(check(
-            "Synaptiq",
-            client.health().await.unwrap_or(false),
-            "instance locale Synaptiq injoignable",
-        )),
+    match &app.vault {
+        Some(vault) => {
+            let existant = vault.root().is_dir();
+            let hint = if existant {
+                format!("vault ouvert : {}", vault.folder_display())
+            } else {
+                "dossier du vault introuvable".to_string()
+            };
+            checks.push(check(
+                "Vault Obsidian",
+                existant,
+                &hint,
+            ));
+        }
         None => checks.push(check(
-            "Synaptiq",
+            "Vault Obsidian",
             false,
-            "SYNAPTIQ_API_KEY absente de .env",
+            "chemin du vault absent des réglages mémoire",
         )),
     }
 
@@ -745,4 +874,22 @@ pub async fn reload_secrets(state: State<'_, AppState>) -> std::result::Result<s
     let secrets = Secrets::from_env();
     let missing = jimmy_agent::config::missing_secrets(&secrets);
     Ok(serde_json::json!({ "missing": missing }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cas réel du 4 octobre : chaque message du Chat ouvrait une session
+    /// neuve, Jimmy perdait le fil. L'interface envoie `sessionId` (camelCase)
+    /// dans une structure imbriquée, que Tauri ne renomme pas.
+    #[test]
+    fn la_requete_de_chat_garde_la_session_envoyee_par_l_interface() {
+        let json = serde_json::json!({ "sessionId": "abc-123", "message": "installe-le" });
+        let request: ChatRequest = serde_json::from_value(json).expect("requête valide");
+        assert_eq!(request.session_id.as_deref(), Some("abc-123"));
+        // Premier message : pas encore de session.
+        let first: ChatRequest = serde_json::from_value(serde_json::json!({ "sessionId": null, "message": "salut" })).unwrap();
+        assert!(first.session_id.is_none());
+    }
 }

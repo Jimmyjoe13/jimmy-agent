@@ -24,12 +24,13 @@ export interface AgentEvent {
     | "toolStart"
     | "toolEnd"
     | "memory"
-    | "synaptiq"
+    | "vault"
     | "skill"
     | "final"
     | "notice"
     | "heard"
     | "spoken"
+    | "progress"
     | "listen"
     | "failed";
   state?: AvatarState;
@@ -49,6 +50,8 @@ export interface AgentEvent {
    *  thinking, speaking) et temps restant en ms pour `your_turn`. */
   phase?: string;
   remaining?: number;
+  /** `spoken` : session de la conversation vocale (adoptée par le Chat). */
+  sessionId?: string;
 }
 
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
@@ -97,7 +100,7 @@ export interface Status {
     running: boolean;
   };
   memory: { enabled: boolean; count: number; has_fts: boolean; semantic_model: string | null };
-  synaptiq: { enabled: boolean; configured: boolean; base_url: string };
+  vault: { enabled: boolean; path: string; folder: string; notes: number };
   permissions: { capability: string; granted: boolean }[];
   tools: string[];
   skills: number;
@@ -110,6 +113,46 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** Dossier du projet de la conversation (onglet Chat). */
+  project?: string | null;
+}
+
+/** Un projet proposé dans le sélecteur du Chat. */
+export interface ProjectInfo {
+  path: string;
+  name: string;
+  exists: boolean;
+  /** Lisible avec les permissions de Jimmy. */
+  readable: boolean;
+}
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size: number;
+}
+
+/** Un candidat du menu « @ » du Chat : chemin relatif au projet. */
+export interface MentionEntry {
+  display: string;
+  name: string;
+  dir: boolean;
+}
+
+export interface MentionSearch {
+  entries: MentionEntry[];
+  truncated: boolean;
+  rootInvalid: boolean;
+}
+
+export interface FsPreview {
+  path: string;
+  size: number;
+  binary: boolean;
+  text: string;
+  truncated: boolean;
+  executable: boolean;
 }
 
 export interface ChatMessage {
@@ -183,6 +226,16 @@ export interface TtsSettings {
   voice: string;
   chars_per_minute: number;
   cues: boolean;
+  library?: VoiceInfo[];
+}
+
+/** Une voix Fish Audio (bibliothèque de voix). */
+export interface VoiceInfo {
+  id: string;
+  label: string;
+  description: string;
+  languages: string[];
+  uses: number;
 }
 
 export interface SttSettings {
@@ -229,13 +282,10 @@ export interface MemorySettings {
   min_score: number;
   auto_learn_every: number;
   auto_learn: boolean;
-}
-
-export interface SynaptiqSettings {
-  enabled: boolean;
-  base_url: string;
-  min_request_chars: number;
-  timeout_ms: number;
+  vault_path: string;
+  vault_enabled: boolean;
+  vault_folder: string;
+  vault_min_request_chars: number;
 }
 
 export interface UiSettings {
@@ -263,7 +313,6 @@ export interface Settings {
   voice: VoiceSettings;
   avatar: AvatarSettings;
   memory: MemorySettings;
-  synaptiq: SynaptiqSettings;
   ui: UiSettings;
   startup: StartupMode;
   mcp_servers: McpServerConfig[];
@@ -299,6 +348,16 @@ export interface Skill {
   body: string;
 }
 
+/** Serveur MCP vu par l'interface (commande `mcp_servers`, secrets masqués). */
+export interface McpServerStatus {
+  name: string;
+  transport: string;
+  launch: string;
+  envKeys: string[];
+  state: "connected" | "stopped" | "busy" | "disabled";
+  tools: { name: string; description: string }[];
+}
+
 export const api = {
   bootstrap: () =>
     invoke<{
@@ -308,8 +367,19 @@ export const api = {
       startup_modes: StartupMode[];
     }>("bootstrap"),
   status: () => invoke<Status>("status"),
-  chat: (sessionId: string | null, message: string) =>
-    invoke<string>("chat", { request: { sessionId, message } }),
+  /** `project` : seulement pour le premier message d'une conversation neuve. */
+  chat: (sessionId: string | null, message: string, project?: string | null) =>
+    invoke<string>("chat", { request: { sessionId, message, project: project ?? null } }),
+  pickFolder: () => invoke<string | null>("pick_folder"),
+  projectsRecent: () => invoke<{ recent: ProjectInfo[]; default: ProjectInfo }>("projects_recent"),
+  sessionSetProject: (sessionId: string, project: string | null) =>
+    invoke<void>("session_set_project", { sessionId, project }),
+  fsList: (path: string) => invoke<{ path: string; entries: FsEntry[]; truncated: boolean }>("fs_list", { path }),
+  fsSearch: (root: string, query: string) => invoke<MentionSearch>("fs_search", { root, query }),
+  fsPreview: (path: string) => invoke<FsPreview>("fs_preview", { path }),
+  fsDiff: (file: string) => invoke<{ diff: string; reason: string }>("fs_diff", { file }),
+  fsOpen: (path: string) => invoke<"opened" | "revealed">("fs_open", { path }),
+  fsReveal: (path: string) => invoke<void>("fs_reveal", { path }),
   sessions: () => invoke<Session[]>("sessions"),
   sessionMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("session_messages", { sessionId }),
@@ -334,8 +404,16 @@ export const api = {
   memoryForget: (id: string) => invoke<void>("memory_forget", { id }),
   skillsList: () => invoke<Skill[]>("skills_list"),
   skillRead: (name: string) => invoke<string>("skill_read", { name }),
-  ttsPreview: (text: string) =>
-    invoke<{ bytes: number; durationMs: number }>("tts_preview", { text }),
+  mcpServers: () => invoke<McpServerStatus[]>("mcp_servers"),
+  /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimmy). */
+  agentStop: () => invoke<boolean>("agent_stop"),
+  ttsVoices: () => invoke<{ current: string; presets: VoiceInfo[]; library: VoiceInfo[] }>("tts_voices"),
+  ttsSearchVoices: (query: string) => invoke<VoiceInfo[]>("tts_search_voices", { query }),
+  ttsSetVoice: (voice: VoiceInfo) => invoke<void>("tts_set_voice", { voice }),
+  ttsRemoveVoice: (id: string) => invoke<string>("tts_remove_voice", { id }),
+  /** `voice` : écouter une autre voix que celle de Jimmy (bibliothèque). */
+  ttsPreview: (text: string, voice?: string) =>
+    invoke<{ bytes: number; durationMs: number }>("tts_preview", { text, voice: voice ?? null }),
   voiceDevices: () => invoke<string[]>("voice_devices"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
