@@ -445,6 +445,60 @@ textarea:focus {
   content: "erreur";
 }
 
+/* Carte d'autorisation : Jimmy veut modifier un fichier sensible et attend
+ * l'accord explicite de l'utilisateur. */
+.bubble.approval {
+  align-self: flex-start;
+  max-width: 90%;
+  border-color: var(--warn);
+  background: rgba(251, 191, 36, 0.07);
+}
+
+.approval-title {
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.approval-target {
+  display: inline-block;
+  margin-top: 6px;
+  word-break: break-all;
+}
+
+.approval-detail {
+  margin: 8px 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-status {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.bubble.approval.approved {
+  border-color: var(--ok);
+  background: var(--bg-card);
+}
+
+.bubble.approval.denied {
+  border-color: var(--border);
+  background: var(--bg-card);
+}
+
 /* Bulle d'attente : trois points animés pendant que Jimmy travaille. */
 .bubble.pending p {
   color: var(--text-dim);

@@ -37,6 +37,9 @@ pub struct AgentDeps {
     /// Dossier de données de Jimmy : les amendements du prompt (lot
     /// « croissance ») y sont lus au début de chaque demande.
     pub data_dir: PathBuf,
+    /// Demandes d'autorisation en attente : modifier un fichier sensible
+    /// (`.env`, clés, secrets) suspend l'outil jusqu'à l'accord du Chat.
+    pub approvals: Arc<crate::sensitive::Approvals>,
     /// Demande dite à voix haute : réponse courte, peu d'étapes, et on fait
     /// répéter une phrase incohérente plutôt que de partir l'explorer.
     pub voice: bool,
@@ -391,6 +394,33 @@ pub async fn run(
                     format!("Résultat déjà obtenu à l'étape précédente, réutilisé :\n{previous}"),
                     0u64,
                 )
+            } else if let Some(refusal) = crate::sensitive::authorize(
+                &deps.approvals,
+                deps.voice,
+                &call.name,
+                &call.arguments,
+                &events,
+                crate::sensitive::APPROVAL_TIMEOUT,
+            )
+            .await
+            {
+                // Fichier sensible sans accord de l'utilisateur (cas réel du
+                // 5 octobre : un `.env` de production réécrit sans rien
+                // demander) : l'outil n'est pas exécuté, le modèle reçoit le
+                // refus et la consigne de ne pas contourner. Pas dans
+                // `tool_errors` : un refus voulu n'est pas une leçon à tirer.
+                emit(
+                    &mut events,
+                    AgentEvent::ToolEnd {
+                        call_id: call.id.clone(),
+                        name: call.name.clone(),
+                        ok: false,
+                        summary: "refusé : fichier sensible, pas d'accord".into(),
+                        duration_ms: 0,
+                    },
+                )
+                .await;
+                (refusal, 0u64)
             } else {
                 let started_tool = Instant::now();
                 match execute(&deps, &call, &tool_context).await {

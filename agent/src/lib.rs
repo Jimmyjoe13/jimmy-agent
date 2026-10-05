@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod paths;
 pub mod permissions;
 pub mod providers;
+pub mod sensitive;
 pub mod skills;
 pub mod tools;
 pub mod voice;
@@ -47,6 +48,9 @@ pub struct App {
     pub tts: Tts,
     pub avatar: AvatarClient,
     pub registry: Arc<ToolRegistry>,
+    /// Demandes d'autorisation en attente (fichiers sensibles) : la boucle
+    /// d'agent y attend le clic « Autoriser / Refuser » du Chat.
+    pub approvals: Arc<sensitive::Approvals>,
     /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
     pub mcp: Arc<mcp::McpRegistry>,
     /// Mémoire persistante dans le vault Obsidian : `None` si le chemin est
@@ -226,6 +230,7 @@ impl App {
             tts,
             avatar,
             registry,
+            approvals: Arc::new(sensitive::Approvals::default()),
             mcp,
             vault,
             stt: tokio::sync::Mutex::new(None),
@@ -823,6 +828,7 @@ impl App {
             vault: self.vault.clone(),
             registry: self.registry.clone(),
             data_dir: self.paths.data.clone(),
+            approvals: self.approvals.clone(),
             voice: false,
         })
     }

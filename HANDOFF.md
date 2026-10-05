@@ -1033,6 +1033,28 @@ bouton grisé fait expirer un clic en 30 s sans autre message — le parcours
 « bibliothèque de modèles » cliquait « Vocal » sur `glm-5.3-flash` alors qu'il
 était déjà le modèle vocal ; il le retire d'abord (et le `finally` le remet).
 
+**77. Un fichier sensible n'est jamais modifié sans accord explicite.** Cas
+réel du 5 octobre : dans la conversation JobXpress, Jimmy a réécrit
+`/home/jimmy/jobxpress/secure/.env.api` sur le VPS (`vps_exec` : `cp …;
+python3 <<'PY'`) puis reconstruit le conteneur, sans rien demander ; il avait
+aussi affiché ce `.env` en clair (`cat -A`). Les permissions V1, accordées une
+fois pour toutes, ne distinguent pas un `.env` d'un fichier de code.
+`agent/src/sensitive.rs` repère avant chaque outil une **modification** d'un
+fichier sensible (`.env*` sauf `.example`/`.sample`…, `*.pem`/`*.key`, clés
+SSH, `secret*`, `credential*`, dossiers `secure/`, `secrets/`, `.ssh/`…) :
+`write_file`, `run_command`, `mcp_call` à commande (`vps_exec`…) ou
+d'écriture (`upload`, `put`…). La lecture reste libre, `--env-file` aussi
+(docker lit le fichier). Une commande qui nomme un fichier sensible n'est
+libre que si **chaque** segment est une lecture connue (`cat`, `grep`, `sed`
+sans `-i`…) sans redirection ni heredoc ; les guillemets sont masqués avant
+le découpage (`grep -E 'A|B'`). La boucle d'agent suspend alors l'outil
+(`sensitive::authorize`, appelé dans `core/agent.rs`), émet
+`AgentEvent::Approval`, et le Chat affiche une carte « Autoriser / Refuser »
+(`approval_respond`). Refus, 5 min sans réponse, STOP ou demande **vocale** =
+outil non exécuté, et le modèle reçoit la consigne de ne pas contourner (règle
+8 du prompt). Limite connue : détection par motifs, un script intermédiaire
+qui ne nomme pas le fichier y échappe.
+
 ---
 
 ## Prochaines étapes

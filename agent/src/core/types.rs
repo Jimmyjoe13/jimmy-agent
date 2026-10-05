@@ -219,6 +219,12 @@ pub enum AgentEvent {
     /// complet et remplace la bulle. Ne doit pas être lu à voix haute ni
     /// historisé — seuls `Final` et les outils le sont.
     Delta { text: String },
+    /// Un outil veut modifier un fichier sensible (`.env`, clés, secrets) :
+    /// il est suspendu jusqu'à la réponse de l'utilisateur
+    /// (`approval_respond`). `detail` = l'outil et la commande exacte.
+    Approval { id: String, target: String, detail: String },
+    /// La demande est close : accord, refus ou délai dépassé.
+    ApprovalResolved { id: String, approved: bool },
     /// Erreur non fatale, Jimmy continue.
     Notice { message: String },
     /// Commande dite à voix haute, telle que transmise à l'agent : affichée

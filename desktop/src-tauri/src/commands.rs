@@ -176,6 +176,18 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
     Ok(session_id)
 }
 
+/// Réponse de l'utilisateur à une demande d'autorisation (modification d'un
+/// fichier sensible). `false` si la demande n'existe plus (délai dépassé,
+/// tâche arrêtée) : l'interface le signale au lieu de croire l'accord passé.
+#[tauri::command]
+pub async fn approval_respond(
+    state: State<'_, AppState>,
+    id: String,
+    approved: bool,
+) -> std::result::Result<bool, String> {
+    Ok(state.app.approvals.respond(&id, approved))
+}
+
 #[tauri::command]
 pub async fn sessions(state: State<'_, AppState>) -> std::result::Result<Vec<serde_json::Value>, String> {
     let list = state.app.history.sessions(50).map_err(err)?;

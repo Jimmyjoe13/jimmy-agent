@@ -253,6 +253,28 @@ let stepPage = null;
     return `bloc travaux visible : « ${chip} »`;
   });
 
+  // Cas réel du 5 octobre : un `.env` de production réécrit sans rien
+  // demander. Modifier un fichier sensible doit afficher une carte
+  // d'autorisation ; « Refuser » = le fichier n'est pas touché.
+  await step("Chat : modifier un fichier sensible demande l'autorisation", async () => {
+    const note = (await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("paths_info"))).data;
+    const fichier = `${note}\\tests-ui\\garde-${Date.now() % 10_000}.env`;
+    await p.locator(".composer-input").fill(`Écris dans « ${fichier} » la ligne unique : TEST=1. Utilise write_file.`);
+    await p.keyboard.press("Enter");
+    await p.waitForSelector(".bubble.approval", { timeout: 150_000 });
+    const target = (await p.locator(".bubble.approval .approval-target").last().textContent()) ?? "";
+    expect(target.endsWith(".env"), `fichier annoncé sur la carte : « ${target} »`);
+    await p.locator(".bubble.approval button", { hasText: "Refuser" }).last().click();
+    await p.waitForSelector(".bubble.approval.denied", { timeout: 10_000 });
+    await attendreReponse(180_000);
+    const existe = await p.evaluate(
+      (f) => window.__TAURI_INTERNALS__.invoke("fs_preview", { path: f }).then(() => true, () => false),
+      fichier,
+    );
+    expect(!existe, `le fichier a été écrit malgré le refus : ${fichier}`);
+    return `carte « ${target.split("\\").pop()} », refus respecté`;
+  });
+
   // Cas réel du 4 octobre (piège 69) : un projet choisi hors d'une
   // conversation enregistrée se perdait au changement d'onglet.
   await step("Chat : le projet d'une nouvelle conversation survit à la navigation", async () => {

@@ -16,6 +16,10 @@ export interface AppContext {
   /** Projet choisi pour une conversation pas encore commencée : gardé ici
    *  pour survivre à un changement d'onglet. */
   pendingProject: string | null;
+  /** Demandes d'autorisation en attente (fichier sensible), par identifiant :
+   *  gardées ici pour que le Chat les affiche même si elles sont arrivées
+   *  pendant que l'utilisateur était sur un autre onglet. */
+  approvals: Map<string, AgentEvent>;
   navigate: (route: Route) => void;
   /** Relit l'état (statut général + écoute) et met à jour la barre latérale. */
   refreshStatus: () => Promise<void>;

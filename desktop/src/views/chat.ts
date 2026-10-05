@@ -577,6 +577,66 @@ export function chatView(ctx: AppContext): HTMLElement {
     }
   }
 
+  /** Filet : sans réponse au bout de 3 minutes, la bulle d'attente devient une
+   *  erreur. Suspendu pendant une demande d'autorisation (l'utilisateur peut
+   *  prendre son temps), réarmé après sa réponse. */
+  function armSafety() {
+    window.clearTimeout(safety);
+    safety = window.setTimeout(() => {
+      if (pending || streaming) {
+        settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
+      }
+    }, ANSWER_TIMEOUT_MS);
+  }
+
+  // Cartes d'autorisation ouvertes, par identifiant de demande.
+  const approvalCards = new Map<string, HTMLElement>();
+
+  /** Carte « Autoriser / Refuser » : Jimmy veut modifier un fichier sensible
+   *  (`.env`, clés, secrets) et son outil est suspendu jusqu'à la réponse. */
+  function showApproval(event: AgentEvent) {
+    const id = event.id ?? "";
+    if (!id || approvalCards.has(id)) return;
+    const status = h("span", { class: "approval-status" }, "Jimmy attend ta réponse");
+    const allow = h("button", { class: "primary small" }, "Autoriser") as HTMLButtonElement;
+    const deny = h("button", { class: "danger small" }, "Refuser") as HTMLButtonElement;
+    const answer = async (approved: boolean) => {
+      allow.disabled = true;
+      deny.disabled = true;
+      const accepted = await guard(() => api.approvalRespond(id, approved), "autorisation");
+      // Demande expirée ou tâche arrêtée entre-temps : rien n'a été exécuté.
+      if (accepted === false) closeApproval(id, null);
+    };
+    allow.addEventListener("click", () => void answer(true));
+    deny.addEventListener("click", () => void answer(false));
+    const card = h(
+      "div",
+      { class: "bubble approval" },
+      h("p", { class: "approval-title" }, "Autorisation demandée : modifier un fichier sensible"),
+      h("code", { class: "approval-target" }, event.target ?? ""),
+      h("pre", { class: "approval-detail" }, event.detail ?? ""),
+      h("div", { class: "approval-actions" }, status, deny, allow),
+    );
+    approvalCards.set(id, card);
+    clearEmptyState();
+    // Au-dessus de la bulle d'attente : elle reste la dernière du fil.
+    if (pending?.isConnected) pending.before(card);
+    else append(card);
+    stream.scrollTop = stream.scrollHeight;
+    window.clearTimeout(safety);
+  }
+
+  /** Clôt une carte : accord, refus, ou `null` = expirée / sans objet. */
+  function closeApproval(id: string, approved: boolean | null) {
+    const card = approvalCards.get(id);
+    if (!card) return;
+    approvalCards.delete(id);
+    card.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
+    card.classList.add(approved ? "approved" : "denied");
+    const status = card.querySelector(".approval-status");
+    if (status) status.textContent = approved === null ? "Demande expirée : rien n'a été modifié" : approved ? "Autorisé" : "Refusé : rien n'a été modifié";
+  }
+
   async function submit() {
     const text = input.value.trim();
     if (!text || pending || streaming) return;
@@ -592,11 +652,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     );
     append(pending);
     setBusy(true);
-    safety = window.setTimeout(() => {
-      if (pending || streaming) {
-        settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
-      }
-    }, ANSWER_TIMEOUT_MS);
+    armSafety();
 
     const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project), "envoi");
     if (!id) {
@@ -711,13 +767,23 @@ export function chatView(ctx: AppContext): HTMLElement {
         stream.scrollTop = stream.scrollHeight;
         break;
       }
+      case "approval":
+        showApproval(event);
+        break;
+      case "approvalResolved":
+        closeApproval(event.id ?? "", event.approved ?? false);
+        if (pending || streaming) armSafety();
+        break;
       case "final": {
+        // Fin du tour (STOP compris) : une carte encore ouverte n'a plus d'objet.
+        for (const id of [...approvalCards.keys()]) closeApproval(id, null);
         const node = bubble("assistant", event.text ?? "");
         if (turnFiles.length > 0) node.append(workBlock(turnFiles));
         settle(node);
         break;
       }
       case "failed":
+        for (const id of [...approvalCards.keys()]) closeApproval(id, null);
         settle(bubble("error", event.message ?? "La demande a échoué."));
         break;
       default:
@@ -781,7 +847,9 @@ export function chatView(ctx: AppContext): HTMLElement {
     stream.scrollTop = stream.scrollHeight;
   }
 
-  void loadHistory();
+  // Demandes arrivées pendant que l'utilisateur était sur un autre onglet :
+  // affichées après l'historique (qui remplace le contenu du fil).
+  void loadHistory().then(() => ctx.approvals.forEach((event) => showApproval(event)));
   void loadProject();
   window.setTimeout(() => input.focus(), 0);
 

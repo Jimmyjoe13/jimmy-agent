@@ -227,6 +227,7 @@ pub fn run() {
                 commands::chat,
                 commands::sessions,
                 commands::session_messages,
+                commands::approval_respond,
                 commands::delete_session,
                 commands::get_settings,
                 commands::save_settings,

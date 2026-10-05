@@ -736,6 +736,19 @@ fenêtre d'aperçu d'un fichier prenait le focus avant d'exister dans la page,
 Échap ne la fermait donc jamais, et elle bloquait tous les clics suivants
 (piège 76).
 
+### Les fichiers sensibles sous autorisation (5 octobre, nuit)
+
+En lisant le journal d'activité d'une conversation JobXpress, l'utilisateur a
+vu Jimmy aller fouiller d'autres projets sur le VPS. Ça, c'était légitime :
+l'API est déployée là-bas. Mais le journal montrait plus grave : le `.env` de
+production réécrit par un script Python puis le conteneur reconstruit, sans
+aucune question, et ce même `.env` affiché en clair une minute plus tôt.
+Consigne de l'utilisateur : « il ne doit pas modifier des fichiers sensibles
+sans autorisation ». Choix retenu parmi deux : une carte « Autoriser /
+Refuser » dans le Chat qui suspend l'outil (plutôt qu'un refus sec qui
+obligerait à tout faire à la main). À la voix, refus immédiat : personne ne
+peut cliquer. Détail et limites au piège 77.
+
 ### Le mot d'arrêt « STOP »
 
 Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,

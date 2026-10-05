@@ -63,6 +63,7 @@ async function main() {
     voice: null,
     lastSessionId: null,
     pendingProject: null,
+    approvals: new Map(),
     navigate: (next) => {
       route = next;
       render();
@@ -142,6 +143,18 @@ async function main() {
     // Conversation vocale : le Chat l'adopte, même si l'utilisateur est sur
     // un autre onglet à ce moment-là.
     if (event.type === "spoken" && event.sessionId) ctx.lastSessionId = event.sessionId;
+    // Demande d'autorisation (fichier sensible) : Jimmy est bloqué tant que
+    // l'utilisateur n'a pas répondu. Hors du Chat, on le prévient et on montre
+    // la fenêtre (souvent masquée derrière l'avatar).
+    if (event.type === "approval" && event.id) {
+      ctx.approvals.set(event.id, event);
+      if (route !== "chat") {
+        toast("Jimmy attend ton autorisation dans le Chat (fichier sensible).", "info");
+        void api.showMain().catch(() => undefined);
+      }
+    }
+    if (event.type === "approvalResolved" && event.id) ctx.approvals.delete(event.id);
+    if (event.type === "final" || event.type === "failed") ctx.approvals.clear();
     for (const handler of handlers) handler(event);
   });
 

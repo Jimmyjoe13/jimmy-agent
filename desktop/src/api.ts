@@ -27,6 +27,8 @@ export interface AgentEvent {
     | "vault"
     | "skill"
     | "delta"
+    | "approval"
+    | "approvalResolved"
     | "final"
     | "notice"
     | "heard"
@@ -53,6 +55,10 @@ export interface AgentEvent {
   remaining?: number;
   /** `spoken` : session de la conversation vocale (adoptée par le Chat). */
   sessionId?: string;
+  /** `approval` : demande d'autorisation (fichier sensible) ; `approvalResolved` : sa clôture. */
+  id?: string;
+  target?: string;
+  approved?: boolean;
 }
 
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
@@ -418,6 +424,8 @@ export const api = {
   voiceDevices: () => invoke<string[]>("voice_devices"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
+  /** Accord ou refus d'une modification de fichier sensible ; `false` = demande expirée. */
+  approvalRespond: (id: string, approved: boolean) => invoke<boolean>("approval_respond", { id, approved }),
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   sttTranscribe: (wav: number[]) => invoke<string>("stt_transcribe", { wav }),
   avatarStart: () => invoke<void>("avatar_start"),
