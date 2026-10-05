@@ -97,13 +97,18 @@ async fn chemin_heureux_analyse_un_dossier() {
     // Les événements ont dû être émis.
     let mut etats = Vec::new();
     let mut outils = Vec::new();
+    let mut fragments = 0usize;
     while let Ok(event) = rx.try_recv() {
         match event {
             jimmy_agent::core::types::AgentEvent::State { state, .. } => etats.push(state),
             jimmy_agent::core::types::AgentEvent::ToolStart { name, .. } => outils.push(name),
+            // Le streaming : la réponse doit arriver par fragments pendant la
+            // génération, pas d'un seul bloc à la fin du tour.
+            jimmy_agent::core::types::AgentEvent::Delta { .. } => fragments += 1,
             _ => {}
         }
     }
+    println!("fragments reçus en flux : {fragments}");
 
     println!("--- réponse ---\n{}\n", reponse.text);
     // Ce qui est réellement dit à voix haute : Markdown et code retirés, puis
@@ -131,6 +136,10 @@ async fn chemin_heureux_analyse_un_dossier() {
     assert!(
         etats.contains(&AvatarState::Thinking),
         "l'état « thinking » n'a jamais été émis"
+    );
+    assert!(
+        fragments > 0,
+        "aucun fragment reçu en flux : la réponse n'est plus streamée"
     );
 
     // Mémoire : ce qui a été appris doit être retrouvable.

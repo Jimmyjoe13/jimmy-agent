@@ -126,9 +126,11 @@ impl Message {
         if let Some(id) = &self.tool_call_id {
             map.insert("tool_call_id".into(), serde_json::Value::String(id.clone()));
         }
-        if let Some(name) = &self.name {
-            map.insert("name".into(), serde_json::Value::String(name.clone()));
-        }
+        // Le `name` du résultat d'outil n'est PAS envoyé : l'upstream le refuse
+        // (« messages[N]: "name" is not supported by this endpoint », HTTP 400
+        // en usage réel le 5 octobre, conversation coupée en pleine procédure).
+        // Il est de toute façon redondant : `tool_call_id` relie le résultat à
+        // son appel. Le champ reste dans la structure pour l'affichage.
         serde_json::Value::Object(map)
     }
 }
@@ -211,6 +213,12 @@ pub enum AgentEvent {
     Skill { action: String, name: String },
     /// Réponse finale prête.
     Final { text: String },
+    /// Fragment de la réponse, reçu en flux pendant la génération : la bulle
+    /// du Chat s'écrit en direct au lieu d'attendre la fin de l'appel (mesuré
+    /// à 22 s de silence). Transitoire : `Final` fournit toujours le texte
+    /// complet et remplace la bulle. Ne doit pas être lu à voix haute ni
+    /// historisé — seuls `Final` et les outils le sont.
+    Delta { text: String },
     /// Erreur non fatale, Jimmy continue.
     Notice { message: String },
     /// Commande dite à voix haute, telle que transmise à l'agent : affichée
@@ -242,4 +250,21 @@ pub struct AgentAnswer {
     pub text: String,
     pub tools_used: Vec<String>,
     pub duration_ms: u64,
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+
+    /// Le nom du résultat d'outil ne part plus sur le fil : l'upstream le
+    /// refuse en HTTP 400 ("name" is not supported by this endpoint, usage
+    /// réel du 5 octobre, conversation coupée en pleine procédure).
+    /// tool_call_id reste, lui : c'est lui qui relie le résultat à son appel.
+    #[test]
+    fn le_resultat_d_outil_n_envoie_pas_son_nom() {
+        let message = Message::tool_result("call_7", "vault_search", "notes trouvées");
+        let texte = message.to_wire().to_string();
+        assert!(texte.contains("tool_call_id"), "{texte}");
+        assert!(!texte.contains("\"name\""), "{texte}");
+    }
 }

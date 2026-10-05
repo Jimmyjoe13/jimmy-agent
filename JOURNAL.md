@@ -694,6 +694,48 @@ chemin_heureux_analyse_un_dossier --ignored` sur le vrai modèle, deux rejeux �
 réponse d'environ 650 caractères, **190 à 228 dits à voix haute** selon le tour,
 nom de fichier intact.
 
+### Le streaming du chat (5 octobre, soir)
+
+Constat chiffré dans le journal du 18:22 : l'appel au modèle a pris **22,5 s**,
+l'utilisateur a regardé trois points pendant tout ce temps, puis la réponse est
+arrivée d'un bloc. Six sondes réelles ont établi le format SSE du fournisseur
+(voir piège 74) : il streame, et proprement.
+
+Le chemin implémenté : `chat_stream` (SSE, même `LlmReply` qu'avant) → la boucle
+d'agent émet `AgentEvent::Delta` par fragment de contenu visible → l'interface
+écrit la bulle au fil, avec un curseur clignotant. Deux règles gardent la
+cohérence : **seul le premier essai streame** (les chemins de secours rejouent
+sans flux, sinon ce qui est affiché serait écrit deux fois), et **une bulle en
+flux coupée par un appel d'outil devient une ligne « annonce »** de l'activité
+puis une bulle d'attente reprend — le texte d'une itération n'est pas la
+réponse. `Final` remplace toujours la bulle par le texte complet : les filets
+anti-dérive et inline-tools gardent tout leur effet.
+
+Le raisonnement caché du modèle (`reasoning_content`) n'est jamais affiché ; sa
+taille est au journal en debug. La voix reste accrochée à `Final` : lire les
+fragments dirait les annonces. Voix anticipée dès la première phrase : différé.
+
+Vérifié : parseur unitaire sur les fragments réels capturés (assemblage contenu
+et tool_calls par index) ; `cargo test --workspace` sans avertissement ; test
+réel `chemin_heureux_analyse_un_dossier` avec comptage des fragments reçus ;
+`npm run build` strict ; suite d'interface.
+
+Le même soir, le test réel a révélé un vrai bug sans lien avec le flux : une
+conversation coupée en pleine procédure par un HTTP 400 (`messages[7]: "name"
+is not supported by this endpoint`). Le champ `name` des résultats d'outil
+n'est plus envoyé (redondant avec `tool_call_id`), test de régression à
+l'appui. La suite d'interface, elle, a cassé sur le streaming : elle prenait la
+disparition de la bulle d'attente pour la fin du tour (piège 75) et lisait un
+fil pollué par l'écoute permanente (musique dans la pièce). Fin de tour
+redéfinie, écoute coupée pendant la suite puis restaurée. Session reprise par
+un autre agent après que le premier s'est perdu dans ses propres fichiers.
+
+La reprise a trouvé la vraie cause de la cascade d'échecs (onze parcours
+« Timeout 30000ms » à la suite) : un bug de l'application, pas des tests. La
+fenêtre d'aperçu d'un fichier prenait le focus avant d'exister dans la page,
+Échap ne la fermait donc jamais, et elle bloquait tous les clics suivants
+(piège 76).
+
 ### Le mot d'arrêt « STOP »
 
 Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,

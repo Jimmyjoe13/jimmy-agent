@@ -36,6 +36,11 @@ export function chatView(ctx: AppContext): HTMLElement {
   let sessionId: string | null = ctx.lastSessionId;
   let pending: HTMLElement | null = null;
   let safety = 0;
+  // Bulle en cours d'écriture en flux (`delta`) : la réponse s'affiche pendant
+  // que le modèle génère, au lieu d'un bloc unique à la fin. Transitoire :
+  // `final` la remplace par la réponse complète, un appel d'outil la résout
+  // en ligne d'activité (ce qui était écrit n'était qu'une annonce).
+  let streaming: HTMLElement | null = null;
   // Fichiers écrits par Jimmy dans le tour courant (`write_file`) : la
   // matière du bloc « travaux » ajouté sous la réponse finale.
   let turnFiles: string[] = [];
@@ -437,8 +442,11 @@ export function chatView(ctx: AppContext): HTMLElement {
       if ((event as KeyboardEvent).key === "Escape") closeModal();
     });
     fileModal.setAttribute("tabindex", "-1");
-    (fileModal as HTMLElement).focus();
+    // Ajout AVANT le focus : un élément hors du document ne prend pas le
+    // focus, Échap n'arrivait jamais à la fenêtre (restée ouverte, elle
+    // bloquait ensuite tous les clics de l'interface).
     document.body.append(fileModal);
+    (fileModal as HTMLElement).focus();
     if (line) {
       body.querySelector(".file-modal-line.target")?.scrollIntoView({ block: "center" });
     }
@@ -518,11 +526,14 @@ export function chatView(ctx: AppContext): HTMLElement {
     stream.scrollTop = stream.scrollHeight;
   }
 
-  /** Remplace la bulle d'attente par la réponse (ou ajoute si aucune attente). */
+  /** Remplace la bulle d'attente (ou en cours d'écriture) par la réponse. */
   function settle(node: HTMLElement) {
     if (pending) {
       pending.replaceWith(node);
       pending = null;
+    } else if (streaming) {
+      streaming.replaceWith(node);
+      streaming = null;
     } else {
       append(node);
     }
@@ -530,9 +541,45 @@ export function chatView(ctx: AppContext): HTMLElement {
     setBusy(false);
   }
 
+  /** La réponse s'écrit : la bulle d'attente devient la bulle en flux, ou une
+   *  nouvelle bulle est ouverte. Retourne le paragraphe à garnir. */
+  function streamingTarget(): HTMLElement {
+    if (!streaming) {
+      streaming = h("div", { class: "bubble assistant streaming" }, h("p", {}, ""));
+      if (pending) {
+        pending.replaceWith(streaming);
+        pending = null;
+      } else {
+        append(streaming);
+      }
+    }
+    return streaming.firstElementChild as HTMLElement;
+  }
+
+  /** Ce qui a été écrit en flux n'était qu'une annonce (« Je lis le dossier… ») :
+   *  un outil part, la bulle se résout en ligne d'activité et une bulle
+   *  d'attente reprend, comme avant le premier fragment. */
+  function resolveStreamingAsAnnouncement() {
+    if (!streaming) return;
+    const announced = streaming.textContent?.trim() ?? "";
+    streaming.remove();
+    streaming = null;
+    if (announced) {
+      logActivity(activityLine("annonce", "note", h("span", { class: "activity-detail" }, announced)));
+    }
+    if (!pending) {
+      pending = h(
+        "div",
+        { class: "bubble assistant pending" },
+        h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimmy réfléchit"),
+      );
+      append(pending);
+    }
+  }
+
   async function submit() {
     const text = input.value.trim();
-    if (!text || pending) return;
+    if (!text || pending || streaming) return;
     mentionClose();
     turnFiles = [];
     input.value = "";
@@ -546,7 +593,9 @@ export function chatView(ctx: AppContext): HTMLElement {
     append(pending);
     setBusy(true);
     safety = window.setTimeout(() => {
-      if (pending) settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
+      if (pending || streaming) {
+        settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
+      }
     }, ANSWER_TIMEOUT_MS);
 
     const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project), "envoi");
@@ -606,6 +655,9 @@ export function chatView(ctx: AppContext): HTMLElement {
   ctx.onEvent((event: AgentEvent) => {
     switch (event.type) {
       case "toolStart":
+        // Ce qui a été écrit en flux n'était qu'une annonce (« Je lis le
+        // dossier… ») : un outil part, la bulle se résout en ligne d'activité.
+        resolveStreamingAsAnnouncement();
         // Suivi des écritures du tour : la matière du bloc « travaux ».
         if (event.name === "write_file") {
           const args = typeof event.arguments === "string" ? safeParse(event.arguments) : event.arguments;
@@ -652,6 +704,13 @@ export function chatView(ctx: AppContext): HTMLElement {
           append(pending);
         }
         break;
+      case "delta": {
+        // Fragment reçu en flux : la bulle s'écrit au fil de la génération.
+        const target = streamingTarget();
+        target.append(event.text ?? "");
+        stream.scrollTop = stream.scrollHeight;
+        break;
+      }
       case "final": {
         const node = bubble("assistant", event.text ?? "");
         if (turnFiles.length > 0) node.append(workBlock(turnFiles));

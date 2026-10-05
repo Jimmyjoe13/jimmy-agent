@@ -207,6 +207,107 @@ impl LlmClient {
         })
     }
 
+    /// Une complétion **en flux** (SSE) : même requête et même [`LlmReply`]
+    /// que [`chat`], mais chaque fragment du contenu visible est passé à
+    /// `on_delta` au fil de la génération — sans cet affichage en direct, le
+    /// chat montre des pointillés pendant toute la génération (appel réel
+    /// mesuré à 22 s de silence). Les fragments du **raisonnement caché**
+    /// (`reasoning_content`) sont comptés dans la réponse mais jamais passés
+    /// à `on_delta`. Le format constaté sur le fournisseur (sondes réelles du
+    /// 5 octobre) est celui d'OpenAI : `delta.content`, tool_calls éparpillés
+    /// par `index`, `finish_reason` au dernier fragment, `usage` séparé,
+    /// `data: [DONE]`.
+    pub async fn chat_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tools: &[ToolSpec],
+        temperature: Option<f32>,
+        max_tokens: u32,
+        mut on_delta: impl FnMut(&str) + Send,
+    ) -> Result<LlmReply> {
+        if !self.has_key() {
+            return Err(Error::provider("OpenCode Go", "clé OPENCODE_API_KEY absente"));
+        }
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": messages.iter().map(|m| m.to_wire()).collect::<Vec<_>>(),
+            "max_tokens": max_tokens,
+            "stream": true,
+        });
+        if let Some(temp) = temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.iter().map(|t| t.to_wire()).collect());
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+
+        let mut response = self
+            .http
+            .post(format!("{}/chat/completions", self.base_url))
+            .headers(self.auth_headers())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::provider("OpenCode Go", e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let raw = response
+                .text()
+                .await
+                .map_err(|e| Error::provider("OpenCode Go", e.to_string()))?;
+            // Le corps peut contenir un secret d'authentification en théorie :
+            // on ne renvoie jamais la clé, seulement le message du serveur.
+            return Err(Error::provider(
+                "OpenCode Go",
+                format!("HTTP {status} — {}", truncate(&raw, 400)),
+            ));
+        }
+
+        let mut acc = StreamAccum::default();
+        let started = std::time::Instant::now();
+        let mut first_fragment = 0u64;
+        // Tampon d'octets : un fragment réseau peut couper une ligne SSE au
+        // milieu. Les lignes finissent par \n, qui n'est jamais un octet de
+        // continuation UTF-8 : couper sur lui est sans risque d'encodage.
+        let mut buffer: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| Error::provider("OpenCode Go", e.to_string()))?
+        {
+            buffer.extend_from_slice(&chunk);
+            while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buffer.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(&line);
+                let data = match line.trim().strip_prefix("data: ") {
+                    Some(data) => data.trim(),
+                    None => continue,
+                };
+                if data == "[DONE]" {
+                    continue;
+                }
+                // Une ligne illisible ne doit jamais tuer le flux : il y a des
+                // battements du protocole qui ne sont pas des fragments.
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                    // Métrique du streaming : le délai du premier fragment est
+                    // ce que l'utilisateur vit à l'écran (22 s de silence avant
+                    // ce chantier). Une seule ligne, au premier contenu.
+                    acc.ingest(&value, &mut |text| {
+                        if first_fragment == 0 {
+                            first_fragment = started.elapsed().as_millis() as u64;
+                            log::info!("[llm] premier fragment après {first_fragment} ms");
+                        }
+                        on_delta(text);
+                    });
+                }
+            }
+        }
+        acc.into_reply()
+    }
+
     /// Complétion simple, sans outil (mémoire, onboarding, titres).
     pub async fn complete(
         &self,
@@ -450,6 +551,122 @@ fn truncate(text: &str, max: usize) -> String {
     format!("{}…", &text[..end])
 }
 
+/// Assemble les fragments SSE en une [`LlmReply`]. Le contenu visible
+/// (`delta.content`) et le raisonnement caché (`delta.reasoning_content`,
+/// compté mais jamais affiché) arrivent en fragments distincts ; les appels
+/// d'outils arrivent éparpillés par `index` — identifiant et nom au premier
+/// fragment, `arguments` en morceaux ensuite ; `usage` n'arrive que dans un
+/// fragment final. Formats constatés sur le fournisseur (sondes réelles du
+/// 5 octobre 2026).
+#[derive(Default)]
+struct StreamAccum {
+    content: String,
+    reasoning: String,
+    tool_calls: Vec<ToolCallAccum>,
+    finish_reason: Option<String>,
+    usage: Usage,
+}
+
+#[derive(Default, Clone)]
+struct ToolCallAccum {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl StreamAccum {
+    fn ingest(&mut self, value: &serde_json::Value, on_delta: &mut dyn FnMut(&str)) {
+        // `usage` arrive dans un fragment séparé (souvent le dernier).
+        if let Some(u) = value.get("usage").filter(|u| !u.is_null()) {
+            self.usage.prompt_tokens = u
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(self.usage.prompt_tokens);
+            self.usage.completion_tokens = u
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(self.usage.completion_tokens);
+        }
+        let Some(choices) = value.get("choices").and_then(|c| c.as_array()) else { return };
+        for choice in choices {
+            if let Some(reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                self.finish_reason = Some(reason.to_string());
+            }
+            let Some(delta) = choice.get("delta") else { continue };
+            if let Some(text) = delta.get("reasoning_content").and_then(|c| c.as_str()) {
+                self.reasoning.push_str(text);
+            }
+            if let Some(text) = delta.get("content").and_then(|c| c.as_str()) {
+                if !text.is_empty() {
+                    self.content.push_str(text);
+                    on_delta(text);
+                }
+            }
+            let Some(calls) = delta.get("tool_calls").and_then(|c| c.as_array()) else { continue };
+            for call in calls {
+                let index = call.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                if self.tool_calls.len() <= index {
+                    self.tool_calls.resize(index + 1, ToolCallAccum::default());
+                }
+                let slot = &mut self.tool_calls[index];
+                if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+                    slot.id.push_str(id);
+                }
+                if let Some(function) = call.get("function") {
+                    if let Some(name) = function.get("name").and_then(|v| v.as_str()) {
+                        slot.name.push_str(name);
+                    }
+                    if let Some(args) = function.get("arguments").and_then(|v| v.as_str()) {
+                        slot.arguments.push_str(args);
+                    }
+                }
+            }
+        }
+    }
+
+    fn into_reply(self) -> Result<LlmReply> {
+        // Le raisonnement caché consomme le plafond de jetons sans être visible
+        // dans le contenu ; sa taille au journal aide à comprendre les réponses
+        // coupées (max_tokens mangé par la réflexion, piège 70).
+        log::debug!(
+            "[llm] flux : {} caractères visibles, {} de raisonnement",
+            self.content.chars().count(),
+            self.reasoning.chars().count()
+        );
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .map(|call| ToolCall {
+                id: call.id,
+                name: call.name,
+                arguments: if call.arguments.trim().is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(&call.arguments)
+                        .unwrap_or_else(|_| serde_json::json!({}))
+                },
+            })
+            .collect::<Vec<_>>();
+        // Ni contenu, ni outil, ni raison de fin : le flux s'est coupé avant
+        // la première réponse. Tout autre cas produit une réponse utilisable.
+        if self.finish_reason.is_none()
+            && self.content.is_empty()
+            && tool_calls.is_empty()
+        {
+            return Err(Error::provider(
+                "OpenCode Go",
+                "flux interrompu avant la fin (aucun fragment reçu)",
+            ));
+        }
+        Ok(LlmReply {
+            truncated: self.finish_reason.as_deref() == Some("length"),
+            content: self.content,
+            tool_calls,
+            usage: self.usage,
+        })
+    }
+}
+
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
@@ -489,4 +706,60 @@ struct UsageRaw {
     prompt_tokens: u64,
     #[serde(default)]
     completion_tokens: u64,
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    /// Fragments capturés dans les sondes réelles du 5 octobre 2026 : le
+    /// premier chunk, du raisonnement caché, un fragment de contenu, puis
+    /// l'usage final. Séquence `data: …` telle qu'arrivée du fournisseur.
+    #[test]
+    fn les_fragments_sont_assembles_comme_en_reel() {
+        let deltas = [
+            r#"{"choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"role":"assistant","content":""}}],"usage":null}"#,
+            r#"{"choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"The user"}}],"usage":null}"#,
+            r#"{"choices":[{"index":0,"finish_reason":null,"delta":{"content":"Bon"}}],"usage":null}"#,
+            r#"{"choices":[{"index":0,"finish_reason":null,"delta":{"content":"jour"}}],"usage":null}"#,
+            r#"{"choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":null}"#,
+            r#"{"usage":{"prompt_tokens":17,"completion_tokens":32},"choices":[]}"#,
+        ];
+        let mut seen = String::new();
+        let mut acc = StreamAccum::default();
+        for raw in deltas {
+            let value = serde_json::from_str::<serde_json::Value>(raw).unwrap();
+            acc.ingest(&value, &mut |text| seen.push_str(text));
+        }
+        assert_eq!(acc.content, "Bonjour");
+        assert_eq!(seen, "Bonjour", "on_delta ne reçoit que le contenu visible");
+        assert_eq!(acc.reasoning, "The user");
+        assert_eq!(acc.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(acc.usage.completion_tokens, 32);
+    }
+
+    /// Les fragments d'outil sont éparpillés : identifiant et nom au premier,
+    /// `arguments` en morceaux ensuite, assemblés par `index`.
+    #[test]
+    fn les_appels_d_outils_sont_reconstitues_par_index() {
+        let deltas = [
+            r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"834e2f99","type":"function","function":{"name":"ping","arguments":""}}]}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{"}}]}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a\":1}"}}]}}]}"#,
+            r#"{"choices":[{"index":0,"finish_reason":"tool_calls","delta":{}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"second","type":"function","function":{"name":"deux","arguments":"{}"}}]}}]}"#,
+        ];
+        let mut acc = StreamAccum::default();
+        for raw in deltas {
+            acc.ingest(&serde_json::from_str::<serde_json::Value>(raw).unwrap(), &mut |_| {});
+        }
+        let reply = acc.into_reply().expect("reply");
+        assert_eq!(reply.tool_calls.len(), 2, "{reply:?}");
+        assert_eq!(reply.tool_calls[0].id, "834e2f99");
+        assert_eq!(reply.tool_calls[0].name, "ping");
+        assert_eq!(reply.tool_calls[0].arguments["a"], 1);
+        assert_eq!(reply.tool_calls[1].id, "second");
+        assert_eq!(reply.tool_calls[1].name, "deux");
+    }
 }

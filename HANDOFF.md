@@ -999,6 +999,40 @@ jamais cosmétique, et « défini mais jamais appelé » est déjà arrivé plus
 fois (pièges 11, 22). Corrigé avec `tokio::process` + `kill_on_drop`, comme
 `run_command`.
 
+**74. Le SSE du fournisseur n'est pas exactement un JSON par ligne.**
+`chat_stream` lit des fragments d'octets (`response.chunk()`), pas des lignes :
+un fragment réseau coupe n'importe où, y compris au milieu d'un caractère
+UTF-8. On accumule les octets et on ne découpe que sur `\n` (jamais un octet de
+continuation) ; les lignes non `data: ` sont ignorées, une ligne JSON
+illisible ne tue jamais le flux. Formats constatés par sondes réelles
+(5 octobre) : `delta.reasoning_content` séparé du contenu (et consommé par le
+plafond de jetons — 32 jetons/32 dans une sonde), tool_calls éparpillés par
+`index` (id + nom au premier fragment, `arguments` en morceaux ensuite),
+`finish_reason` dans un `delta: {}` final, `usage` dans un fragment séparé,
+`data: [DONE]` pour clore. Le tampon qui s'arrête sans `finish_reason` ni
+contenu → erreur « flux interrompu », pas une réponse vide.
+
+**75. Avec le streaming, « la bulle d'attente a disparu » n'est plus la fin du
+tour.** Elle part au premier fragment, la bulle `.streaming` redevient une
+bulle d'attente à chaque appel d'outil, et seule `final` libère le bouton
+d'envoi. Dans `suite.js`, la fin du tour est `attendreReponse()` : ni
+`.bubble.pending`, ni `.bubble.streaming`, et bouton d'envoi actif, au même
+instant. La preuve du flux passe par un `MutationObserver` posé avant l'envoi
+(`guetterFlux`) : une réponse d'un mot crée et retire la bulle en flux entre
+deux sondages. Autre détail : `voice_stop` enregistre aussi
+`listen_on_start` — la suite coupe l'écoute au départ (parole ambiante =
+commandes parasites dans le fil) et la remet dans son état d'origine à la fin.
+
+**76. La fenêtre d'aperçu ne se fermait pas avec Échap.** `openFileModal`
+appelait `focus()` avant d'ajouter la fenêtre au document : un élément détaché
+ne prend pas le focus, Échap n'arrivait jamais. Restée ouverte, elle
+interceptait tous les clics : onze parcours de la suite tombaient en cascade
+(« locator.click: Timeout 30000ms »). Ajout puis focus. La suite retire aussi
+toute fenêtre d'aperçu restante après un parcours échoué. Même famille : un
+bouton grisé fait expirer un clic en 30 s sans autre message — le parcours
+« bibliothèque de modèles » cliquait « Vocal » sur `glm-5.3-flash` alors qu'il
+était déjà le modèle vocal ; il le retire d'abord (et le `finally` le remet).
+
 ---
 
 ## Prochaines étapes
@@ -1036,6 +1070,25 @@ fois (pièges 11, 22). Corrigé avec `tokio::process` + `kill_on_drop`, comme
   début du texte nettoyé (phrases entières, `SPOKEN_MAX_CHARS` = 240
   caractères) ; le reste demeure dans la bulle. Constante plutôt que réglage, à
   ajuster si l'usage le demande. S'applique au Chat comme à la voix.
+
+### Décisions prises (5 octobre 2026 — streaming du chat)
+
+- **La réponse s'écrit en direct dans le chat** (`AgentEvent::Delta`) : le
+  premier appel au modèle passe en SSE (`chat_stream`), le chat affiche les
+  fragments au fil de la génération au lieu d'attendre l'appel complet (appel
+  réel mesuré à 22 s de silence). Le résultat de l'appel est identique : la
+  boucle, l'historique et les filets ne changent pas.
+- **Seul le premier essai streame.** Les chemins de secours (réessai passager,
+  régénération anti-dérive, conclusion forcée) rejouent `chat` sans flux :
+  rejouer un stream écrirait deux fois ce qui est déjà affiché.
+- **Une bulle en flux résolue par un appel d'outil devient une ligne
+  « annonce »** du journal d'activité, et une bulle d'attente reprend : le
+  texte d'annonce d'une itération n'est pas la réponse.
+- **Le raisonnement caché (`reasoning_content`) n'est jamais affiché** ni lu à
+  voix haute ; sa taille est au journal en debug (il consomme le plafond de
+  jetons, piège 70).
+- **La voix reste sur `Final`** : lire les fragments dirait les annonces
+  d'itération. La voix anticipée dès la première phrase est différée.
 
 ### Ensuite
 

@@ -13,12 +13,17 @@ async function step(name, fn) {
     results.push(`OK     ${name}${detail ? ` — ${detail}` : ""}`);
   } catch (e) {
     results.push(`ÉCHEC  ${name} — ${e.message.split("\n")[0]}`);
+    // Un échec ne doit pas contaminer les parcours suivants : une fenêtre
+    // d'aperçu restée ouverte interceptait tous les clics (cascade d'échecs).
+    await stepPage?.evaluate(() => document.querySelectorAll(".file-modal").forEach((m) => m.remove())).catch(() => {});
   }
 }
+let stepPage = null;
 
 (async () => {
   const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
   const p = browser.contexts()[0].pages().find((pg) => pg.url().includes("tauri.localhost"));
+  stepPage = p;
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -29,6 +34,46 @@ async function step(name, fn) {
   const expect = (cond, msg) => {
     if (!cond) throw new Error(msg);
   };
+  /** Fin du tour. Avec le streaming, la bulle d'attente part au premier
+   *  fragment, la bulle en flux redevient une bulle d'attente à chaque appel
+   *  d'outil, et seule `final` libère le bouton d'envoi : la fin du tour, c'est
+   *  ni attente, ni flux, ET bouton libre — dans le même instant. Attendre la
+   *  disparition de `.bubble.pending` seule lisait l'historique trop tôt. */
+  const attendreReponse = async (timeout = 120_000) => {
+    await p.waitForFunction(
+      () =>
+        !document.querySelector(".bubble.pending, .bubble.streaming") &&
+        !document.querySelector(".composer button.primary")?.hasAttribute("disabled"),
+      null,
+      { timeout, polling: 200 },
+    );
+  };
+  /** Témoin du streaming : une bulle `.streaming` peut naître et disparaître
+   *  entre deux sondages (réponse d'un mot) ; un observateur posé AVANT
+   *  l'envoi note qu'elle a existé, même brièvement. */
+  const guetterFlux = () =>
+    p.evaluate(() => {
+      window.__fluxVu = false;
+      window.__fluxObs?.disconnect();
+      window.__fluxObs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const n of m.addedNodes) {
+            if (n.nodeType === 1 && n.classList.contains("streaming")) window.__fluxVu = true;
+          }
+        }
+      });
+      window.__fluxObs.observe(document.body, { childList: true, subtree: true });
+    });
+  // L'écoute permanente capte la parole ambiante (musique, vidéo) et répond à
+  // des commandes parasites : elles s'ajoutent au fil du Chat et les parcours
+  // lisent un fil souillé (« Jimmy a perdu le fil »). Coupée pendant la suite,
+  // remise dans son état d'origine à la fin : `voice_stop` enregistre aussi la
+  // préférence `listen_on_start`, il faut la rétablir.
+  const ecouteInitiale = await p.evaluate(async () => {
+    const status = await window.__TAURI_INTERNALS__.invoke("voice_status");
+    if (status.running) await window.__TAURI_INTERNALS__.invoke("voice_stop");
+    return status.running;
+  });
 
   await step("Navigation : une seule vue montée par page", async () => {
     for (const label of ["Chat", "Voix", "Historique", "Mémoire", "Skills", "Skin", "Paramètres", "Diagnostic"]) {
@@ -45,11 +90,15 @@ async function step(name, fn) {
     await nav("Chat");
     await p.locator("button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
+    await guetterFlux();
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
     const busy = await p.locator(".composer button.primary").textContent();
     expect(busy.includes("travaille"), `bouton pendant l'attente : « ${busy} »`);
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 120000 });
+    await attendreReponse(150_000);
+    // Streaming : la réponse a dû passer par une bulle qui s'écrit au fil.
+    const fluxVu = await p.evaluate(() => window.__fluxVu === true);
+    expect(fluxVu, "aucune bulle en flux pendant la génération : la réponse n'est plus streamée");
     const last = await p.locator(".stream .bubble").last();
     const cls = await last.getAttribute("class");
     const text = (await last.textContent()).trim();
@@ -86,7 +135,7 @@ async function step(name, fn) {
     await p.locator(".composer-input").fill("Quel mot viens-tu d'écrire juste avant ? Réponds en un seul mot.");
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 120000 });
+    await attendreReponse(120_000);
     const sessionAfter = await latest();
     expect(sessionAfter === sessionBefore, `une session neuve a été créée (${sessionBefore} → ${sessionAfter})`);
     // La réponse enregistrée dans CETTE session, pas la dernière bulle : une
@@ -136,7 +185,7 @@ async function step(name, fn) {
     await p.locator(".composer-input").fill("Quel est ton dossier de travail pour cette conversation ? Réponds uniquement par le chemin complet, sans outil.");
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 120000 });
+    await attendreReponse(120_000);
     const messages = await invoke("session_messages", { sessionId: session.id });
     const answer = messages.filter((m) => m.role === "assistant").pop()?.content ?? "";
     expect(answer.toLowerCase().includes(repoName.toLowerCase()), `dossier de travail annoncé : « ${answer} »`);
@@ -172,7 +221,7 @@ async function step(name, fn) {
     await input.fill(`Réponds UNIQUEMENT par ce chemin, copié exactement, sans phrase : ${target}`);
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 180000 });
+    await attendreReponse(180_000);
     await p.waitForSelector(".bubble.assistant .msg-path", { timeout: 5000 });
     const label = (await p.locator(".bubble.assistant .msg-path").textContent()) ?? "";
     expect(label.replace(/\D/g, "").includes("3"), `étiquette de la puce : « ${label} »`);
@@ -190,13 +239,14 @@ async function step(name, fn) {
   // tour apparaissent sous la réponse, en puces cliquables. Ici data/tests-ui/
   // (dossier de données local, jamais commité) : le diff silencieux est
   // acceptable, seules les puces sont vérifiées.
-  await step("Chat : le bloc « travaux » liste les fichiers écrits", async () => {    const note = (await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("paths_info"))).data;
+  await step("Chat : le bloc « travaux » liste les fichiers écrits", async () => {
+    const note = (await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("paths_info"))).data;
     const fichier = `${note}\\tests-ui\\reussite-${Date.now() % 10_000}.txt`;
     const input = p.locator(".composer-input");
     await input.fill(`Écris dans « ${fichier} » la ligne unique : test travaux. Ne renvoie que la confirmation en une phrase.`);
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 180000 });
+    await attendreReponse(180_000);
     await p.waitForSelector(".bubble.assistant .work-block .work-file", { timeout: 10000 });
     const chip = (await p.locator(".work-file").textContent()) ?? "";
     expect(chip.endsWith(".txt"), `puce du bloc travaux : « ${chip} »`);
@@ -236,7 +286,7 @@ async function step(name, fn) {
     await p.waitForTimeout(2500);
     const t0 = Date.now();
     await p.locator(".stop-button").click();
-    await p.waitForSelector(".bubble.pending", { state: "detached", timeout: 15000 });
+    await attendreReponse(15_000);
     const ms = Date.now() - t0;
     const text = ((await p.locator(".stream .bubble.assistant").last().textContent()) ?? "").trim();
     expect(/Arrêté/.test(text), `réponse après l'arrêt : « ${text} »`);
@@ -392,6 +442,13 @@ async function step(name, fn) {
       // Choix d'un modèle vocal fonctionnel, puis retrait.
       const flash = p.locator(".model-row", { hasText: "glm-5.3-flash" });
       if ((await flash.count()) > 0) {
+        // Déjà le modèle vocal de l'utilisateur : son bouton « Vocal » est
+        // grisé et le clic attendait 30 s. On le retire d'abord (le `finally`
+        // le remet).
+        if ((await flash.getAttribute("class"))?.includes("is-voice")) {
+          await p.locator(".model-current button", { hasText: "Retirer" }).click();
+          await p.waitForSelector(".model-row.is-voice", { state: "detached", timeout: 15000 });
+        }
         await flash.locator("button", { hasText: "Vocal" }).click();
         // Attendre que CE modèle devienne vocal : un modèle vocal déjà choisi
         // satisfaisait « .model-row.is-voice » tout de suite (échec intermittent).
@@ -528,6 +585,13 @@ async function step(name, fn) {
   await step("Aucune erreur JavaScript", async () => {
     expect(errors.length === 0, errors.join(" | "));
   });
+
+  // Écoute remise comme avant la suite (et la préférence de lancement avec).
+  await p.evaluate(async (on) => {
+    const status = await window.__TAURI_INTERNALS__.invoke("voice_status");
+    if (on && !status.running) await window.__TAURI_INTERNALS__.invoke("voice_start");
+    if (!on && status.running) await window.__TAURI_INTERNALS__.invoke("voice_stop");
+  }, ecouteInitiale).catch((e) => results.push(`ÉCHEC  Écoute non restaurée — ${e.message.split("\n")[0]}`));
 
   console.log(results.join("\n"));
   await browser.close();

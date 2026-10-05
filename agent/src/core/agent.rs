@@ -198,10 +198,12 @@ pub async fn run(
         // MiMo est resté muet 95 s avant un HTTP 500, l'utilisateur attendait
         // en silence. Au-delà, Error::Timeout → « la demande a pris trop de temps ».
         let budget = deps.voice.then_some(VOICE_CALL_TIMEOUT);
-        let mut first_try = call_model(&deps, &model, &messages, &specs, &settings, budget).await;
+        let mut first_try =
+            call_model_streaming(&deps, &model, &messages, &specs, &settings, budget, &events).await;
         // Erreur passagère du fournisseur (5xx, 429, coupure) qui arrive vite :
         // une seule nouvelle tentative. Une panne lente n'est pas rejouée, elle
-        // doublerait l'attente.
+        // doublerait l'attente. Sans flux : ce qui a pu être affiché du premier
+        // essai ne doit pas être écrit deux fois.
         if let Err(error) = &first_try {
             if is_transient(error) && call_started.elapsed() < FAST_FAILURE {
                 log::warn!("[agent] erreur passagère du modèle {model} ({error}) : nouvelle tentative");
@@ -742,6 +744,40 @@ async fn call_model(
     budget: Option<Duration>,
 ) -> Result<crate::providers::llm::LlmReply> {
     let call = deps.llm.chat(model, messages, specs, settings.llm.temperature, settings.llm.max_tokens);
+    match budget {
+        Some(limit) => tokio::time::timeout(limit, call).await.unwrap_or(Err(Error::Timeout)),
+        None => call.await,
+    }
+}
+
+/// Le même appel, **en flux** : chaque fragment du contenu visible part sur le
+/// canal d'événements (`AgentEvent::Delta`) — le chat affiche la réponse
+/// pendant qu'elle s'écrit. Résultat identique à [`call_model`] : la boucle ne
+/// change pas. `try_send` : si le canal est plein (interface lente), le
+/// fragment est perdu, le suivant rattrapera — jamais de blocage de la
+/// génération. Utilisé pour le premier essai seulement : les chemins de
+/// secours (réessai passager, régénération anti-dérive, conclusion) rejouent
+/// `chat` sans flux, sinon ce qui est déjà affiché serait écrit deux fois.
+async fn call_model_streaming(
+    deps: &AgentDeps,
+    model: &str,
+    messages: &[Message],
+    specs: &[crate::core::types::ToolSpec],
+    settings: &crate::config::Settings,
+    budget: Option<Duration>,
+    events: &tokio::sync::mpsc::Sender<crate::core::types::AgentEvent>,
+) -> Result<crate::providers::llm::LlmReply> {
+    let delta_tx = events.clone();
+    let call = deps.llm.chat_stream(
+        model,
+        messages,
+        specs,
+        settings.llm.temperature,
+        settings.llm.max_tokens,
+        move |text| {
+            let _ = delta_tx.try_send(crate::core::types::AgentEvent::Delta { text: text.to_string() });
+        },
+    );
     match budget {
         Some(limit) => tokio::time::timeout(limit, call).await.unwrap_or(Err(Error::Timeout)),
         None => call.await,

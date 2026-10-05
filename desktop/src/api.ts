@@ -26,6 +26,7 @@ export interface AgentEvent {
     | "memory"
     | "vault"
     | "skill"
+    | "delta"
     | "final"
     | "notice"
     | "heard"

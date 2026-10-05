@@ -450,6 +450,20 @@ textarea:focus {
   color: var(--text-dim);
 }
 
+/* Bulle en cours d'écriture en flux : la réponse s'affiche au fil de la
+ * génération ; un curseur discret marque qu'elle n'est pas finie. */
+.bubble.streaming p::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--text-dim);
+  animation: stream-caret 1.1s steps(2) infinite;
+}
+
+@keyframes stream-caret {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0; }
+}
+
 .dots {
   display: inline-flex;
   gap: 3px;
