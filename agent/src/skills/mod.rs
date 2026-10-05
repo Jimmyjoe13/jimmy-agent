@@ -23,6 +23,8 @@
 //! * un skill ne donne aucun droit nouveau : il passe par les mêmes
 //!   permissions que n'importe quel outil (PLAN, risque n° 5).
 
+pub mod capture;
+
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
