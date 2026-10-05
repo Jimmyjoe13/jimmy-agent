@@ -47,8 +47,8 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Permissions | ✅ LECTURE / MODIFICATION / EXÉCUTION / RÉSEAU | 4 tests unitaires |
 | Mémoire locale | ✅ vectorielle + FTS5, apprentissage auto | 3 tests unitaires + test happy path |
 | Skills | ✅ création, lecture, amélioration, suggestion | 3 tests unitaires |
-| Synaptiq | ✅ consultation conditionnelle, écriture | appelé dans le test happy path |
-| Synaptiq — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
+| Vault Obsidian | ✅ lecture plein texte du vault, écriture des souvenirs en notes | recherche réelle sur le vault `C:\Obsidian\Jimmy` |
+| Vault — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
 | Wake word « Jimmy » | ✅ détection locale, variantes ASR gérées | 5 tests unitaires |
 | Écoute permanente | ✅ micro ouvert, `whisper-server` démarré | `test audio` |
 | STT local | ✅ whisper.cpp, français, hors-ligne | WAV de test transcrit correctement |
@@ -90,10 +90,10 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 │                                          │       │     │       │
 │                            ┌─────────────┘       │     └────┐  │
 │                            ▼                     ▼          ▼  │
-│                     ┌─────────────┐      ┌──────────┐  ┌────────┐│
-│                     │  OpenCodeGo │      │Fish Audio│  │Synaptiq││
-│                     │  (LLM)      │      │  (voix)  │  │(local) ││
-│                     └─────────────┘      └──────────┘  └────────┘│
+│                     ┌─────────────┐      ┌──────────┐  ┌──────────────┐│
+│                     │  OpenCodeGo │      │Fish Audio│  │Vault Obsidian││
+│                     │  (LLM)      │      │  (voix)  │  │  (mémoire)   ││
+│                     └─────────────┘      └──────────┘  └──────────────┘│
 │                     ┌─────────────┐      ┌──────────┐            │
 │                     │ whisper.cpp │      │  cpal    │            │
 │                     │ (STT local) │      │ (micro)  │            │
@@ -129,12 +129,11 @@ jimmy-agent-personnel/
 │   ├── src/
 │   │   ├── core/           boucle agentique, historique, prompt
 │   │   ├── tools/          fichiers, CLI, réseau, mémoire, skills
-│   │   ├── memory/         vecteurs, apprentissage, recherche
+│   │   ├── memory/         vecteurs, apprentissage, recherche, vault Obsidian
 │   │   ├── providers/      LLM, TTS, STT, avatar
 │   │   ├── skills/         création et amélioration de skills
 │   │   ├── mcp/            client MCP (stdio)
-│   │   ├── voice/          micro, wake word, boucle d'écoute
-│   │   └── synaptiq.rs     client Synaptiq
+│   │   └── voice/          micro, wake word, boucle d'écoute
 │   ├── skills/             skills créés par Jimmy
 │   └── tests/              test du chemin heureux
 ├── desktop/                application Tauri
@@ -163,7 +162,7 @@ jimmy-agent-personnel/
 | Visual Studio Build Tools | 2022 (C++) | ✅ |
 | WebView2 | 154 | ✅ |
 | Godot | 4.5.1 stable | ✅ |
-| Synaptiq | local, API sur 8000 | ✅ |
+| Vault Obsidian | dossier des notes (par défaut `C:\Obsidian\Jimmy`) | ✅ |
 
 L'installateur vérifie tout cela et indique précisément ce qui manque :
 
@@ -270,7 +269,7 @@ JIMMY_LOG=info
 |---|---|---|
 | `OPENCODE_API_KEY` | — | authentification LLM (requis) |
 | `OPENROUTER_API_KEY` | — | authentification voix (requis pour parler) |
-| `SYNAPTIQ_API_KEY` | — | authentification Synaptiq |
+| `JIMMY_VAULT_PATH` | `C:\Obsidian\Jimmy` | racine du vault Obsidian |
 | `JIMMY_GODOT_EXE` | auto-détecté | chemin de l'exécutable Godot |
 | `JIMMY_GODOT_PORT` | 8787 | port du serveur HTTP de l'avatar |
 | `JIMMY_BRIDGE_PORT` | 8790 | port du pont Tauri |
@@ -325,7 +324,7 @@ Le dossier contient deux petits fichiers texte.
 première est une tâche à faire, la deuxième est marquée comme terminée...
 
 états : [Thinking, Executing, Executing, Speaking]
-outils : ["list_directory", "synaptiq_search", "read_file", "read_file"]
+outils : ["list_directory", "vault_search", "read_file", "read_file"]
 durée : 13951 ms
 ```
 

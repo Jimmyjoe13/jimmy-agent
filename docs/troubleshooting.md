@@ -221,21 +221,25 @@ C'est normal quand quatre outils sont enchaînés : chaque appel LLM est un
 aller-retour réseau. Le journal d'activité de la page Chat montre le détail
 (outil, durée, succès ou échec).
 
-## Mémoire et Synaptiq
+## Mémoire et vault Obsidian
 
 ### « aucun souvenir pertinent »
 
 La mémoire se construit **au fil des conversations**. Après quelques échanges,
 elle se remplit. La page **Mémoire** montre le compteur.
 
-### Synaptiq injoignable
+### Le vault n'est pas trouvé
 
-```powershell
-curl.exe -s http://127.0.0.1:8000/v1/health
+Jimmy lit le vault Obsidian en plein texte et y écrit ses souvenirs. Si le
+chemin est vide ou n'existe pas, il le signale dans le journal au démarrage :
+
+```
+[vault] introuvable : C:\Obsidian\Jimmy — souvenirs écrits dans le vault ignorés
 ```
 
-Si Synaptiq est arrêté, Jimmy fonctionne normalement : il est un complément.
-La page **Diagnostic** affiche l'état.
+Le chemin se règle dans **Paramètres → Vault Obsidian** (ou `JIMMY_VAULT_PATH`
+au premier lancement). Le vault est un complément : Jimmy fonctionne
+normalement sans lui, avec la mémoire locale SQLite.
 
 ## Base de données
 
@@ -269,6 +273,6 @@ La page **Diagnostic** vérifie l'essentiel :
 | Modèle STT | modèle présent |
 | Godot | exécutable trouvable |
 | Avatar | Godot répond sur 8787 |
-| Synaptiq | instance locale joignable |
+| Vault Obsidian | dossier présent et lisible |
 
 Le bouton « Chemins » affiche les répertoires réellement utilisés.

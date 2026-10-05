@@ -46,4 +46,10 @@ dist-ssr/
 # ── Système ────────────────────────────────────────────────────────────────
 Thumbs.db
 desktop.ini
-.DS_Store/data/ui-test/
+.DS_Store
+
+# ── Donnees runtime non versionnees ──────────────────────────────────────
+# `data/` (base, config, journaux, audio, captures, composants) et les skills
+# ecrits ou ameliores par Jimmy restent locaux : jamais dans l'historique.
+/data/
+/agent/skills/

@@ -15,7 +15,7 @@ Tauri (fenêtre + agent)   ──HTTP──▶   Godot (avatar)
         │
         ├──HTTP──▶  OpenCode Go   (LLM)
         ├──HTTP──▶  Fish Audio   (voix)
-        ├──HTTP──▶  Synaptiq     (mémoire complémentaire, local)
+        ├──lecture/écriture──▶  Vault Obsidian (mémoire persistante, local)
         └──sous-processus──▶  whisper.cpp (STT local)
 ```
 
@@ -23,7 +23,7 @@ Tauri (fenêtre + agent)   ──HTTP──▶   Godot (avatar)
 |---|---|---|
 | Tauri / `jimmy-agent` | tout du reste | — |
 | Godot | qu'on lui demande de changer d'animation | ce qu'est un LLM |
-| Synaptiq | ce qu'il a mémorisé | que Jimmy existe |
+| Vault Obsidian | ce qu'il contient | que Jimmy existe |
 
 **Pourquoi cette séparation ?** Le PLAN identifie le risque n° 2 : « deux
 runtimes doivent fonctionner ensemble ». La réponse n'est pas d'éviter le
@@ -34,8 +34,8 @@ d'un bug non traçable dans l'agent.
 ### Le crate `jimmy-agent` ne dépend pas de Tauri
 
 C'est un choix structurant. Toute la logique — boucle agentique, outils,
-mémoire, permissions, voix, Synaptiq — vit dans un crate Rust ordinaire, sans
-une seule ligne liée à Tauri.
+mémoire, permissions, voix, vault Obsidian — vit dans un crate Rust ordinaire,
+sans une seule ligne liée à Tauri.
 
 Conséquences concrètes :
 
@@ -92,7 +92,7 @@ retenu.
 demande
   │
   ├─▶ mémoire locale      (souvenirs pertinents)
-  ├─▶ Synaptiq            (uniquement si la demande référence un contexte)
+  ├─▶ Vault Obsidian      (notes, uniquement si la demande référence un contexte)
   │
   ▼
 LLM + outils  ──────────────────────────┐
@@ -122,29 +122,38 @@ commande, changer d'argument, abandonner. Seules les erreurs *structurelles*
 
 Le prompt système est reconstruit **à chaque tour**, à partir de ce que Jimmy
 sait au moment précis : identité, outils disponibles, catalogue de skills,
-souvenirs pertinents, contexte Synaptiq. Ce n'est pas un bloc figé, parce
+souvenirs pertinents, notes du vault. Ce n'est pas un bloc figé, parce
 qu'un prompt figé devient faux dès qu'un paramètre change.
 
 ---
 
-## 4. Synaptiq : quand l'utiliser, et quand ne pas l'utiliser
+## 4. Vault Obsidian : quand le consulter, et quand ne pas le consulter
 
-Le PLAN est explicite : « Ne force PAS Synaptiq sur toutes les requêtes. »
+Le PLAN était explicite : « Ne force PAS [la mémoire longue] sur toutes les
+requêtes. »
 
-La règle (`synaptiq::should_consult`) est volontairement simple et lisible —
-une heuristique, pas un classifieur :
+La règle (`memory::vault::should_consult`) est volontairement simple et
+lisible — une heuristique, pas un classifieur :
 
 ```text
-la demande référence-t-elle un contexte antérieur ?   → oui : on consulte
-la demande dépasse-t-elle min_request_chars (180) ?    → oui : on consulte
-sinon                                                    non
+la demande référence-t-elle un contexte antérieur ?     → oui : on consulte
+la demande dépasse-t-elle vault_min_request_chars (180) ? → oui : on consulte
+sinon                                                      non
 ```
 
 Les marqueurs de contexte sont explicites : « la dernière fois », « mon
 projet », « comme d'habitude », « tu te souviens », « mon infrastructure »…
 
-**Si Synaptiq est indisponible, la demande continue.** Synaptiq est un
-complément, jamais un préalable.
+**Si le vault est introuvable, la demande continue.** Le vault est un
+complément, jamais un préalable : la mémoire locale SQLite reste la première
+source.
+
+### Écriture
+
+Jimmy écrit ses souvenirs dans `<vault>\0_Inbox\Jimmy\` : une note Markdown
+datée par souvenir, avec un frontmatter minimal (`type`, `source`, `date`).
+L'apprentissage automatique alimente les deux couches en parallèle — SQLite
+pour le rappel rapide, le vault pour la mémoire que l'utilisateur relit.
 
 ---
 
@@ -297,7 +306,7 @@ change de nom, il n'y a qu'un fichier à corriger.
 | Mémoire vectorielle locale | ✅ hachage 512 dim + FTS5 | pas d'embeddings sémantiques |
 | Skills auto-créés | ✅ | — |
 | MCP | ✅ client stdio | pas de transport HTTP, pas de marketplace |
-| Synaptiq dynamique | ✅ heuristique documentée | — |
+| Vault Obsidian dynamique | ✅ heuristique documentée, lecture du vault, écriture des souvenirs | — |
 | Voix « Clémence » | ✅ deux voix, « Féminine » par défaut | voir README |
 | Installateur qui vérifie les prérequis | ✅ `scripts/install.ps1` | pas d'export Godot ni d'installateur NSIS signé |
 | Mise à jour automatique | ⚠️ commande écrite, sans source branchée | pas de distribution publique |
