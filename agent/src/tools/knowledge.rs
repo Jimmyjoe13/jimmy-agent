@@ -1,4 +1,4 @@
-//! Outils de connaissance : mémoire locale de Jimmy et Synaptiq.
+//! Outils de connaissance : mémoire locale de Jimmy et vault Obsidian.
 
 use super::{arg_str, arg_u64, schema, BoxFuture, Tool, ToolContext, MAX_TOOL_OUTPUT};
 use crate::error::{Error, Result};
@@ -98,34 +98,34 @@ impl Tool for Remember {
     }
 }
 
-// ── Synaptiq ─────────────────────────────────────────────────────────────────
+// ── Vault Obsidian ───────────────────────────────────────────────────────────
 
-fn require_synaptiq(ctx: &ToolContext) -> Result<&std::sync::Arc<crate::synaptiq::SynaptiqClient>> {
-    ctx.synaptiq
+fn require_vault(ctx: &ToolContext) -> Result<&std::sync::Arc<crate::memory::vault::Vault>> {
+    ctx.vault
         .as_ref()
-        .ok_or_else(|| Error::Tool("Synaptiq n'est pas configuré".into()))
+        .ok_or_else(|| Error::Tool("Vault Obsidian indisponible (chemin absent ou inexistant)".into()))
 }
 
-pub struct SynaptiqSearch;
+pub struct VaultSearch;
 
-impl Tool for SynaptiqSearch {
+impl Tool for VaultSearch {
     fn name(&self) -> &str {
-        "synaptiq_search"
+        "vault_search"
     }
     fn description(&self) -> &str {
-        "Interroge Synaptiq, le moteur local de réflexion : souvenirs, règles et décisions enregistrées lors de tâches précédentes. À utiliser quand la demande fait référence à un contexte antérieur."
+        "Recherche en plein texte dans le vault Obsidian de l'utilisateur, partagé avec d'autres agents (notes, projets, journaux d'agents, souvenirs de Jimmy). Renvoie les extraits les plus proches avec leur note et son origine (« ta note » ou « partagée »)."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
             serde_json::json!({
-                "query": {"type": "string", "description": "Sujet ou mot-clé à rechercher."},
+                "query": {"type": "string", "description": "Sujet ou mots-clés à rechercher."},
                 "limit": {"type": "integer", "description": "Nombre de résultats (défaut 6)."}
             }),
             &["query"],
         )
     }
     fn capability(&self) -> Capability {
-        Capability::Network
+        Capability::Read
     }
     fn call<'a>(
         &'a self,
@@ -133,35 +133,85 @@ impl Tool for SynaptiqSearch {
         ctx: &'a ToolContext,
     ) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
-            let client = require_synaptiq(ctx)?;
+            let vault = require_vault(ctx)?;
             let query = arg_str(args, "query").ok_or_else(|| Error::Tool("« query » manquant".into()))?;
             let limit = arg_u64(args, "limit", 6).min(20) as usize;
-            client.retrieve(&query, limit).await
+            let hits = vault.search(&query, limit).await;
+            if hits.is_empty() {
+                return Ok("Rien dans le vault pour cette requête.".into());
+            }
+            // Origine de chaque note : le vault est partagé avec d'autres agents.
+            Ok(hits
+                .iter()
+                .map(|hit| {
+                    let origin = if vault.is_own(&hit.path) { "ta note" } else { "partagée" };
+                    format!("- {} [{origin} : {}] — {}", hit.title, hit.path, hit.snippet)
+                })
+                .take(MAX_TOOL_OUTPUT)
+                .collect::<Vec<_>>()
+                .join("\n"))
         })
     }
 }
 
-pub struct SynaptiqRemember;
+pub struct VaultRead;
 
-impl Tool for SynaptiqRemember {
+impl Tool for VaultRead {
     fn name(&self) -> &str {
-        "synaptiq_remember"
+        "vault_read"
     }
     fn description(&self) -> &str {
-        "Enregistre une leçon, une règle ou un résultat dans Synaptiq, afin qu'une tâche similaire soit plus rapide la prochaine fois."
+        "Lit une note du vault Obsidian en entier, d'après le chemin renvoyé par vault_search."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
             serde_json::json!({
-                "content": {"type": "string", "description": "Le fait, la règle ou le résultat à retenir."},
-                "type": {"type": "string", "description": "semantic | procedural | episodic. Défaut : procedural."},
-                "collection": {"type": "string", "description": "Nom du rayon, ex. « preference » ou « rule »."}
+                "path": {"type": "string", "description": "Chemin de la note relatif au vault, ex. « 1_Projets\\jimmy\\PLAN.md »."}
+            }),
+            &["path"],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Read
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            let vault = require_vault(ctx)?;
+            let chemin = arg_str(args, "path")
+                .ok_or_else(|| Error::Tool("« path » manquant".into()))?;
+            let contenu = vault.read(&chemin).await?;
+            if contenu.trim().is_empty() {
+                return Ok("(note vide)".into());
+            }
+            Ok(contenu)
+        })
+    }
+}
+
+pub struct VaultWrite;
+
+impl Tool for VaultWrite {
+    fn name(&self) -> &str {
+        "vault_write"
+    }
+    fn description(&self) -> &str {
+        "Écrit un souvenir durable dans le dossier de Jimmy, dans le vault Obsidian : une note datée que l'utilisateur relit comme les autres. À n'utiliser que si l'information est stable et utile plus tard."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "content": {"type": "string", "description": "Le souvenir, formulé à la troisième personne."},
+                "kind": {"type": "string", "description": "semantic | procedural | episodic. Défaut : semantic."}
             }),
             &["content"],
         )
     }
     fn capability(&self) -> Capability {
-        Capability::Network
+        Capability::Write
     }
     fn call<'a>(
         &'a self,
@@ -169,11 +219,12 @@ impl Tool for SynaptiqRemember {
         ctx: &'a ToolContext,
     ) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
-            let client = require_synaptiq(ctx)?;
+            let vault = require_vault(ctx)?;
             let content = arg_str(args, "content").ok_or_else(|| Error::Tool("« content » manquant".into()))?;
-            let memory_type = arg_str(args, "type").unwrap_or_else(|| "procedural".into());
-            let collection = arg_str(args, "collection");
-            client.remember(&content, &memory_type, collection.as_deref()).await
+            let kind = memory_kind(args, MemoryKind::Semantic);
+            ctx.check(Capability::Write, "vault obsidian")?;
+            let chemin = vault.remember(kind.as_str(), &content).await?;
+            Ok(format!("mémorisé dans le vault : {}", chemin.display()))
         })
     }
 }

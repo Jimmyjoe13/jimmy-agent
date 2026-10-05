@@ -20,6 +20,7 @@
 pub mod embed;
 pub mod learn;
 pub mod semantic;
+pub mod vault;
 
 use std::sync::Arc;
 
@@ -84,6 +85,12 @@ pub struct MemoryStore {
 /// Similarité sémantique minimale. Les modèles MiniLM donnent ~0,1 à 0,3
 /// entre phrases sans rapport : en dessous de 0,35, c'est du bruit.
 const SEMANTIC_MIN: f32 = 0.35;
+
+/// Souvenirs du socle, chargés à chaque demande (les plus importants).
+pub const BASE_MEMORY_COUNT: usize = 8;
+
+/// Taille maximale du bloc mémoire injecté dans le prompt.
+pub const MEMORY_BLOCK_MAX_CHARS: usize = 1200;
 
 impl MemoryStore {
     /// Mémoire sans embeddings sémantiques (hachage seul).
@@ -307,16 +314,36 @@ impl MemoryStore {
     }
 
     /// Injection textuelle des souvenirs les plus pertinents pour le prompt.
+    /// Bloc mémoire du prompt : un **socle** (les souvenirs les plus
+    /// importants, toujours chargés) puis le rappel lié à la demande.
+    ///
+    /// Le rappel seul ne suffisait pas : sur « installe-le », il ne ramène
+    /// rien d'utile, et Jimmy repartait sans rien savoir de l'utilisateur. Le
+    /// tout reste borné par `MEMORY_BLOCK_MAX_CHARS` (≈ 300 jetons).
     pub async fn context_block(&self, query: &str, limit: usize) -> Result<String> {
+        let base = self.list(BASE_MEMORY_COUNT)?;
         let hits = self.recall_semantic(query, limit).await?;
-        if hits.is_empty() {
+        let mut seen = std::collections::HashSet::new();
+        let mut lines = Vec::new();
+        let mut used = 0usize;
+        // Le rappel passe d'abord : il est propre à la demande ; le socle
+        // complète dans le budget restant.
+        for memory in hits.into_iter().map(|h| h.memory).chain(base) {
+            if !seen.insert(memory.id.clone()) {
+                continue;
+            }
+            let line = format!("- [{}] {}", memory.kind.as_str(), memory.content);
+            let size = line.chars().count() + 1;
+            if used + size > MEMORY_BLOCK_MAX_CHARS {
+                continue;
+            }
+            used += size;
+            lines.push(line);
+        }
+        if lines.is_empty() {
             return Ok(String::new());
         }
-        let mut out = String::from("Ce que Jimmy sait de l'utilisateur :\n");
-        for hit in hits {
-            out.push_str(&format!("- [{}] {}\n", hit.memory.kind.as_str(), hit.memory.content));
-        }
-        Ok(out)
+        Ok(format!("Ce que Jimmy sait de l'utilisateur :\n{}\n", lines.join("\n")))
     }
 
     pub fn mark_used(&self, ids: &[String]) -> Result<()> {
@@ -354,6 +381,29 @@ impl MemoryStore {
         let mut stmt = conn.conn().prepare(
             "SELECT id, kind, content, source, importance, created_at, use_count
              FROM memories ORDER BY importance DESC, created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok(Memory {
+                id: row.get(0)?,
+                kind: MemoryKind::parse(&row.get::<_, String>(1)?),
+                content: row.get(2)?,
+                source: row.get(3)?,
+                importance: row.get(4)?,
+                created_at: row.get(5)?,
+                use_count: row.get(6)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Leçons récentes (source « lesson »), de la plus récente : le journal
+    /// d'expérience relu par la revue périodique (module `growth`).
+    pub fn lessons(&self, limit: usize) -> Result<Vec<Memory>> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn.conn().prepare(
+            "SELECT id, kind, content, source, importance, created_at, use_count
+             FROM memories WHERE source = 'lesson'
+             ORDER BY created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |row| {
             Ok(Memory {
@@ -406,6 +456,30 @@ mod tests {
         let hits = store.recall("quel langage pour le backend", 5).unwrap();
         assert!(!hits.is_empty());
         assert!(hits[0].memory.content.contains("Rust"));
+    }
+
+    /// La mémoire de base (souvenirs les plus importants) est chargée même
+    /// quand la demande ne ressemble à rien (« installe-le »), sans doublon
+    /// avec le rappel, et dans un budget de caractères.
+    #[tokio::test]
+    async fn le_socle_de_memoire_est_toujours_charge() {
+        let store = store();
+        store
+            .remember(MemoryKind::Semantic, "L'utilisateur s'appelle Jimmy et parle français", "test", 0.9)
+            .unwrap();
+        store.remember(MemoryKind::Procedural, "Toujours répondre court", "test", 0.8).unwrap();
+        for i in 0..30 {
+            store
+                .remember(MemoryKind::Episodic, &format!("souvenir mineur numéro {i} {}", "z".repeat(80)), "test", 0.1)
+                .unwrap();
+        }
+        let block = store.context_block("installe-le", 6).await.unwrap();
+        assert!(block.contains("s'appelle Jimmy"), "{block}");
+        assert!(block.contains("répondre court"), "{block}");
+        assert!(block.chars().count() <= MEMORY_BLOCK_MAX_CHARS + 80, "{} caractères", block.chars().count());
+        // Pas de doublon si le rappel retrouve aussi un souvenir du socle.
+        let block = store.context_block("Jimmy parle français", 6).await.unwrap();
+        assert_eq!(block.matches("s'appelle Jimmy").count(), 1, "{block}");
     }
 
     #[test]
