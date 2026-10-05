@@ -61,7 +61,6 @@ var _last_region := Rect2()
 var _last_bubble := false
 var _drag_offset := Vector2i.ZERO
 var _moved := false
-var _look_smooth := Vector2.ZERO
 var _quality := "medium"
 
 
@@ -194,6 +193,8 @@ func _build_scene() -> void:
 		push_warning("[godot/main] skin inconnu : %s (repli sur %s)" % [skin, SKIN_DEFAULT])
 		skin = SKIN_DEFAULT
 	add_child(_jimmy)
+	# Jimmy regarde l'utilisateur, c'est-à-dire la caméra (voir jimmy.gd).
+	_jimmy.set_viewer(_camera)
 
 	_build_ground()
 
@@ -417,12 +418,6 @@ func _save_snapshot(path: String) -> void:
 # ── Interaction ─────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
-	# Suivi du regard : Jimmy regarde le curseur quand il est dans sa fenêtre.
-	var local := get_viewport().get_mouse_position()
-	var center := get_viewport().get_visible_rect().size * 0.5
-	_look_smooth = _look_smooth.lerp((local - center) / (center * 0.75), clampf(delta * 5.0, 0.0, 1.0))
-	_jimmy.set_look_at(_look_smooth)
-
 	if _bubble.visible and _bubble_timer > 0.0:
 		_bubble_timer -= delta
 		if _bubble_timer <= 0.0:

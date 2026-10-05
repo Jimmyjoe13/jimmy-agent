@@ -16,6 +16,8 @@ pub const SKINS: &[(&str, &str)] = &[
     ("renard", "Renard roux"),
     ("arctique", "Renard arctique"),
     ("fennec", "Fennec"),
+    ("ours", "Ours"),
+    ("robot", "Robot"),
 ];
 
 #[derive(Debug, Clone)]

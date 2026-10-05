@@ -77,24 +77,43 @@ const POSES := {
 	},
 }
 
-## Skins : une palette + quelques paramètres de forme. Ajouter un skin =
-## ajouter une entrée ici (et son libellé dans `providers::avatar::SKINS`,
-## côté Rust, pour l'interface). `ear_scale` agrandit les oreilles.
+## Skins : une palette + paramètres de forme. Ajouter un skin = ajouter une
+## entrée ici (et son libellé dans `providers::avatar::SKINS`, côté Rust, pour
+## l'interface). Paramètres de forme :
+##   `ear_scale`   — taille des oreilles (1 = normal)
+##   `tail_scale`  — taille de la queue (0 = pas de queue)
+##   `metallic`    — 0 = mat, 1 = métallique (robot)
+##   `has_fur`     — 1 = fourrure (normal map + rim), 0 = surface lisse
 const SKINS := {
 	"renard": {
 		"fur": Color(0.80, 0.42, 0.13), "cream": Color(0.95, 0.89, 0.79),
 		"dark": Color(0.11, 0.08, 0.07), "shirt": Color(0.16, 0.36, 0.72),
 		"accent": Color(0.95, 0.62, 0.16), "ear_scale": 1.0,
+		"tail_scale": 1.0, "metallic": 0.0, "has_fur": 1.0,
 	},
 	"arctique": {
 		"fur": Color(0.86, 0.88, 0.92), "cream": Color(0.99, 0.99, 1.0),
 		"dark": Color(0.18, 0.20, 0.26), "shirt": Color(0.08, 0.46, 0.50),
 		"accent": Color(0.36, 0.74, 0.94), "ear_scale": 0.9,
+		"tail_scale": 1.0, "metallic": 0.0, "has_fur": 1.0,
 	},
 	"fennec": {
 		"fur": Color(0.87, 0.70, 0.47), "cream": Color(0.97, 0.92, 0.82),
 		"dark": Color(0.28, 0.18, 0.12), "shirt": Color(0.22, 0.46, 0.28),
 		"accent": Color(0.93, 0.78, 0.30), "ear_scale": 1.55,
+		"tail_scale": 1.0, "metallic": 0.0, "has_fur": 1.0,
+	},
+	"ours": {
+		"fur": Color(0.35, 0.22, 0.12), "cream": Color(0.75, 0.65, 0.50),
+		"dark": Color(0.15, 0.10, 0.08), "shirt": Color(0.25, 0.35, 0.45),
+		"accent": Color(0.60, 0.45, 0.30), "ear_scale": 0.7,
+		"tail_scale": 0.3, "metallic": 0.0, "has_fur": 1.0,
+	},
+	"robot": {
+		"fur": Color(0.55, 0.58, 0.62), "cream": Color(0.75, 0.78, 0.82),
+		"dark": Color(0.20, 0.22, 0.25), "shirt": Color(0.30, 0.35, 0.40),
+		"accent": Color(0.20, 0.80, 0.90), "ear_scale": 0.4,
+		"tail_scale": 0.0, "metallic": 0.9, "has_fur": 0.0,
 	},
 }
 const SKIN_DEFAULT := "renard"
@@ -110,13 +129,38 @@ const POSE_SPEED := 7.0
 ## Amplitude du clignement des yeux.
 const BLINK_PERIOD := 4.2
 
+## Regard. La caméra tient lieu d'yeux de l'utilisateur : un personnage qui
+## regarde la caméra semble regarder la personne devant l'écran, où qu'elle
+## soit (effet Joconde). Avant, Jimmy suivait le curseur — et regardait de
+## côté dès que la souris quittait sa fenêtre.
+## Contact visuel par état (1 = yeux dans les yeux ; défaut 1).
+const EYE_CONTACT := {"thinking": 0.0, "executing": 0.2, "error": 0.5}
+## Où porte le regard quand il n'y a pas contact : (lacet, tangage) en radians,
+## tangage positif = vers le bas. On lève les yeux pour réfléchir, on baisse
+## les yeux sur son travail.
+const GAZE_AWAY := {"thinking": Vector2(-0.12, -0.10), "executing": Vector2(0.15, 0.22)}
+## Débattement de la tête vers l'utilisateur ; les yeux font le reste.
+const GAZE_YAW_MAX := 0.6
+const GAZE_PITCH_MAX := 0.45
+
 var state: String = IDLE
 ## Skin courant. Positionné avant l'entrée dans l'arbre, ou via `set_skin`.
 var skin: String = SKIN_DEFAULT
 var _t := 0.0
 var _blink_t := 0.0
 var _blink := 0.0
-var _look_at := Vector2.ZERO
+## Nœud dont la position est « l'œil de l'utilisateur » (la caméra).
+var _viewer: Node3D = null
+## Regard lissé (lacet, tangage) appliqué à la tête.
+var _gaze := Vector2.ZERO
+## Coup d'œil furtif ailleurs : direction, poids (0 → 1) et calendrier.
+var _glance := Vector2.ZERO
+var _glance_w := 0.0
+var _glance_until := 0.0
+var _next_glance := 6.0
+## Micro-saccades : de minuscules mouvements des pupilles, signe de vie.
+var _saccade := Vector2.ZERO
+var _next_saccade := 0.5
 
 # Nœuds animés.
 var _body: Node3D
@@ -207,9 +251,39 @@ func speak_for(seconds: float) -> float:
 	return effective
 
 
-## Direction du regard, normalisée dans [-1, 1] (suit le curseur).
-func set_look_at(v: Vector2) -> void:
-	_look_at = Vector2(clampf(v.x, -1.0, 1.0), clampf(v.y, -1.0, 1.0))
+## Désigne « l'œil de l'utilisateur » : Jimmy le regarde (la caméra).
+func set_viewer(node: Node3D) -> void:
+	_viewer = node
+
+
+## Angles (lacet, tangage) qui orientent la tête vers le spectateur, dans le
+## repère du cou : le balancement du corps est compensé, comme une vraie tête
+## qui garde le regard fixé.
+func _viewer_angles() -> Vector2:
+	if _viewer == null or not is_instance_valid(_viewer):
+		return Vector2.ZERO
+	var neck := _head.get_parent() as Node3D
+	var local := neck.to_local(_viewer.global_position) - _head.position
+	var yaw := atan2(local.x, local.z)
+	var pitch := -atan2(local.y, Vector2(local.x, local.z).length())
+	return Vector2(clampf(yaw, -GAZE_YAW_MAX, GAZE_YAW_MAX), clampf(pitch, -GAZE_PITCH_MAX, GAZE_PITCH_MAX))
+
+
+## Coups d'œil ailleurs et micro-saccades. Fixer sans jamais ciller du regard
+## met mal à l'aise ; un bref regard de côté, puis le retour vers
+## l'utilisateur, rend le contact crédible. Plus rares quand Jimmy écoute ou
+## parle : il est alors attentif.
+func _update_glance(delta: float) -> void:
+	if _t >= _next_glance and _glance_w <= 0.01:
+		var attentive := state == LISTENING or state == SPEAKING
+		_glance = Vector2(randf_range(0.22, 0.4) * (1.0 if randf() < 0.5 else -1.0), randf_range(-0.12, 0.14))
+		_glance_until = _t + randf_range(0.45, 1.1)
+		_next_glance = _t + (randf_range(9.0, 15.0) if attentive else randf_range(4.5, 9.0))
+	var want := 1.0 if _t < _glance_until else 0.0
+	_glance_w = move_toward(_glance_w, want, delta * 5.0)
+	if _t >= _next_saccade:
+		_saccade = Vector2(randf_range(-0.1, 0.1), randf_range(-0.07, 0.07))
+		_next_saccade = _t + randf_range(0.35, 0.9)
 
 
 func _process(delta: float) -> void:
@@ -251,9 +325,14 @@ func _apply_pose(delta: float) -> void:
 	_torso.rotation.y = _pose["body_yaw"] + deg_to_rad(2.0) * bounce * sway
 	_torso.position.z = _pose["lean"] * 0.05
 
-	# Tête : posture + suivi du curseur.
-	_head.rotation.x = _pose["head_pitch"] - _look_at.y * 0.22
-	_head.rotation.y = _pose["head_yaw"] + _look_at.x * 0.35
+	# Tête : vers l'utilisateur (ou ailleurs selon l'état), posture en plus.
+	_update_glance(delta)
+	var contact: float = EYE_CONTACT.get(state, 1.0)
+	var away: Vector2 = GAZE_AWAY.get(state, Vector2.ZERO)
+	var gaze_target := _viewer_angles() * contact + away + _glance * _glance_w
+	_gaze = _gaze.lerp(gaze_target, clampf(delta * 6.0, 0.0, 1.0))
+	_head.rotation.x = _pose["head_pitch"] + _gaze.y
+	_head.rotation.y = _pose["head_yaw"] + _gaze.x
 	_head.rotation.z = _pose["head_roll"]
 	_head.position.y = HEAD_Y + 0.012 * breathe * bounce
 
@@ -273,13 +352,22 @@ func _apply_pose(delta: float) -> void:
 	_ear_l.rotation.x = ear + twitch
 	_ear_r.rotation.x = ear - twitch * 0.6
 
-	# Yeux : clignement + suivi du regard.
+	# Yeux : clignement + regard. Chaque pupille vise l'utilisateur depuis son
+	# propre œil (légère convergence, crédible de près) ; pendant un regard
+	# détourné, elle part dans la direction du regard.
 	var lid := 1.0 - _blink
+	var eye_contact := contact * (1.0 - _glance_w)
+	var aside := Vector2(away.x, -away.y) * 0.6 + Vector2(_glance.x, -_glance.y) * _glance_w * 0.6
 	for i in _eyes.size():
 		_eyes[i].scale.y = maxf(0.08, lid)
 		var pupil := _pupils[i]
-		pupil.position.x = lerpf(pupil.position.x, _look_at.x * 0.012, clampf(delta * 8.0, 0.0, 1.0))
-		pupil.position.y = lerpf(pupil.position.y, -_look_at.y * 0.008, clampf(delta * 8.0, 0.0, 1.0))
+		var look := aside + _saccade
+		if _viewer != null and is_instance_valid(_viewer) and eye_contact > 0.0:
+			var d := _eyes[i].to_local(_viewer.global_position).normalized()
+			look += Vector2(d.x, d.y) * eye_contact
+		var follow := clampf(delta * 10.0, 0.0, 1.0)
+		pupil.position.x = lerpf(pupil.position.x, clampf(look.x * 0.03, -0.012, 0.012), follow)
+		pupil.position.y = lerpf(pupil.position.y, clampf(look.y * 0.03, -0.008, 0.008), follow)
 
 	# Queue : remuage en cascade, plus rapide quand Jimmy est enthousiaste.
 	var speed := 1.6 + 2.4 * bounce
@@ -318,15 +406,21 @@ func _make_materials() -> void:
 
 	# Fourrure : reflet rasant (rim) qui imite le duvet éclairé par l'arrière,
 	# et relief fin par une normal map générée (aucun fichier d'asset).
-	var fur_normal := _fur_normal_map()
-	for mat in [_mat_fur, _mat_cream]:
-		mat.rim_enabled = true
-		mat.rim = 0.35
-		mat.rim_tint = 0.6
-		mat.normal_enabled = true
-		mat.normal_texture = fur_normal
-		mat.normal_scale = 0.45
-		mat.uv1_scale = Vector3(3.0, 3.0, 1.0)
+	# Le robot (fur = 0) a une surface lisse : pas de rim ni de normal map.
+	var metallic := float(palette.get("metallic", 0.0))
+	var has_fur := float(palette.get("has_fur", 1.0)) > 0.5
+	for mat in [_mat_fur, _mat_cream, _mat_dark, _mat_shirt, _mat_accent]:
+		mat.metallic = metallic
+	if has_fur:
+		var fur_normal := _fur_normal_map()
+		for mat in [_mat_fur, _mat_cream]:
+			mat.rim_enabled = true
+			mat.rim = 0.35
+			mat.rim_tint = 0.6
+			mat.normal_enabled = true
+			mat.normal_texture = fur_normal
+			mat.normal_scale = 0.45
+			mat.uv1_scale = Vector3(3.0, 3.0, 1.0)
 
 
 ## Normal map de fourrure générée à partir d'un bruit : grain fin, sans
@@ -434,24 +528,28 @@ func _build_body() -> void:
 func _build_tail() -> void:
 	# Queue en chaîne de sphères : chaque maillon reçoit le mouvement du
 	# précédent avec un léger retard, ce qui donne un remuage naturel.
+	# `tail_scale` = 0 (robot) : pas de queue.
+	var tail_scale := float(SKINS.get(skin, SKINS[SKIN_DEFAULT]).get("tail_scale", 1.0))
+	if tail_scale <= 0.0:
+		return
 	var parent: Node3D = _body
-	var offset := Vector3(0.0, 0.34, -0.14)
+	var offset := Vector3(0.0, 0.34, -0.14) * tail_scale
 	for i in 4:
 		var seg := Node3D.new()
 		seg.name = "Tail%d" % (i + 1)
-		seg.position = Vector3(0.0, 0.0, -0.10) if i > 0 else offset
+		seg.position = (Vector3(0.0, 0.0, -0.10) if i > 0 else offset)
 		seg.rotation.x = deg_to_rad(-18.0) if i == 0 else deg_to_rad(6.0)
 		parent.add_child(seg)
 
-		var radius := 0.085 - i * 0.016
+		var radius := (0.085 - i * 0.016) * tail_scale
 		var fluff := _sphere(radius, _mat_fur, 14)
 		fluff.scale = Vector3(1.0, 1.0, 1.15)
 		seg.add_child(fluff)
 
 		if i == 3:
-			var tip := _cone(radius * 0.95, 0.004, 0.11, _mat_cream)
+			var tip := _cone(radius * 0.95, 0.004, 0.11 * tail_scale, _mat_cream)
 			tip.rotation.x = deg_to_rad(-90.0)
-			tip.position = Vector3(0.0, 0.0, -0.10)
+			tip.position = Vector3(0.0, 0.0, -0.10 * tail_scale)
 			seg.add_child(tip)
 
 		_tail.append(seg)
