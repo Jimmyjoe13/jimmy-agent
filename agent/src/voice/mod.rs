@@ -565,10 +565,47 @@ pub fn strip_wake_word(text: &str, wake_word: &str) -> String {
 /// tampon est vidé par la callback, et l'appelant attend la fin de la lecture.
 /// C'est ce qui permet d'enchaîner parole → animation → parole sans que les
 /// flux se chevauchent.
+/// Arrêt d'urgence de la lecture : le morceau en cours se tait aussitôt.
+static STOP_PLAYBACK: AtomicBool = AtomicBool::new(false);
+
+/// Coupe la voix de Jimmy (arrêt d'urgence, voir `App::request_stop`).
+pub fn interrupt_playback() {
+    STOP_PLAYBACK.store(true, Ordering::Relaxed);
+}
+
+/// Mots qui composent un ordre d'arrêt.
+const STOP_WORDS: &[&str] = &["stop", "stoppe", "stopper", "arrête", "arrete", "arrêtez", "arretez", "arrêter"];
+/// Mots tolérés autour (« arrête-toi », « arrête tout », « stop stop »).
+const STOP_FILLERS: &[&str] = &["toi", "tout", "ça", "ca", "maintenant", "stp"];
+
+/// La transcription est-elle un ordre d'arrêt d'urgence ?
+///
+/// Seule une phrase **réduite** au mot d'arrêt compte (« STOP », « Stop ! »,
+/// « Jimmy, arrête », « arrête-toi », « stop stop ») : « arrête le serveur »
+/// reste une commande. La transcription se trompe parfois et lance des tâches
+/// pour rien — l'arrêt doit être fiable, sans en déclencher de faux.
+pub fn is_stop_command(text: &str) -> bool {
+    let words: Vec<String> = text
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        // Le nom de Jimmy devant ou derrière ne change rien.
+        .filter(|w| !matches_wake_word(w, "jimmy"))
+        .collect();
+    !words.is_empty()
+        && words.len() <= 4
+        && words.iter().any(|w| STOP_WORDS.contains(&w.as_str()))
+        && words.iter().all(|w| STOP_WORDS.contains(&w.as_str()) || STOP_FILLERS.contains(&w.as_str()))
+}
+
 pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
     }
+    // Une nouvelle lecture repart d'un état « non interrompu » ; `App::speak`
+    // vérifie l'arrêt avant chaque morceau (voir `interrupt_playback`).
+    STOP_PLAYBACK.store(false, Ordering::Relaxed);
     let mut samples = decode_audio(bytes, sample_rate)?;
     let host = cpal::default_host();
     let device = host
@@ -643,6 +680,14 @@ pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
     );
     let started = std::time::Instant::now();
     while !done.load(Ordering::Relaxed) {
+        // Arrêt d'urgence (« STOP ») : on vide la file, le son se tait aussitôt.
+        if STOP_PLAYBACK.load(Ordering::Relaxed) {
+            if let Ok(mut pending) = queue.lock() {
+                pending.clear();
+            }
+            log::info!("[voice] lecture coupée par l'arrêt d'urgence");
+            return Ok(());
+        }
         if started.elapsed() > limit {
             log::warn!("[voice] lecture interrompue : le périphérique n'a rien produit");
             return Ok(());
@@ -737,6 +782,20 @@ fn decode_wav(bytes: &[u8]) -> Result<Vec<f32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_mot_d_arret_est_reconnu_seul() {
+        for text in ["STOP", "Stop !", "stop.", "Stoppe.", "Jimmy, stop !", "Arrête !", "arrête-toi", "Stop stop.", "Jimmy arrête tout"] {
+            assert!(is_stop_command(text), "« {text} » doit arrêter");
+        }
+    }
+
+    #[test]
+    fn une_vraie_commande_n_est_pas_un_arret() {
+        for text in ["Arrête le serveur de dev.", "Stop le conteneur docker", "Mets un stop loss", "", "Jimmy.", "c'est stoppé depuis hier ?"] {
+            assert!(!is_stop_command(text), "« {text} » ne doit pas arrêter");
+        }
+    }
 
     /// Stéréo 48 kHz → mono 16 kHz : une seconde d'entrée doit donner une
     /// seconde de sortie, et un signal identique sur les deux canaux doit

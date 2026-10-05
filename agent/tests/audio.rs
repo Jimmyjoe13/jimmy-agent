@@ -97,6 +97,36 @@ async fn tts_synthetise_et_se_lit() {
         .expect("la lecture ne doit pas échouer");
 }
 
+/// Bibliothèque de voix : la voix par défaut (« Le narrateur ») passe bien par
+/// OpenRouter, et le catalogue Fish Audio la retrouve. Silencieux : rien
+/// n'est joué sur les haut-parleurs.
+#[tokio::test]
+#[ignore = "consulte Fish Audio (OpenRouter et catalogue public)"]
+async fn voix_du_narrateur_et_catalogue() {
+    let Some(app) = app_de_test() else {
+        panic!("environnement de test indisponible");
+    };
+    let settings = app.settings();
+    let narrateur = jimmy_agent::providers::tts::TtsVoice::NARRATEUR;
+    let speech = app
+        .tts
+        .speak(
+            &app.secrets.openrouter_api_key,
+            &settings.tts.model,
+            narrateur.id,
+            "Bonjour, je suis Jimmy.",
+            settings.tts.chars_per_minute,
+        )
+        .await
+        .expect("synthèse avec le narrateur");
+    println!("narrateur : {} octets à {} Hz", speech.bytes.len(), speech.sample_rate);
+    assert!(speech.bytes.len() > 10_000, "audio trop court");
+
+    let found = app.tts.search_voices("Le narrateur", "fr").await.expect("catalogue");
+    println!("catalogue : {} voix, dont {:?}", found.len(), found.iter().take(3).map(|v| &v.label).collect::<Vec<_>>());
+    assert!(found.iter().any(|v| v.id == narrateur.id), "le narrateur doit être trouvé");
+}
+
 /// L'écoute permanente doit démarrer whisper.cpp et ouvrir le micro.
 ///
 /// Ce test a échoué en conditions réelles : la boucle n'était jamais démarrée
@@ -356,6 +386,16 @@ fn bruit(n: usize, graine: &mut u32) -> Vec<f32> {
 /// fourni, il n'est injecté qu'au signal « Oui ? » de Jimmy — comme une
 /// personne qui attend sa réponse avant de parler.
 async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32>>) -> (bool, String) {
+    let (reveil, reponse, _) = faire_ecouter_detail(app, flux, apres_oui).await;
+    (reveil, reponse)
+}
+
+/// Comme [`faire_ecouter`], et renvoie en plus la commande transmise à l'agent.
+async fn faire_ecouter_detail(
+    app: &Arc<App>,
+    flux: Vec<f32>,
+    apres_oui: Option<Vec<f32>>,
+) -> (bool, String, String) {
     use jimmy_agent::core::types::AgentEvent;
 
     let debut_test = chrono::Utc::now().to_rfc3339();
@@ -426,7 +466,7 @@ async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32
                 }
             }
             AgentEvent::Notice { message } => println!("avis : {message}"),
-            AgentEvent::Spoken { text } => {
+            AgentEvent::Spoken { text, .. } => {
                 println!("commande affichée : « {text} »");
                 commande = text.clone();
             }
@@ -459,7 +499,7 @@ async fn faire_ecouter(app: &Arc<App>, flux: Vec<f32>, apres_oui: Option<Vec<f32
         !jimmy_agent::voice::matches_wake_word(&commande, "jimmy"),
         "le nom est resté dans la commande : « {commande} »"
     );
-    (reveil, reponse)
+    (reveil, reponse, commande)
 }
 
 /// Phrase enchaînée : « Jimmy, quelle heure est-il ? » d'une traite.
@@ -501,6 +541,66 @@ async fn ecoute_nom_seul_puis_commande() {
     let (reveil, reponse) = faire_ecouter(&app, flux, Some(commande)).await;
     assert!(reveil, "le mot d'éveil n'a pas été reconnu");
     assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu après « Oui ? »");
+}
+
+/// Cas réel du 4 octobre : « Je viens de voir que dans ta mémoire tu as
+/// mis... » transmis coupé, une pause de réflexion ayant clos la prise. Ici,
+/// une phrase qui s'arrête sur « de », 1,8 s de pause (plus que le silence de
+/// fin, même allongé), puis la suite : la commande doit contenir les deux.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_hesitation_ne_coupe_pas_la_phrase() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 2024;
+    let mut flux = bruit(32_000, &mut graine);
+    flux.extend(phrase_avec_nom(&app, "Jimmy, donne-moi le nom de", 0.02).await);
+    flux.extend(bruit(16_000 * 18 / 10, &mut graine));
+    flux.extend(phrase_16k(&app, "la capitale de l'Italie.", 0.02).await);
+
+    let (reveil, reponse, commande) = faire_ecouter_detail(&app, flux, None).await;
+    assert!(reveil, "le mot d'éveil n'a pas été reconnu");
+    let minuscule = commande.to_lowercase();
+    assert!(
+        minuscule.contains("capitale") || minuscule.contains("italie"),
+        "la suite après la pause a été perdue : « {commande} »"
+    );
+    assert!(minuscule.contains("nom"), "le début de la phrase a été perdu : « {commande} »");
+    assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu");
+}
+
+/// Arrêt d'urgence : une longue tâche est lancée à la voix, puis « Stop ! »
+/// est dit pendant qu'elle tourne (sans le nom). Jimmy doit l'abandonner et
+/// répondre qu'il arrête — la boucle d'écoute, elle, attend la fin de la tâche :
+/// c'est le guetteur qui doit entendre le « Stop ».
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_stop_arrete_la_tache_en_cours() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 99;
+    let mut flux = bruit(32_000, &mut graine);
+    flux.extend(
+        phrase_avec_nom(
+            &app,
+            "Jimmy, lis un par un tous les fichiers du dossier agent et fais-moi un rapport très détaillé sur chacun.",
+            0.02,
+        )
+        .await,
+    );
+    // La tâche démarre et tourne ; « Stop ! » arrive en plein travail.
+    flux.extend(bruit(16_000 * 14, &mut graine));
+    flux.extend(phrase_16k(&app, "Stop !", 0.02).await);
+
+    let debut = std::time::Instant::now();
+    let (reveil, reponse, _) = faire_ecouter_detail(&app, flux, None).await;
+    println!("réponse après {} s : « {reponse} »", debut.elapsed().as_secs());
+    assert!(reveil, "le mot d'éveil n'a pas été reconnu");
+    assert!(reponse.contains("j'arrête"), "la tâche n'a pas été arrêtée : « {reponse} »");
 }
 
 /// Auto-réparation : les serveurs whisper sont tués en pleine session (cas
@@ -613,7 +713,7 @@ async fn ecoute_conversation_continue() {
                     t_fin_2 = Some(Instant::now() + Duration::from_millis((second.len() as u64 * 1000) / 16_000));
                 }
             }
-            AgentEvent::Spoken { text } => {
+            AgentEvent::Spoken { text, .. } => {
                 println!("[{:>6} ms] commande {} : « {text} »", t0.elapsed().as_millis(), commandes.len() + 1);
                 let depuis = match (commandes.len(), t_fin_2) {
                     (0, _) => Instant::now().saturating_duration_since(fin_phrase_1),

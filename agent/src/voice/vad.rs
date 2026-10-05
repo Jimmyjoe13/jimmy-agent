@@ -31,6 +31,16 @@ pub const NOISE_CHECK_MS: u64 = 3000;
 /// la prise soit de la parole (150 = 15 %).
 pub const MIN_DENSITY_PERMILLE: u64 = 150;
 
+/// Parole au-delà de laquelle le silence de fin s'allonge : une longue
+/// phrase contient des hésitations (on cherche ses mots), une commande brève
+/// non.
+pub const LONG_SPEECH_FROM_MS: u64 = 1500;
+
+/// Allongement maximal du silence de fin, atteint à 2,5 s de parole
+/// (700 ms réglés → 1,2 s). Cas réel : « Je viens de voir que dans ta mémoire
+/// tu as mis... » coupé par une pause de réflexion.
+pub const MAX_EXTRA_END_MS: u64 = 500;
+
 /// Énergie RMS d'un bloc d'échantillons.
 pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
@@ -143,8 +153,24 @@ impl SpeechTracker {
     }
 
     /// La phrase est-elle terminée (parole puis silence suffisant) ?
+    ///
+    /// Le silence exigé grandit avec la parole déjà dite : une commande brève
+    /// (« Non, c'est bon ») se clôt au réglage (700 ms), une longue phrase
+    /// tolère une pause de réflexion jusqu'à 500 ms de plus.
     pub fn ended(&self) -> bool {
-        self.started() && self.silence >= self.end_frames
+        self.started() && self.silence >= self.end_frames + self.extra_end_frames()
+    }
+
+    /// Trames de silence ajoutées pour une longue phrase.
+    fn extra_end_frames(&self) -> usize {
+        let extra_ms = (self.voiced_ms().saturating_sub(LONG_SPEECH_FROM_MS) / 2).min(MAX_EXTRA_END_MS);
+        extra_ms as usize / FRAME_MS
+    }
+
+    /// Silence en cours depuis la dernière trame voisée, en ms. Sert à couper
+    /// une prise trop longue dans une pause plutôt qu'au milieu d'un mot.
+    pub fn silent_ms(&self) -> u64 {
+        (self.silence * FRAME_MS) as u64
     }
 
     /// Durée de parole confirmée, en ms.
@@ -225,6 +251,37 @@ mod tests {
         tracker.feed(&audio);
         assert!(tracker.started());
         assert!(!tracker.ended(), "400 ms de silence ne closent pas une phrase de 700 ms");
+    }
+
+    #[test]
+    fn une_hesitation_dans_une_longue_phrase_ne_la_coupe_pas() {
+        // Cas réel (journal du 4 octobre) : « Je viens de voir que dans ta
+        // mémoire tu as mis... » coupé par une hésitation. 2,5 s de parole
+        // puis 900 ms de pause : la phrase n'est pas finie.
+        let audio = concat(&[tone(2500, 0.02), tone(900, 0.001)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 700, 0);
+        tracker.feed(&audio);
+        assert!(!tracker.ended(), "une pause de 900 ms après 2,5 s de parole est une hésitation");
+        // Un vrai silence finit quand même par la clore.
+        tracker.feed(&concat(&[audio.clone(), tone(400, 0.001)]));
+        assert!(tracker.ended(), "1,3 s de silence closent la phrase");
+    }
+
+    #[test]
+    fn une_commande_breve_garde_un_silence_de_fin_court() {
+        // « Non, c'est bon » (600 ms) : la réactivité ne doit pas changer.
+        let audio = concat(&[tone(600, 0.02), tone(750, 0.001)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 700, 0);
+        tracker.feed(&audio);
+        assert!(tracker.ended());
+    }
+
+    #[test]
+    fn le_silence_courant_est_mesure() {
+        let audio = concat(&[tone(1000, 0.02), tone(200, 0.001)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 700, 0);
+        tracker.feed(&audio);
+        assert!((150..=250).contains(&tracker.silent_ms()), "{}", tracker.silent_ms());
     }
 
     #[test]

@@ -18,10 +18,19 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+pub use crate::config::VoiceInfo;
 use crate::error::{Error, Result};
 
-/// Voix françaises proposées. La première est la voix validée pour la lecture
-/// de Jimmy (calme, posée) ; la seconde est plus douce et claire.
+/// Catalogue public des voix Fish Audio (lecture sans clé).
+const CATALOG_URL: &str = "https://api.fish.audio/model";
+/// Budget d'une recherche dans le catalogue (piège 55 : tout appel borné).
+const CATALOG_TIMEOUT: Duration = Duration::from_secs(10);
+/// Résultats affichés par recherche.
+const CATALOG_PAGE: usize = 20;
+
+/// Voix françaises prédéfinies. La première est la voix par défaut de Jimmy.
+/// D'autres voix s'ajoutent depuis le catalogue Fish Audio
+/// ([`Tts::search_voices`]) et sont gardées dans `tts.library`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TtsVoice {
     pub id: &'static str,
@@ -30,10 +39,18 @@ pub struct TtsVoice {
 }
 
 impl TtsVoice {
+    /// Choisie par l'utilisateur le 4 octobre 2026. Deux voix publiques
+    /// portent ce nom sur Fish Audio : celle-ci est la plus utilisée (70 000
+    /// lectures, 505 « j'aime »).
+    pub const NARRATEUR: TtsVoice = TtsVoice {
+        id: "4f2a0684dd0247dda68f339738c780e6",
+        label: "Le narrateur",
+        description: "Voix d'homme grave, ton de narration — voix par défaut",
+    };
     pub const FEMININE: TtsVoice = TtsVoice {
         id: "5567200c7d8341738f0892bbacd3be3c",
         label: "Féminine",
-        description: "Calme et posée — voix validée pour Jimmy",
+        description: "Calme et posée",
     };
     pub const CLEMENCE: TtsVoice = TtsVoice {
         id: "a288bdc744da4ad194921adad6863175",
@@ -41,7 +58,18 @@ impl TtsVoice {
         description: "Douce et claire",
     };
 
-    pub const PRESETS: &'static [TtsVoice] = &[TtsVoice::FEMININE, TtsVoice::CLEMENCE];
+    pub const PRESETS: &'static [TtsVoice] = &[TtsVoice::NARRATEUR, TtsVoice::FEMININE, TtsVoice::CLEMENCE];
+
+    /// La voix sous la forme gardée par la bibliothèque.
+    pub fn info(&self) -> VoiceInfo {
+        VoiceInfo {
+            id: self.id.to_string(),
+            label: self.label.to_string(),
+            description: self.description.to_string(),
+            languages: vec!["fr".into()],
+            uses: 0,
+        }
+    }
 
     pub fn from_id(id: &str) -> Option<TtsVoice> {
         TtsVoice::PRESETS.iter().copied().find(|v| v.id == id)
@@ -68,6 +96,38 @@ pub struct Speech {
 struct AudioPayload {
     bytes: Vec<u8>,
     sample_rate: u32,
+}
+
+/// Voix utilisables d'une réponse du catalogue : entraînées et publiques.
+fn parse_catalog(value: &serde_json::Value) -> Vec<VoiceInfo> {
+    let Some(items) = value.get("items").and_then(|i| i.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter(|m| m.get("state").and_then(|s| s.as_str()).unwrap_or("trained") == "trained")
+        .filter_map(|m| {
+            let id = m.get("_id")?.as_str()?.to_string();
+            let label = m.get("title").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+            let description: String = m
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(160)
+                .collect();
+            let languages = m
+                .get("languages")
+                .and_then(|l| l.as_array())
+                .map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let uses = m.get("task_count").and_then(|n| n.as_u64()).unwrap_or(0);
+            Some(VoiceInfo { id, label: if label.is_empty() { "Sans nom".into() } else { label }, description, languages, uses })
+        })
+        .collect()
 }
 
 /// Extrait la fréquence d'un en-tête `audio/pcm;rate=44100;channels=1`.
@@ -107,6 +167,36 @@ impl Tts {
 
     pub fn provider(&self) -> TtsProvider {
         self.provider
+    }
+
+    /// Cherche des voix dans le catalogue public de Fish Audio, par pertinence
+    /// (un tri par popularité faisait passer Clémence avant « Le narrateur »
+    /// pour la requête « Le narrateur »). `language` filtre (« fr ») ; vide = toutes.
+    pub async fn search_voices(&self, query: &str, language: &str) -> Result<Vec<VoiceInfo>> {
+        let mut params = vec![
+            ("title", query.trim().to_string()),
+            ("page_size", CATALOG_PAGE.to_string()),
+        ];
+        if !language.is_empty() {
+            params.push(("language", language.to_string()));
+        }
+        let response = self
+            .http
+            .get(CATALOG_URL)
+            .query(&params)
+            .timeout(CATALOG_TIMEOUT)
+            .send()
+            .await
+            .map_err(|e| Error::Tts(format!("catalogue Fish Audio injoignable : {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(Error::Tts(format!("catalogue Fish Audio : HTTP {status}")));
+        }
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| Error::Tts(format!("catalogue Fish Audio illisible : {e}")))?;
+        Ok(parse_catalog(&value))
     }
 
     /// Synthétise `text`. Le texte est d'abord réécrit pour l'oral : les
@@ -421,6 +511,29 @@ struct SpeechResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_narrateur_est_la_voix_par_defaut() {
+        assert_eq!(TtsVoice::PRESETS[0], TtsVoice::NARRATEUR);
+        assert_eq!(crate::config::TtsSettings::default().voice, TtsVoice::NARRATEUR.id);
+    }
+
+    #[test]
+    fn le_catalogue_est_lu_sans_les_voix_non_entrainees() {
+        let value = serde_json::json!({ "total": 3, "items": [
+            { "_id": "4f2a0684dd0247dda68f339738c780e6", "title": "Le narrateur", "description": "A deep,\n resonant male voice",
+              "languages": ["fr"], "task_count": 70528, "state": "trained" },
+            { "_id": "aaa", "title": "En cours", "state": "training" },
+            { "_id": "bbb", "title": "  ", "task_count": 3 }
+        ]});
+        let voices = parse_catalog(&value);
+        assert_eq!(voices.len(), 2, "{voices:?}");
+        assert_eq!(voices[0].label, "Le narrateur");
+        assert_eq!(voices[0].description, "A deep, resonant male voice");
+        assert_eq!(voices[0].uses, 70528);
+        assert_eq!(voices[1].label, "Sans nom");
+        assert!(parse_catalog(&serde_json::json!({ "erreur": 1 })).is_empty());
+    }
 
     #[test]
     fn decoupage_par_phrases() {
