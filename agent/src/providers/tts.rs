@@ -332,15 +332,87 @@ pub fn prepare_for_speech(text: &str) -> String {
     cleaned.trim().to_string()
 }
 
+/// Longueur maximale de ce qui est **dit** à voix haute. L'essentiel est en
+/// tête (consigne « Sortie » du prompt) ; au-delà, la voix se tairait pendant
+/// des minutes — une analyse d'un tour a déjà été lue en 9 000 caractères.
+pub const SPOKEN_MAX_CHARS: usize = 240;
+
+/// La ponctuation à l'indice `i` termine-t-elle vraiment une phrase ? Un point
+/// dans un nom de fichier (« todo.md ») ou un nombre (« 1.5 ») n'en termine pas
+/// une : sans cette règle, la voix disait « todo. » puis s'arrêtait au milieu.
+fn ends_sentence(chars: &[char], i: usize) -> bool {
+    match chars[i] {
+        '!' | '?' | '…' => true,
+        '.' => chars.get(i + 1).map_or(true, |c| c.is_whitespace()),
+        _ => false,
+    }
+}
+
+/// Ne garde que le début utile d'un texte déjà préparé pour la voix, en
+/// coupant sur des phrases entières. La première phrase est toujours gardée
+/// (même longue, elle est alors coupée au dernier mot) : mieux vaut dire la
+/// réponse que rien. Ce qui est retiré reste affiché dans la bulle.
+pub fn limit_for_speech(text: &str, max_chars: usize) -> String {
+    let mut kept = String::new();
+    let mut sentence = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        sentence.push(ch);
+        if !ends_sentence(&chars, i) {
+            continue;
+        }
+        let s = sentence.trim();
+        if kept.is_empty() {
+            kept.push_str(s);
+        } else if kept.chars().count() + 1 + s.chars().count() <= max_chars {
+            kept.push(' ');
+            kept.push_str(s);
+        } else {
+            // Cette phrase ne tient plus : on s'arrête là.
+            sentence.clear();
+            break;
+        }
+        sentence.clear();
+    }
+    let tail = sentence.trim();
+    if !tail.is_empty() && (kept.is_empty() || kept.chars().count() + 1 + tail.chars().count() <= max_chars) {
+        if !kept.is_empty() {
+            kept.push(' ');
+        }
+        kept.push_str(tail);
+    }
+    if kept.chars().count() > max_chars {
+        kept = cut_words(&kept, max_chars);
+    }
+    kept.trim().to_string()
+}
+
+/// Coupe au dernier mot entier avant `max_chars` (filet pour une phrase
+/// démesurée sans ponctuation).
+fn cut_words(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for word in text.split_whitespace() {
+        if !out.is_empty() && out.chars().count() + 1 + word.chars().count() > max_chars {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    out
+}
+
 /// Découpe un texte en morceaux d'environ `max_chars`, aux fins de phrase
 /// (puis aux virgules si une phrase est trop longue). Chaque morceau est
 /// synthétisé séparément pour commencer à parler plus tôt.
 pub fn split_for_speech(text: &str, max_chars: usize) -> Vec<String> {
     let mut sentences: Vec<String> = Vec::new();
     let mut current = String::new();
-    for ch in text.chars() {
+    let chars: Vec<char> = text.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
         current.push(ch);
-        if matches!(ch, '.' | '!' | '?' | '…') {
+        if ends_sentence(&chars, i) {
             sentences.push(current.trim().to_string());
             current.clear();
         }
@@ -558,6 +630,52 @@ Voir [la doc](https://exemple.fr) ou https://x.fr/a";
         assert!(oral.contains("code affiché"), "{oral}");
         assert!(oral.contains("la doc") && !oral.contains("https"), "{oral}");
         assert!(oral.starts_with("Résumé Trois points"), "{oral}");
+    }
+
+    /// La voix ne dit pas toute la réponse : elle s'arrête sur des phrases
+    /// entières, sous le plafond, et laisse le reste à l'écran.
+    #[test]
+    fn la_voix_s_arrete_aux_premieres_phrases() {
+        let long = "J'ai écrit le fichier. Il reste à le tester. Voici un détail \
+                    qui ne doit pas être lu et qui continue encore sur plusieurs phrases. Et encore une dernière.";
+        let spoken = limit_for_speech(long, 60);
+        assert!(spoken.starts_with("J'ai écrit le fichier."), "{spoken}");
+        assert!(spoken.chars().count() <= 60, "{spoken}");
+        assert!(!spoken.contains("ne doit pas être lu"), "{spoken}");
+    }
+
+    /// Une première phrase démesurée (sans ponctuation) est coupée au dernier
+    /// mot entier, jamais au milieu d'un mot.
+    #[test]
+    fn une_premiere_phrase_longue_est_coupee_au_mot() {
+        let long = "voici une phrase sans ponctuation qui continue longtemps et qui doit être coupée sans casser un mot";
+        let spoken = limit_for_speech(long, 40);
+        assert!(spoken.chars().count() <= 40, "{spoken}");
+        // Ce qui est dit reste les premiers mots entiers de la phrase.
+        assert!(
+            long.split_whitespace().take(spoken.split_whitespace().count()).eq(spoken.split_whitespace()),
+            "{spoken}"
+        );
+    }
+
+    #[test]
+    fn un_texte_court_traverse_la_borne_intact() {
+        assert_eq!(limit_for_speech("Bonjour. Ça va ?", 240), "Bonjour. Ça va ?");
+    }
+
+    /// Un point dans un nom de fichier ou un nombre ne finit pas une phrase :
+    /// sinon la voix s'arrêtait sur « todo. » et reprenait sur « md ».
+    #[test]
+    fn un_point_dans_un_nom_de_fichier_ne_coupe_pas_la_phrase() {
+        let spoken = limit_for_speech("Le fichier todo.md est prêt. La suite arrive plus loin.", 35);
+        assert!(spoken.contains("todo.md est prêt."), "{spoken}");
+        // Le découpage en morceaux ne scinde pas non plus la phrase au point.
+        let parts = split_for_speech("Le fichier todo.md est prêt. La suite arrive.", 200);
+        assert_eq!(
+            parts.first().map(String::as_str),
+            Some("Le fichier todo.md est prêt."),
+            "{parts:?}"
+        );
     }
 
     #[test]

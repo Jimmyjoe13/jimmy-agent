@@ -990,6 +990,14 @@ paramètre `has_fur`. Règle : chaque paramètre de forme d'un skin porte un nom
 qui n'existe pas déjà comme couleur (`fur`, `cream`, `dark`, `shirt`,
 `accent`, `ear_scale`).
 
+**73. Un commentaire qui promet une borne que le code ne tient pas.**
+`fs_diff` (bloc « travaux » du Chat) annonçait « temps borné (10 s) » avec une
+constante `DIFF_TIMEOUT`, mais exécutait `git diff` sans aucune borne : la
+constante existait sans jamais être utilisée. Le compilateur l'a signalé
+(`constant DIFF_TIMEOUT is never used`) — un avertissement de build n'est
+jamais cosmétique, et « défini mais jamais appelé » est déjà arrivé plusieurs
+fois (pièges 11, 22). Corrigé avec `tokio::process` + `kill_on_drop`, comme
+`run_command`.
 
 ---
 
@@ -1017,6 +1025,17 @@ qui n'existe pas déjà comme couleur (`fur`, `cream`, `dark`, `shirt`,
 - **Le vault reste lu en entier** (décision de l'utilisateur) : Jimmy sait
   qu'il est partagé et distingue ses notes (66).
 - **Regard** : la caméra est l'œil de l'utilisateur ; pas de suivi de webcam (67).
+
+### Décisions prises (5 octobre 2026 — sortie courte et nette)
+
+- **Réponse courte par défaut** : une à trois phrases, l'essentiel en tête
+  (nouvelle section « Sortie » d'`IDENTITY`). Le détail technique (code,
+  chemins, commandes) va dans un bloc de code : il reste à l'écran et n'est pas
+  lu à voix haute.
+- **L'oral est borné, pas seulement nettoyé** : `limit_for_speech` ne dit que le
+  début du texte nettoyé (phrases entières, `SPOKEN_MAX_CHARS` = 240
+  caractères) ; le reste demeure dans la bulle. Constante plutôt que réglage, à
+  ajuster si l'usage le demande. S'applique au Chat comme à la voix.
 
 ### Ensuite
 

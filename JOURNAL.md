@@ -665,6 +665,35 @@ du précis ( Jimmy n'explique que l'essentiel, à l'écran comme à voix
 haute) — et une voix qui ne récite **jamais** le code, le détail restant
 sur l'écran.
 
+### La sortie de Jimmy : texte court et net (5 octobre)
+
+Le journal chiffre le défaut : la plupart des réponses font 6 à 93 caractères,
+mais deux réponses d'analyse ont été **lues à voix haute en 9 147 et 3 046
+caractères** (`[tts] lecture de N caractères`) — plusieurs minutes de récitation,
+code et jargon de développement compris.
+
+Corrigé en deux endroits.
+
+1. **Le prompt** (`IDENTITY`, section « Sortie ») : une à trois phrases, la
+   réponse en tête, pas de préambule ni de récapitulatif d'étapes ; le détail
+   technique (code, chemins, commandes) va dans un bloc de code, lu à l'écran
+   seulement. La section « Voix » interdit désormais explicitement le code et
+   les chemins dans la prose ; la règle 5 renvoie vers cette section.
+2. **La lecture** : `prepare_for_speech` retirait déjà Markdown et code ;
+   `limit_for_speech` borne ce qui est **dit** (phrases entières,
+   `SPOKEN_MAX_CHARS` = 240 caractères). Le reste demeure dans la bulle : ce qui
+   est dit n'est plus tout ce qui est affiché.
+
+Défaut trouvé en relisant la sortie réelle : la découpe sur le point coupait les
+noms de fichiers (« todo.md » → « todo. » puis « md »), à l'écrit comme à
+l'oral. Corrigé par `ends_sentence` (un point ne finit une phrase que suivi d'un
+blanc).
+
+Vérifié : 130 tests unitaires ; `--test happy_path
+chemin_heureux_analyse_un_dossier --ignored` sur le vrai modèle, deux rejeux →
+réponse d'environ 650 caractères, **190 à 228 dits à voix haute** selon le tour,
+nom de fichier intact.
+
 ### Le mot d'arrêt « STOP »
 
 Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,
@@ -773,11 +802,13 @@ en 64 ms) — piège 71.
 
 ## 8. Reste à faire et questions ouvertes
 
-0. **Prochaine session : la sortie de Jimmy** — réponses courtes et nettes
-   (que l'essentiel, droit au but) et voix qui ne récite pas le code (le
-   détail reste à l'écran). Validé le 5 octobre ; voir le top du HANDOFF.
-   Puis **committer les lots du 4 et 5 octobre** et **régénérer la clé MCP
-   `aggregate`** (exposée dans le journal).
+0. **Sortie de Jimmy** — texte court et net fait le 5 octobre (section
+   « Sortie » du prompt + borne de l'oral `limit_for_speech`) ; reste à
+   confirmer en usage réel, et la voix qui ne récite pas le code. Les lots du
+   3 au 5 octobre sont **commités** (7 commits, `e5c37ba` → `1f6f19c`). Reste
+   à **régénérer les clés MCP** exposées (`aggregate` dans `jimmy.log`,
+   `skillsmp` dans `data/config.json`) et à masquer les secrets dans le
+   journal des arguments d'outils.
 1. **Utiliser Jimmy au quotidien à la voix** pendant une semaine : c'est le seul
    test qui répond à la question du PLAN (la voix apporte-t-elle quelque chose ?).
    Vérifier surtout : plusieurs questions d'affilée, une exploration longue avec

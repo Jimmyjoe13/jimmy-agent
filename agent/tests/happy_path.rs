@@ -106,6 +106,19 @@ async fn chemin_heureux_analyse_un_dossier() {
     }
 
     println!("--- réponse ---\n{}\n", reponse.text);
+    // Ce qui est réellement dit à voix haute : Markdown et code retirés, puis
+    // borné à SPOKEN_MAX_CHARS (planche « sortie courte et nette »). Le reste
+    // demeure à l'écran.
+    let spoken = jimmy_agent::providers::tts::limit_for_speech(
+        &jimmy_agent::providers::tts::prepare_for_speech(&reponse.text),
+        jimmy_agent::providers::tts::SPOKEN_MAX_CHARS,
+    );
+    println!("--- ce qui est dit ({} caractères) ---\n{spoken}\n", spoken.chars().count());
+    assert!(
+        spoken.chars().count() <= jimmy_agent::providers::tts::SPOKEN_MAX_CHARS,
+        "la voix récite toute la réponse ({} caractères)",
+        spoken.chars().count()
+    );
     println!("états : {etats:?}");
     println!("outils : {outils:?}");
     println!("durée : {} ms", reponse.duration_ms);

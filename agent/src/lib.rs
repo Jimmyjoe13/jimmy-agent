@@ -662,12 +662,25 @@ impl App {
         if cleaned.is_empty() {
             return;
         }
+        // La voix ne récite pas toute la réponse : on ne dit que le début utile
+        // (borne), l'essentiel étant placé en tête par la consigne « Sortie » du
+        // prompt ; le reste demeure dans la bulle. Une analyse d'un tour a déjà
+        // été lue en 9 000 caractères, soit plusieurs minutes.
+        let spoken = providers::tts::limit_for_speech(&cleaned, providers::tts::SPOKEN_MAX_CHARS);
+        if spoken.is_empty() {
+            return;
+        }
         // Phrase par phrase : la première est jouée pendant que la suivante
         // est synthétisée. Avant, toute la réponse était synthétisée avant le
         // premier son — plusieurs secondes de silence pour une réponse longue.
-        let parts = providers::tts::split_for_speech(&cleaned, 220);
-        log::info!("[tts] lecture de {} caractères en {} morceau(x)", cleaned.chars().count(), parts.len());
-        let estimated = providers::tts::estimate_ms(&cleaned, settings.tts.chars_per_minute);
+        let parts = providers::tts::split_for_speech(&spoken, 220);
+        log::info!(
+            "[tts] lecture de {} caractères (prose nettoyée : {}) en {} morceau(x)",
+            spoken.chars().count(),
+            cleaned.chars().count(),
+            parts.len()
+        );
+        let estimated = providers::tts::estimate_ms(&spoken, settings.tts.chars_per_minute);
         let _ = self.avatar.say(text, estimated).await;
 
         let synth = |part: String| {
