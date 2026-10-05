@@ -273,6 +273,50 @@ impl McpRegistry {
         Ok(render_result(&value))
     }
 
+    /// État de chaque serveur pour l'interface : processus vivant ou non, et
+    /// outils déjà enregistrés. `tools` = (nom préfixé, description) des outils
+    /// du registre. Ne bloque jamais : si une connexion ou un appel tient le
+    /// verrou (jusqu'à 90 s au lancement), l'état est « occupé ».
+    pub fn status(&self, tools: &[(String, String)]) -> Vec<McpServerStatus> {
+        // Vivant = processus enfant qui n'a pas terminé.
+        let alive: Option<HashMap<String, bool>> = self.connections.try_lock().ok().map(|mut connections| {
+            connections
+                .iter_mut()
+                .map(|(name, c)| (name.clone(), matches!(c.child.try_wait(), Ok(None))))
+                .collect()
+        });
+        self.servers()
+            .into_iter()
+            .map(|server| {
+                let state = match &alive {
+                    None => "busy",
+                    Some(map) if map.get(&server.name) == Some(&true) => "connected",
+                    Some(_) => "stopped",
+                };
+                let prefix = format!("mcp_{}__", sanitize(&server.name));
+                let server_tools = tools
+                    .iter()
+                    .filter_map(|(name, description)| {
+                        name.strip_prefix(&prefix).map(|short| McpToolInfo {
+                            name: short.to_string(),
+                            description: description.clone(),
+                        })
+                    })
+                    .collect();
+                let mut env_keys: Vec<String> = server.env.keys().cloned().collect();
+                env_keys.sort();
+                McpServerStatus {
+                    launch: if server.is_stdio() { mask_command(&server.command) } else { mask_command(&[server.url.clone()]) },
+                    name: server.name,
+                    transport: server.transport,
+                    env_keys,
+                    state,
+                    tools: server_tools,
+                }
+            })
+            .collect()
+    }
+
     pub async fn shutdown(&self) {
         let mut connections = self.connections.lock().await;
         for (_, connection) in connections.iter_mut() {
@@ -280,6 +324,109 @@ impl McpRegistry {
         }
         connections.clear();
     }
+}
+
+/// Un serveur MCP tel que l'interface l'affiche (vue Skills → Serveurs MCP).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerStatus {
+    pub name: String,
+    pub transport: String,
+    /// Commande de lancement, secrets masqués (`mask_command`).
+    pub launch: String,
+    /// Noms des variables d'environnement passées au serveur ; jamais leurs
+    /// valeurs, qui sont souvent des clés.
+    pub env_keys: Vec<String>,
+    /// `connected`, `stopped` (pas encore lancé ou processus mort), `busy`
+    /// (connexion ou appel en cours) ou `disabled` (désactivé en config).
+    pub state: &'static str,
+    pub tools: Vec<McpToolInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpToolInfo {
+    /// Nom d'origine, sans le préfixe `mcp_<serveur>__`.
+    pub name: String,
+    pub description: String,
+}
+
+/// Options dont la valeur suivante est un secret.
+const SECRET_FLAGS: &[&str] = &[
+    "--header", "-h", "--token", "--api-key", "--apikey", "--key", "--password", "--secret", "--auth",
+    "--authorization", "--bearer",
+];
+
+/// Mots qui signalent un secret dans un argument (`X-API-Key: …`, `token=…`).
+const SECRET_HINTS: &[&str] = &["key", "token", "secret", "password", "passwd", "authorization", "bearer", "auth"];
+
+/// Commande lisible, secrets masqués. Une commande MCP porte souvent une clé
+/// (en-tête `--header "X-API-Key: …"` de `mcp-remote`, `--token=…`, jeton
+/// dans l'URL) : elle ne doit jamais apparaître en clair dans l'interface.
+/// Le nom de l'en-tête ou de l'option reste visible, seule la valeur est cachée.
+pub fn mask_command(args: &[String]) -> String {
+    let mut out = Vec::with_capacity(args.len());
+    let mut hide_next = false;
+    for arg in args {
+        if hide_next {
+            hide_next = false;
+            out.push(mask_value(arg, true));
+            continue;
+        }
+        let lower = arg.to_lowercase();
+        if SECRET_FLAGS.contains(&lower.as_str()) {
+            hide_next = true;
+            out.push(arg.clone());
+            continue;
+        }
+        out.push(mask_value(arg, false));
+    }
+    out.join(" ")
+}
+
+/// Masque la valeur d'un argument : après `:` ou `=` si ce qui précède parle
+/// d'un secret (ou si `always`), en entier sinon quand `always`.
+fn mask_value(arg: &str, always: bool) -> String {
+    // Identifiants dans une URL (`postgres://user:motdepasse@hôte`) : masqués,
+    // puis le reste de l'argument est traité normalement.
+    let masked_userinfo = arg.split_once("://").and_then(|(scheme, rest)| {
+        let (userinfo, host) = rest.split_once('@')?;
+        (!userinfo.contains('/')).then(|| {
+            let user = userinfo.split(':').next().unwrap_or("");
+            format!("{scheme}://{user}:••••@{host}")
+        })
+    });
+    let arg = masked_userinfo.as_deref().unwrap_or(arg);
+    // Jeton dans une URL : chaque paramètre sensible de la requête.
+    if let Some((base, query)) = arg.split_once('?') {
+        let params: Vec<String> = query
+            .split('&')
+            .map(|p| match p.split_once('=') {
+                Some((k, _)) if always || is_secret_name(k) => format!("{k}=••••"),
+                _ => p.to_string(),
+            })
+            .collect();
+        return format!("{base}?{}", params.join("&"));
+    }
+    // `X-API-Key: valeur`, `--token=valeur`, `Authorization: Bearer valeur`.
+    for sep in [':', '='] {
+        if let Some((name, _)) = arg.split_once(sep) {
+            // `http://…` ou `C:\…` : un `:` qui n'introduit pas de valeur.
+            let is_path_or_url = sep == ':' && (name.len() == 1 || arg[name.len()..].starts_with("://"));
+            if !is_path_or_url && (always || is_secret_name(name)) {
+                return if sep == '=' { format!("{name}=••••") } else { format!("{name}: ••••") };
+            }
+        }
+    }
+    if always {
+        "••••".to_string()
+    } else {
+        arg.to_string()
+    }
+}
+
+fn is_secret_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    SECRET_HINTS.iter().any(|hint| lower.contains(hint))
 }
 
 /// Le nom d'outil exposé au modèle combine serveur et outil, avec un
@@ -291,6 +438,17 @@ fn split_prefixed(name: &str) -> Result<(String, String)> {
     rest.split_once("__")
         .map(|(server, tool)| (server.to_string(), tool.to_string()))
         .ok_or_else(|| Error::Mcp(format!("nom d'outil MCP invalide : {name}")))
+}
+
+/// Préfixe des outils d'un serveur dans le registre : `mcp_<serveur>__`.
+pub fn tool_prefix(server: &str) -> String {
+    format!("mcp_{}__", sanitize(server))
+}
+
+/// Outil MCP « proxy » (`mcp_<serveur>__<outil>`), par opposition aux outils
+/// de Jimmy dont le nom commence aussi par `mcp_` (`mcp_add_server`, `mcp_call`…).
+pub fn is_proxy_tool(name: &str) -> bool {
+    name.starts_with("mcp_") && name.contains("__")
 }
 
 fn sanitize(name: &str) -> String {
@@ -425,6 +583,64 @@ pub fn server_from_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn la_commande_affichee_ne_montre_aucun_secret() {
+        // Forme réelle d'un serveur ajouté par Jimmy (mcp-remote + en-tête).
+        let shown = mask_command(&args(&[
+            "npx", "-y", "mcp-remote", "http://127.0.0.1:8010/mcp", "--header", "X-API-Key: abc123secret",
+        ]));
+        assert!(!shown.contains("abc123secret"), "{shown}");
+        assert!(shown.contains("X-API-Key: ••••"), "{shown}");
+        assert!(shown.contains("mcp-remote http://127.0.0.1:8010/mcp"), "{shown}");
+        // Options « --token=… », « --api-key … », jeton dans l'URL, Bearer.
+        for (input, secret) in [
+            (args(&["srv", "--token=tok42"]), "tok42"),
+            (args(&["srv", "--api-key", "k-99"]), "k-99"),
+            (args(&["srv", "https://x.io/mcp?api_key=zz77"]), "zz77"),
+            (args(&["srv", "-H", "Authorization: Bearer bb55"]), "bb55"),
+            (args(&["srv", "postgres://jim:pw66@db:5432/x"]), "pw66"),
+        ] {
+            let shown = mask_command(&input);
+            assert!(!shown.contains(secret), "{shown}");
+        }
+        // Rien de sensible : la commande reste lisible telle quelle.
+        assert_eq!(
+            mask_command(&args(&["npx", "-y", "mcp-obsidian", "C:\\Obsidian\\Jimmy"])),
+            "npx -y mcp-obsidian C:\\Obsidian\\Jimmy"
+        );
+    }
+
+    #[tokio::test]
+    async fn l_etat_rattache_chaque_outil_a_son_serveur() {
+        let server = |name: &str| McpServer {
+            name: name.into(),
+            transport: "stdio".into(),
+            command: args(&["npx", "x"]),
+            url: String::new(),
+            env: HashMap::from([("API_TOKEN".to_string(), "secret".to_string())]),
+        };
+        let registry = McpRegistry::new(vec![server("obsidian"), server("my server")]);
+        let tools = vec![
+            ("mcp_obsidian__search".to_string(), "Cherche".to_string()),
+            ("mcp_my_server__run".to_string(), "Lance".to_string()),
+            ("read_file".to_string(), "Local".to_string()),
+        ];
+        let status = registry.status(&tools);
+        assert_eq!(status.len(), 2);
+        assert_eq!(status[0].name, "obsidian");
+        // Jamais lancé dans ce test : arrêté, pas connecté.
+        assert_eq!(status[0].state, "stopped");
+        assert_eq!(status[0].tools.len(), 1);
+        assert_eq!(status[0].tools[0].name, "search");
+        assert_eq!(status[1].tools[0].name, "run");
+        // Les variables d'environnement : leurs noms seulement, jamais les valeurs.
+        assert_eq!(status[0].env_keys, vec!["API_TOKEN".to_string()]);
+    }
 
     #[test]
     fn nom_compose_separe() {

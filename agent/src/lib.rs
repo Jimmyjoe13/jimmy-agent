@@ -10,13 +10,13 @@ pub mod config;
 pub mod core;
 pub mod db;
 pub mod error;
+pub mod growth;
 pub mod memory;
 pub mod mcp;
 pub mod paths;
 pub mod permissions;
 pub mod providers;
 pub mod skills;
-pub mod synaptiq;
 pub mod tools;
 pub mod voice;
 
@@ -32,7 +32,6 @@ use paths::Paths;
 use permissions::Permissions;
 use providers::{AvatarClient, LlmClient, Stt, Tts, TtsVoice};
 use skills::SkillStore;
-use synaptiq::SynaptiqClient;
 use tools::{ToolDeps, ToolRegistry};
 
 /// Assembleur de Jimmy. Detient l'état long.
@@ -50,7 +49,9 @@ pub struct App {
     pub registry: Arc<ToolRegistry>,
     /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
     pub mcp: Arc<mcp::McpRegistry>,
-    pub synaptiq: Option<Arc<SynaptiqClient>>,
+    /// Mémoire persistante dans le vault Obsidian : `None` si le chemin est
+    /// vide ou inexistant.
+    pub vault: Option<Arc<memory::vault::Vault>>,
     /// Verrous asynchrones : ces deux champs sont utilisés à travers des
     /// `await`, un `std::sync::Mutex` rendrait la future non `Send`.
     pub stt: tokio::sync::Mutex<Option<Stt>>,
@@ -62,6 +63,43 @@ pub struct App {
     /// Vrai pendant que Jimmy parle : l'écoute ignore alors le micro.
     speaking: std::sync::atomic::AtomicBool,
     pub godot: tokio::sync::Mutex<Option<tokio::process::Child>>,
+    /// L'avatar doit tourner : vrai dès qu'un démarrage est demandé, faux
+    /// après un arrêt explicite. Le chien de garde s'en sert pour relancer
+    /// Godot quand il disparaît sans trace.
+    avatar_desired: std::sync::atomic::AtomicBool,
+    /// Un seul lancement d'avatar à la fois : deux lancements simultanés, et
+    /// le second écrasait le premier dans `godot` — `kill_on_drop` tuait alors
+    /// l'avatar VIVANT, tandis que le second mourait sur le port déjà pris.
+    avatar_spawning: tokio::sync::Mutex<()>,
+    /// Le chien de garde de l'avatar n'est démarré qu'une fois.
+    avatar_watchdog: std::sync::atomic::AtomicBool,
+    /// Session vocale courante et instant du dernier échange. Portée par
+    /// `App`, et non par la boucle d'écoute : un arrêt puis une reprise de
+    /// l'écoute (bouton, réglage, micro) créait auparavant une boucle neuve
+    /// dont la session repartait de zéro — Jimmy « oubliait » la conversation
+    /// en cours. Voir `VOICE_SESSION_IDLE` (10 min).
+    pub voice_session: std::sync::Mutex<Option<(String, std::time::Instant)>>,
+    /// Arrêt d'urgence (« STOP », bouton « Arrêter ») : chaque demande
+    /// incrémente le compteur, les tâches en cours l'observent.
+    stop_signal: tokio::sync::watch::Sender<u64>,
+    /// Tâches de l'agent en cours (Chat et voix).
+    running: std::sync::atomic::AtomicUsize,
+}
+
+/// Compte une tâche en cours le temps de son exécution.
+struct RunningGuard<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> RunningGuard<'a> {
+    fn new(counter: &'a std::sync::atomic::AtomicUsize) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RunningGuard(counter)
+    }
+}
+
+impl Drop for RunningGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Prompts Whisper, un par rôle — mesurés, les deux serveurs ont des besoins
@@ -122,16 +160,27 @@ impl App {
         let tts = Tts::new(providers::tts::TtsProvider::FishAudio)?;
         let avatar = AvatarClient::new(&settings.avatar.host, settings.avatar.port)?;
 
-        let synaptiq = if settings.synaptiq.enabled && !secrets.synaptiq_api_key.is_empty() {
-            Some(Arc::new(SynaptiqClient::new(
-                &settings.synaptiq.base_url,
-                &secrets.synaptiq_api_key,
-                &secrets.synaptiq_agent_id,
-                settings.synaptiq.timeout_ms,
-            )?))
+        let vault = if settings.memory.enabled && settings.memory.vault_enabled {
+            memory::vault::Vault::open(&settings.memory.vault_path, &settings.memory.vault_folder)
+                .map(Arc::new)
         } else {
             None
         };
+        // Log clair : le vault est un chemin choisi par l'utilisateur, son
+        // absence doit se comprendre immédiatement.
+        match &vault {
+            Some(v) => {
+                log::info!("[vault] ouvert : {} ({} notes)", v.root().display(), v.count());
+            }
+            None => {
+                if settings.memory.enabled && !settings.memory.vault_path.trim().is_empty() {
+                    log::warn!(
+                        "[vault] introuvable : {} — souvenirs écrits dans le vault ignorés",
+                        settings.memory.vault_path
+                    );
+                }
+            }
+        }
 
         let registry = Arc::new(ToolRegistry::new());
         let http = reqwest::Client::builder()
@@ -154,6 +203,10 @@ impl App {
         // Les paramètres sont partagés dès maintenant : `mcp_add_server`
         // persiste les serveurs qu'il ajoute.
         let shared_settings = Arc::new(RwLock::new(settings.clone()));
+        // Outils MCP à la demande (voir `tools::mcp`) : leurs définitions ne
+        // partent plus à chaque appel au modèle.
+        registry.register(Arc::new(tools::mcp::McpListTools::new(Arc::downgrade(&registry))));
+        registry.register(Arc::new(tools::mcp::McpCall::new(Arc::downgrade(&registry))));
         registry.register(Arc::new(tools::mcp::McpAddServer::new(
             mcp.clone(),
             Arc::downgrade(&registry),
@@ -174,19 +227,93 @@ impl App {
             avatar,
             registry,
             mcp,
-            synaptiq,
+            vault,
             stt: tokio::sync::Mutex::new(None),
             stt_command: tokio::sync::Mutex::new(None),
             last_vad_threshold: Mutex::new(0.0),
             speaking: std::sync::atomic::AtomicBool::new(false),
             godot: tokio::sync::Mutex::new(None),
+            avatar_desired: std::sync::atomic::AtomicBool::new(false),
+            avatar_spawning: tokio::sync::Mutex::new(()),
+            avatar_watchdog: std::sync::atomic::AtomicBool::new(false),
+            voice_session: std::sync::Mutex::new(None),
+            stop_signal: tokio::sync::watch::channel(0).0,
+            running: std::sync::atomic::AtomicUsize::new(0),
         }))
+    }
+
+    /// Arrêt d'urgence : la tâche en cours (Chat ou voix) est abandonnée — ses
+    /// commandes en cours sont tuées (`kill_on_drop`) — et Jimmy se tait.
+    /// Renvoie `true` s'il y avait quelque chose à arrêter.
+    pub fn request_stop(&self) -> bool {
+        let busy = self.is_busy();
+        self.stop_signal.send_modify(|generation| *generation += 1);
+        voice::interrupt_playback();
+        log::info!("[agent] arrêt d'urgence demandé (tâche ou parole en cours : {busy})");
+        busy
+    }
+
+    /// Une tâche tourne, ou Jimmy parle.
+    pub fn is_busy(&self) -> bool {
+        self.running.load(std::sync::atomic::Ordering::Relaxed) > 0
+            || self.speaking.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Nombre d'arrêts demandés depuis le lancement (sert à savoir si un arrêt
+    /// a eu lieu pendant une opération).
+    pub fn stop_generation(&self) -> u64 {
+        *self.stop_signal.borrow()
+    }
+
+    /// Exécute une tâche de l'agent qu'un arrêt d'urgence peut interrompre :
+    /// `Error::Cancelled` dès que `request_stop` est appelé.
+    pub async fn cancellable<T>(&self, task: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+        let _running = RunningGuard::new(&self.running);
+        let mut stop = self.stop_signal.subscribe();
+        stop.borrow_and_update();
+        tokio::select! {
+            biased;
+            _ = stop.changed() => Err(Error::Cancelled),
+            result = task => result,
+        }
     }
 
     /// Connecte les serveurs MCP configurés et ajoute leurs outils au
     /// registre. Renvoie le nombre d'outils ajoutés.
     pub async fn start_mcp(&self) -> usize {
         tools::mcp::connect_all(&self.mcp, &self.registry).await
+    }
+
+    /// Serveurs MCP pour l'interface (Skills → Serveurs MCP) : ceux du
+    /// registre avec leur état réel et leurs outils, puis ceux désactivés dans
+    /// la configuration (absents du registre, mais l'utilisateur doit les voir).
+    pub fn mcp_overview(&self) -> Vec<mcp::McpServerStatus> {
+        let tools: Vec<(String, String)> = self
+            .registry
+            .specs()
+            .into_iter()
+            .filter(|t| t.name.starts_with("mcp_"))
+            .map(|t| (t.name, t.description))
+            .collect();
+        let mut servers = self.mcp.status(&tools);
+        for config in self.settings().mcp_servers.iter().filter(|s| !s.enabled) {
+            if servers.iter().any(|s| s.name == config.name) {
+                continue;
+            }
+            servers.push(mcp::McpServerStatus {
+                name: config.name.clone(),
+                transport: config.transport.clone(),
+                launch: if config.command.is_empty() {
+                    mcp::mask_command(std::slice::from_ref(&config.url))
+                } else {
+                    mcp::mask_command(&config.command)
+                },
+                env_keys: config.env.keys().cloned().collect(),
+                state: "disabled",
+                tools: Vec::new(),
+            });
+        }
+        servers
     }
 
     pub fn settings(&self) -> Settings {
@@ -231,11 +358,27 @@ impl App {
     /// Le mode développement lance l'application depuis le dossier de projet ;
     /// en installation, l'exécutable exporté est utilisé. Les deux passent par
     /// la même commande : seule la résolution du binaire change.
-    pub async fn start_avatar(&self) -> Result<()> {
+    ///
+    /// Si l'avatar meurt ensuite sans trace (processus tué, fenêtre fermée),
+    /// le chien de garde démarré ici le relance, tant que l'utilisateur n'a
+    /// pas demandé son arrêt explicitement.
+    pub async fn start_avatar(self: &Arc<Self>) -> Result<()> {
         let settings = self.settings();
         if !settings.avatar.enabled {
             return Ok(());
         }
+        self.avatar_desired
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = self.spawn_avatar(&settings).await;
+        self.start_avatar_watchdog();
+        result
+    }
+
+    /// Un seul lancement d'avatar à la fois : c'est la course entre deux
+    /// lancements simultanés qui tuait l'avatar vivant (voir le champ
+    /// `avatar_spawning`).
+    async fn spawn_avatar(&self, settings: &Settings) -> Result<()> {
+        let _spawn = self.avatar_spawning.lock().await;
         if self.avatar.is_up().await {
             return Ok(());
         }
@@ -272,26 +415,137 @@ impl App {
             .spawn()
             .map_err(|e| Error::Avatar(format!("lancement de Godot impossible : {e}")))?;
         log::info!("[avatar] Godot lancé ({})", exe.display());
-        {
-            let mut guard = self.godot.lock().await;
-            *guard = Some(child);
-        }
+        *self.godot.lock().await = Some(child);
 
-        // Godot a besoin d'une seconde pour ouvrir son port.
-        let avatar = &self.avatar;
+        // Godot a besoin d'une seconde pour ouvrir son port. On sort tôt si le
+        // processus meurt immédiatement (port déjà occupé, mauvais argument) :
+        // attendre 10 s sur un mort ne servait qu'à masquer la cause.
         for _ in 0..40 {
-            if avatar.is_up().await {
-                avatar.set_quality(&settings.avatar.quality).await;
+            if self.avatar.is_up().await {
+                self.avatar.set_quality(&settings.avatar.quality).await;
                 // Le skin est déjà passé en argument (`--skin`) : rien à renvoyer.
-                break;
+                return Ok(());
+            }
+            if let Some(status) = self.godot_exit().await {
+                self.godot.lock().await.take();
+                return Err(Error::Avatar(format!(
+                    "Godot s'est arrêté dès son lancement ({status}) : le port {} était peut-être déjà occupé",
+                    settings.avatar.port
+                )));
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
+        // Toujours en vie mais muet après 10 s (premier lancement, cache de
+        // shaders) : on laisse tourner, le chien de garde confirmera.
+        log::info!("[avatar] Godot vivant mais silencieux après 10 s");
         Ok(())
     }
 
+    /// Statut du processus Godot s'il est terminé, `None` s'il tourne ou
+    /// n'est pas lancé.
+    async fn godot_exit(&self) -> Option<std::process::ExitStatus> {
+        self.godot
+            .lock()
+            .await
+            .as_mut()?
+            .try_wait()
+            .ok()
+            .flatten()
+    }
+
+    /// Vrai si le processus Godot tient encore. Avant, un enfant terminé
+    /// restait stocké dans `godot` : l'interface affichait « avatar en
+    /// marche » pour un renard absent.
+    pub fn avatar_running(&self) -> bool {
+        self.godot
+            .try_lock()
+            .ok()
+            .and_then(|mut g| {
+                g.as_mut().map(|c| {
+                    c.try_wait()
+                        .map(|état| état.is_none())
+                        .unwrap_or(true)
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    /// Relance l'avatar tant que l'utilisateur le veut et qu'il a disparu.
+    /// Démarré une seule fois, au premier démarrage d'avatar.
+    fn start_avatar_watchdog(self: &Arc<Self>) {
+        if self
+            .avatar_watchdog
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        let app = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut échecs = 0u32;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if !app
+                    .avatar_desired
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    continue;
+                }
+                // L'avatar en service est la vérité, pas l'enfant stocké : un
+                // Godot orphelin d'une précédente instance répond déjà, et un
+                // lancement peut être en cours. Sans ce test, le chien de
+                // garde loguait « absent » toutes les 5 s pour un avatar
+                // parfaitement visible.
+                if app.avatar.is_up().await {
+                    échecs = 0;
+                    continue;
+                }
+                // Enfant vivant mais muet (premier lancement, cache de
+                // shaders) : on patiente, on ne le tue pas.
+                let enfant_vivant = {
+                    let mut guard = app.godot.lock().await;
+                    guard
+                        .as_mut()
+                        .map(|c| c.try_wait().ok().flatten().is_none())
+                        .unwrap_or(false)
+                };
+                if enfant_vivant {
+                    continue;
+                }
+                let mut message =
+                    "Godot absent alors qu'il est demandé ; lancement".to_string();
+                if let Some(status) = app.godot_exit().await {
+                    message =
+                        format!("Godot s'est arrêté ({status}) ; relance automatique");
+                }
+                log::warn!("[avatar] {message}");
+                let settings = app.settings();
+                match app.spawn_avatar(&settings).await {
+                    Ok(()) => échecs = 0,
+                    Err(error) => {
+                        échecs = (échecs + 1).min(12);
+                        log::warn!(
+                            "[avatar] relance impossible (essai {}) : {error}",
+                            échecs
+                        );
+                        // Retour croissant : une configuration cassée ne doit
+                        // pas inonder le journal toutes les 5 s.
+                        tokio::time::sleep(std::time::Duration::from_secs(
+                            5u64.saturating_mul(échecs as u64),
+                        ))
+                        .await;
+                    }
+                }
+            }
+        });
+    }
+
     pub async fn stop_avatar(&self) {
+        self.avatar_desired
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         let mut guard = self.godot.lock().await;
+        if guard.is_some() {
+            log::info!("[avatar] arrêt demandé");
+        }
         if let Some(mut child) = guard.take() {
             let _ = child.kill().await;
         }
@@ -427,8 +681,14 @@ impl App {
 
         self.speaking.store(true, std::sync::atomic::Ordering::Relaxed);
         let started = std::time::Instant::now();
+        // Un « STOP » pendant la lecture coupe le reste de la réponse.
+        let generation = self.stop_generation();
         let mut next = parts.first().cloned().map(&synth);
         for index in 0..parts.len() {
+            if self.stop_generation() != generation {
+                log::info!("[tts] lecture arrêtée (arrêt d'urgence)");
+                break;
+            }
             let Some(pending) = next.take() else { break };
             let speech = match pending.await {
                 Ok(Ok(speech)) => speech,
@@ -445,6 +705,9 @@ impl App {
             }
             if speech.bytes.is_empty() {
                 continue;
+            }
+            if self.stop_generation() != generation {
+                break;
             }
             let bytes = speech.bytes;
             let rate = speech.sample_rate;
@@ -507,6 +770,26 @@ impl App {
     }
 
     /// Contexte d'outils prêt à l'emploi pour une demande.
+    /// Réglages et contexte d'outils pour une conversation : si elle est
+    /// rattachée à un projet (onglet Chat) qui existe, l'agent y travaille
+    /// (dossier de travail du prompt et des outils). Partagé par le Chat écrit
+    /// et la boucle vocale : avant, la voix ignorait le projet.
+    pub fn session_context(&self, session_id: &str) -> (Settings, tools::ToolContext) {
+        let mut settings = self.settings();
+        let mut context = self.tool_context();
+        if let Some(project) = self
+            .history
+            .project(session_id)
+            .ok()
+            .flatten()
+            .filter(|p| std::path::Path::new(p).is_dir())
+        {
+            settings.workspace = project.clone();
+            context.workspace = std::path::PathBuf::from(project);
+        }
+        (settings, context)
+    }
+
     pub fn tool_context(&self) -> tools::ToolContext {
         let settings = self.settings();
         tools::ToolContext {
@@ -514,7 +797,7 @@ impl App {
             permissions: self.permissions(),
             memory: self.memory.clone(),
             skills: self.skills.clone(),
-            synaptiq: self.synaptiq.clone(),
+            vault: self.vault.clone(),
         }
     }
 
@@ -524,8 +807,9 @@ impl App {
             history: self.history.clone(),
             memory: self.memory.clone(),
             skills: self.skills.clone(),
-            synaptiq: self.synaptiq.clone(),
+            vault: self.vault.clone(),
             registry: self.registry.clone(),
+            data_dir: self.paths.data.clone(),
             voice: false,
         })
     }
@@ -556,9 +840,11 @@ impl App {
                 "model": settings.tts.model,
                 "voice": settings.tts.voice,
                 "has_key": !self.secrets.openrouter_api_key.is_empty(),
-                "voices": TtsVoice::PRESETS.iter().map(|v| serde_json::json!({
-                    "id": v.id, "label": v.label, "description": v.description
-                })).collect::<Vec<_>>(),
+                // Voix prédéfinies puis celles de la bibliothèque.
+                "voices": TtsVoice::PRESETS.iter().map(|v| v.info())
+                    .chain(settings.tts.library.iter().cloned())
+                    .map(|v| serde_json::json!({ "id": v.id, "label": v.label, "description": v.description }))
+                    .collect::<Vec<_>>(),
             },
             "stt": {
                 "enabled": settings.stt.enabled,
@@ -580,7 +866,7 @@ impl App {
                 "dodge": settings.avatar.dodge,
                 "host": settings.avatar.host,
                 "port": settings.avatar.port,
-                "running": self.godot.try_lock().map(|g| g.is_some()).unwrap_or(false),
+                "running": self.avatar_running(),
             },
             "memory": {
                 "enabled": settings.memory.enabled,
@@ -588,10 +874,11 @@ impl App {
                 "semantic_model": self.memory.semantic_model(),
                 "has_fts": self.db.lock().map(|db| db.has_fts()).unwrap_or(false),
             },
-            "synaptiq": {
-                "enabled": settings.synaptiq.enabled,
-                "configured": self.synaptiq.is_some(),
-                "base_url": settings.synaptiq.base_url,
+            "vault": {
+                "enabled": settings.memory.enabled && settings.memory.vault_enabled && self.vault.is_some(),
+                "path": settings.memory.vault_path,
+                "folder": settings.memory.vault_folder,
+                "notes": self.vault.as_ref().map(|v| v.count()).unwrap_or(0),
             },
             "permissions": self.load_permissions().summary()
                 .iter()

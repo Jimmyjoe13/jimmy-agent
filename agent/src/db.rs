@@ -13,7 +13,7 @@ use crate::error::Result;
 /// Version 2 : table `memory_semantic` (embeddings LM Studio). Toute table
 /// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
 /// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub struct Db {
     conn: Connection,
@@ -59,7 +59,8 @@ impl Db {
                 id          TEXT PRIMARY KEY,
                 title       TEXT NOT NULL DEFAULT 'Nouvelle session',
                 created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
+                updated_at  TEXT NOT NULL,
+                project     TEXT
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -149,6 +150,17 @@ impl Db {
             "#,
         );
 
+        // v3 : projet (dossier) rattaché à une conversation, onglet Chat. Une
+        // base v2 a déjà la table : `CREATE TABLE IF NOT EXISTS` n'y ajoute
+        // pas la colonne (piège 30), d'où l'ALTER explicite.
+        let has_project = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'project'")?
+            .exists([])?;
+        if !has_project {
+            self.conn.execute_batch("ALTER TABLE sessions ADD COLUMN project TEXT;")?;
+        }
+
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -174,6 +186,32 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une base v2 (sessions sans colonne `project`) doit la recevoir.
+    #[test]
+    fn migration_v2_vers_v3_ajoute_le_projet_des_sessions() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-v3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v2.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'x', \
+                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL); \
+                 INSERT INTO sessions VALUES ('s1', 't', 'a', 'a'); PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        let project: Option<String> = db
+            .conn()
+            .query_row("SELECT project FROM sessions WHERE id = 's1'", [], |r| r.get(0))
+            .expect("la colonne project doit exister");
+        assert!(project.is_none(), "les sessions existantes n'ont pas de projet");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Une base créée en version 1 (sans `memory_semantic`) doit recevoir la
     /// table à l'ouverture.

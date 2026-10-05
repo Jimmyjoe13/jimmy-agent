@@ -56,6 +56,10 @@ pub enum Error {
     #[error("timeout")]
     Timeout,
 
+    /// Tâche arrêtée par l'utilisateur (« STOP » ou bouton « Arrêter »).
+    #[error("arrêté à la demande de l'utilisateur")]
+    Cancelled,
+
     #[error("chemin introuvable : {0}")]
     PathNotFound(PathBuf),
 }

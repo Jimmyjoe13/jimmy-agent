@@ -2,5 +2,6 @@
 
 pub mod agent;
 pub mod history;
+pub mod inline_tools;
 pub mod prompt;
 pub mod types;

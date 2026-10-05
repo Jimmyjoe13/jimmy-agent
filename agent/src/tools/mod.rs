@@ -36,7 +36,7 @@ pub struct ToolContext {
     pub permissions: Arc<RwLock<Permissions>>,
     pub memory: Arc<MemoryStore>,
     pub skills: Arc<crate::skills::SkillStore>,
-    pub synaptiq: Option<Arc<crate::synaptiq::SynaptiqClient>>,
+    pub vault: Option<Arc<crate::memory::vault::Vault>>,
 }
 
 impl ToolContext {
@@ -144,8 +144,9 @@ impl ToolRegistry {
         self.register(Arc::new(net::OpenBrowser));
         self.register(Arc::new(knowledge::SearchMemory));
         self.register(Arc::new(knowledge::Remember));
-        self.register(Arc::new(knowledge::SynaptiqSearch));
-        self.register(Arc::new(knowledge::SynaptiqRemember));
+        self.register(Arc::new(knowledge::VaultSearch));
+        self.register(Arc::new(knowledge::VaultRead));
+        self.register(Arc::new(knowledge::VaultWrite));
         self.register(Arc::new(skills::ListSkills));
         self.register(Arc::new(skills::ReadSkill));
         self.register(Arc::new(skills::CreateSkill));

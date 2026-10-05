@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::core::types::{Message, Role};
@@ -25,6 +25,8 @@ pub struct SessionSummary {
     pub created_at: String,
     pub updated_at: String,
     pub message_count: i64,
+    /// Dossier du projet de la conversation (onglet Chat), s'il y en a un.
+    pub project: Option<String>,
 }
 
 impl History {
@@ -149,11 +151,77 @@ impl History {
         Ok(out)
     }
 
+    /// Résumé compact des outils appelés pendant les `turns` derniers tours :
+    /// nom, arguments et début du résultat, une ligne par appel.
+    ///
+    /// `conversation` ne renvoie jamais les messages d'outils (piège 45 : l'API
+    /// refuse une séquence incomplète, et les résultats bruts faisaient passer
+    /// le contexte de 3 k à 15 k jetons). Mais sans aucune trace, le modèle
+    /// oubliait au tour suivant ce que ses outils avaient trouvé. Ce résumé va
+    /// dans le prompt système : aucun risque de séquence invalide, et un coût
+    /// borné par `max_chars` (≈ 400 jetons pour 1 500 caractères).
+    pub fn tool_digest(&self, session_id: &str, turns: usize, max_chars: usize) -> Result<Option<String>> {
+        // Découpage en tours : chaque message de l'utilisateur en ouvre un.
+        let mut tours: Vec<(String, Vec<String>)> = Vec::new();
+        let mut pending: std::collections::VecDeque<(String, String)> = Default::default();
+        for message in self.messages(session_id, usize::MAX)? {
+            match message.role {
+                Role::User => {
+                    tours.push((one_line(&message.content, DIGEST_REQUEST_CHARS), Vec::new()));
+                    pending.clear();
+                }
+                Role::Assistant => {
+                    for call in message.tool_calls.unwrap_or_default() {
+                        let args = serde_json::to_string(&call.arguments).unwrap_or_default();
+                        pending.push_back((call.name, one_line(&args, DIGEST_ARGS_CHARS)));
+                    }
+                }
+                Role::Tool => {
+                    // Les résultats sont enregistrés dans l'ordre des appels.
+                    let (name, args) = pending
+                        .pop_front()
+                        .unwrap_or_else(|| (message.name.clone().unwrap_or_default(), String::new()));
+                    if let Some((_, lines)) = tours.last_mut() {
+                        lines.push(format!("  - {name} {args} → {}", one_line(&message.content, DIGEST_RESULT_CHARS)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let start = tours.len().saturating_sub(turns);
+        // Du plus récent au plus ancien : si le budget est dépassé, ce sont les
+        // tours anciens qui sautent.
+        let header = "## Travail récent dans cette session\nOutils déjà appelés (résultats abrégés). Appuie-toi dessus pour comprendre la suite de la conversation ; relance un outil seulement si le détail te manque.";
+        let mut blocks: Vec<String> = Vec::new();
+        let mut used = header.chars().count();
+        for (request, lines) in tours[start..].iter().rev().filter(|(_, lines)| !lines.is_empty()) {
+            let mut block = format!("- Demande « {request} » :");
+            for line in lines.iter().take(DIGEST_CALLS_PER_TURN) {
+                block.push('\n');
+                block.push_str(line);
+            }
+            if lines.len() > DIGEST_CALLS_PER_TURN {
+                block.push_str(&format!("\n  - … et {} autre(s) appel(s)", lines.len() - DIGEST_CALLS_PER_TURN));
+            }
+            let size = block.chars().count() + 1;
+            if used + size > max_chars {
+                break;
+            }
+            used += size;
+            blocks.push(block);
+        }
+        if blocks.is_empty() {
+            return Ok(None);
+        }
+        blocks.reverse();
+        Ok(Some(format!("{header}\n{}", blocks.join("\n"))))
+    }
+
     pub fn sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn.conn().prepare(
             "SELECT s.id, s.title, s.created_at, s.updated_at,
-                    (SELECT count(*) FROM messages m WHERE m.session_id = s.id)
+                    (SELECT count(*) FROM messages m WHERE m.session_id = s.id), s.project
              FROM sessions s ORDER BY s.updated_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |row: &Row| {
@@ -163,8 +231,44 @@ impl History {
                 created_at: row.get(2)?,
                 updated_at: row.get(3)?,
                 message_count: row.get(4)?,
+                project: row.get(5)?,
             })
         })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Rattache (ou détache, `None`) un projet à une conversation : l'agent y
+    /// travaille alors (dossier de travail de ses outils).
+    pub fn set_project(&self, session_id: &str, project: Option<&str>) -> Result<()> {
+        let project = project.map(str::trim).filter(|p| !p.is_empty());
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET project = ?2 WHERE id = ?1",
+            params![session_id, project],
+        )?;
+        Ok(())
+    }
+
+    /// Projet d'une conversation.
+    pub fn project(&self, session_id: &str) -> Result<Option<String>> {
+        let conn = self.db.lock().unwrap();
+        let project = conn
+            .conn()
+            .query_row("SELECT project FROM sessions WHERE id = ?1", params![session_id], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .optional()?
+            .flatten();
+        Ok(project)
+    }
+
+    /// Projets utilisés récemment, du plus récent au plus ancien, sans doublon.
+    pub fn recent_projects(&self, limit: usize) -> Result<Vec<String>> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn.conn().prepare(
+            "SELECT project FROM sessions WHERE project IS NOT NULL AND project != ''
+             GROUP BY project ORDER BY max(updated_at) DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -175,6 +279,22 @@ impl History {
         )?;
         Ok(())
     }
+}
+
+/// Budgets du résumé des outils récents (`History::tool_digest`).
+const DIGEST_REQUEST_CHARS: usize = 70;
+const DIGEST_ARGS_CHARS: usize = 90;
+const DIGEST_RESULT_CHARS: usize = 110;
+const DIGEST_CALLS_PER_TURN: usize = 5;
+
+/// Texte sur une ligne (blancs fusionnés), tronqué à `max` caractères.
+fn one_line(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let kept: String = flat.chars().take(max).collect();
+    format!("{kept}…")
 }
 
 #[cfg(test)]
@@ -206,6 +326,59 @@ mod tests {
             h.append(session, &Message::tool_result(format!("call_{i}"), "list_directory", "contenu")).unwrap();
         }
         h.append(session, &Message::assistant(reponse)).unwrap();
+    }
+
+    /// Cas réel du 4 octobre : au tour suivant, le modèle ne savait plus ce
+    /// que ses outils avaient trouvé (« installe-le » → « installer quoi ? »).
+    /// Le résumé des outils récents redonne ce contexte, en peu de caractères.
+    #[test]
+    fn le_resume_des_outils_recents_est_compact_et_borne() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        assert!(h.tool_digest(&s, 3, 1500).unwrap().is_none(), "session vide : rien");
+        tour_avec_outils(&h, &s, "Tour ancien", "Ok.", 2);
+        for i in 0..3 {
+            tour_avec_outils(&h, &s, &format!("Inspecte le skill {i}"), "Voilà.", 2);
+        }
+        // Un résultat d'outil très long ne doit pas passer en entier.
+        h.append(&s, &Message::user("Lis le gros fichier")).unwrap();
+        let mut appel = Message::assistant("");
+        appel.tool_calls = Some(vec![ToolCall {
+            id: "c".into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({ "path": "C:\\gros.txt" }),
+        }]);
+        h.append(&s, &appel).unwrap();
+        h.append(&s, &Message::tool_result("c", "read_file", "x".repeat(20_000))).unwrap();
+        h.append(&s, &Message::assistant("Fini.")).unwrap();
+
+        let digest = h.tool_digest(&s, 3, 1500).unwrap().expect("résumé");
+        assert!(digest.contains("read_file"), "{digest}");
+        assert!(digest.contains("gros.txt"), "les arguments sont gardés : {digest}");
+        assert!(digest.contains("list_directory"), "{digest}");
+        // Seuls les 3 derniers tours : le tour ancien n'y est plus.
+        assert!(!digest.contains("Tour ancien"), "{digest}");
+        assert!(digest.chars().count() <= 1500, "{} caractères", digest.chars().count());
+        assert!(!digest.contains(&"x".repeat(300)), "résultat d'outil non tronqué");
+    }
+
+    #[test]
+    fn une_conversation_garde_son_projet_et_les_projets_recents_sont_listes() {
+        let h = history();
+        let a = h.create_session("a").unwrap();
+        let b = h.create_session("b").unwrap();
+        assert_eq!(h.project(&a).unwrap(), None);
+        h.set_project(&a, Some("C:\\Users\\jimmy\\Projet\\alpha")).unwrap();
+        h.set_project(&b, Some("C:\\Users\\jimmy\\Projet\\beta")).unwrap();
+        h.append(&b, &Message::user("salut")).unwrap();
+        assert_eq!(h.project(&a).unwrap().as_deref(), Some("C:\\Users\\jimmy\\Projet\\alpha"));
+        let recents = h.recent_projects(10).unwrap();
+        assert_eq!(recents.len(), 2);
+        assert!(recents[0].ends_with("beta"), "le plus récent d'abord : {recents:?}");
+        // Détacher, et un projet vide ne compte pas.
+        h.set_project(&a, Some("  ")).unwrap();
+        assert_eq!(h.project(&a).unwrap(), None);
+        assert_eq!(h.sessions(10).unwrap().iter().find(|s| s.id == b).unwrap().project.as_deref(), Some("C:\\Users\\jimmy\\Projet\\beta"));
     }
 
     /// La conversation ne contient jamais d'outil : ni appel, ni résultat.

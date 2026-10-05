@@ -205,8 +205,8 @@ pub enum AgentEvent {
     },
     /// Mémoire consultée ou écrite.
     Memory { action: String, detail: String },
-    /// Synaptiq consulté ou alimenté.
-    Synaptiq { action: String, detail: String },
+    /// Vault Obsidian consulté ou alimenté.
+    Vault { action: String, detail: String },
     /// Un skill a été chargé ou créé.
     Skill { action: String, name: String },
     /// Réponse finale prête.
@@ -215,7 +215,14 @@ pub enum AgentEvent {
     Notice { message: String },
     /// Commande dite à voix haute, telle que transmise à l'agent : affichée
     /// dans le chat comme un message de l'utilisateur.
-    Spoken { text: String },
+    /// `session_id` : la session vocale, que le Chat adopte pour afficher la
+    /// conversation et y rattacher un projet (sans lui, le projet choisi dans
+    /// le Chat pendant une conversation vocale se perdait).
+    Spoken { text: String, session_id: String },
+    /// Où en est une longue tâche (« Je lis config.py. »), dit à voix haute de
+    /// temps en temps pendant une conversation vocale : une tâche de code prend
+    /// plusieurs minutes, le silence ressemblait à une panne.
+    Progress { text: String },
     /// Où en est l'écoute, pour que l'utilisateur sache toujours ce que Jimmy
     /// attend de lui. `phase` : `idle` (en veille), `capturing` (je t'entends),
     /// `transcribing`, `your_turn` (à toi, `remaining` ms pour commencer),

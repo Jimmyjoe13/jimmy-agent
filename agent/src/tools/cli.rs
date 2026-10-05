@@ -23,7 +23,7 @@ impl Tool for RunCommand {
         "run_command"
     }
     fn description(&self) -> &str {
-        "Exécute une commande dans le terminal Windows (PowerShell) et renvoie stdout, stderr et le code de sortie. Utilise cet outil pour compiler, tester,/versionner ou inspecter."
+        "Exécute une commande dans le terminal Windows (PowerShell) et renvoie stdout, stderr et le code de sortie. Utilise cet outil pour compiler, tester, versionner ou inspecter. La commande est DÉJÀ exécutée par PowerShell : ne l'enveloppe jamais dans « powershell -Command \"…\" » (les variables $ seraient vidées). Pour lire un fichier, préfère read_file."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(

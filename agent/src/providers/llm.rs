@@ -66,6 +66,8 @@ pub struct Usage {
 pub struct LlmReply {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
+    /// Réponse coupée par la limite de longueur (`finish_reason = "length"`).
+    pub truncated: bool,
     pub usage: Usage,
 }
 
@@ -179,6 +181,7 @@ impl LlmClient {
             .next()
             .ok_or_else(|| Error::provider("OpenCode Go", "aucun choix dans la réponse"))?;
 
+        let truncated = choice.finish_reason.as_deref() == Some("length");
         let mut tool_calls = Vec::new();
         for call in choice.message.tool_calls.unwrap_or_default() {
             let arguments = if call.function.arguments.trim().is_empty() {
@@ -196,6 +199,7 @@ impl LlmClient {
         Ok(LlmReply {
             content: choice.message.content.unwrap_or_default(),
             tool_calls,
+            truncated,
             usage: Usage {
                 prompt_tokens: parsed.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0),
                 completion_tokens: parsed.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0),
@@ -455,6 +459,8 @@ struct ChatResponse {
 #[derive(Deserialize)]
 struct Choice {
     message: MessageRaw,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
