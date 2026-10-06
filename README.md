@@ -40,12 +40,14 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Bulle de dialogue | ✅ affichage, auto-masquage, parole synchronisée | `POST /say` + capture |
 | Clic sur l'avatar | ✅ ouvre l'interface Tauri | pont HTTP 8790 |
 | Communication Tauri ↔ Godot | ✅ HTTP local, 6 routes | tests `curl` sur 8787 |
-| Chat texte + LLM | ✅ OpenCode Go, outils, réponse en français | `agent/tests/happy_path.rs` |
+| Chat texte + LLM | ✅ OpenCode Go, outils, réponse en français, **écrite en direct** (flux SSE) | `agent/tests/happy_path.rs` |
+| Formats d'API des modèles | ✅ Chat, Responses (Muse Spark, GPT, Grok) et Messages (Qwen 3.7+, MiniMax), choisis d'après le catalogue | `agent/tests/protocols.rs` (un vrai modèle par format) |
+| Fichiers sensibles | ✅ toute **écriture** dans un `.env`, une clé, un secret attend ton accord (carte dans le Chat) ; la lecture reste libre | tests `sensitive` + suite d'interface |
 | **Loop agentique** | ✅ outils enchaînés, erreurs relues, itérations | test happy path (4 appels d'outils) |
 | Outils fichiers | ✅ lister, lire, écrire, chercher | test happy path |
 | Outil CLI | ✅ PowerShell, stdout/stderr, code de sortie | test happy path |
 | Permissions | ✅ LECTURE / MODIFICATION / EXÉCUTION / RÉSEAU | 4 tests unitaires |
-| Mémoire locale | ✅ vectorielle + FTS5, apprentissage auto | 3 tests unitaires + test happy path |
+| Mémoire locale | ✅ vectorielle (embeddings LM Studio, repli par hachage) + FTS5, apprentissage auto | tests unitaires + `--test memory_semantic` |
 | Skills | ✅ création, lecture, amélioration, suggestion | 3 tests unitaires |
 | Vault Obsidian | ✅ lecture plein texte du vault, écriture des souvenirs en notes | recherche réelle sur le vault `C:\Obsidian\Jimmy` |
 | Vault — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
@@ -56,7 +58,8 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Lecture audio | ✅ cpal, rééchantillonnage si la carte son diffère | `test audio` |
 | Boucle vocale | ✅ wake → STT → agent → voix → avatar | `voice/listener.rs` |
 | Profils graphiques | ✅ `low` / `medium` / `high` appliqués à Godot | logs `[godot/main]` |
-| Diagnostic | ✅ 7 vérifications, chemins, secrets | vue Diagnostic |
+| Diagnostic | ✅ 8 vérifications, chemins, secrets | vue Diagnostic |
+| Interface | ✅ 26 parcours sur la vraie application (Chat, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
 
 ### Chiffres mesurés sur cette machine
 
@@ -252,16 +255,16 @@ contient que les secrets.
 OPENCODE_API_KEY=sk-...          # OpenCode Go
 OPENROUTER_API_KEY=sk-or-v1-...  # Fish Audio (voix)
 
-# Optionnels
+# Optionnels (valeurs de départ : ensuite, tout se choisit dans l'interface)
 JIMMY_LLM_MODEL=space-bunny-free
-JIMMY_TTS_VOICE=5567200c7d8341738f0892bbacd3be3c
+JIMMY_TTS_VOICE=4f2a0684dd0247dda68f339738c780e6
 JIMMY_STT_LANGUAGE=fr
-SYNAPTIQ_API_URL=http://127.0.0.1:8000
-SYNAPTIQ_API_KEY=...
 JIMMY_LOG=info
 ```
 
-`.env` est dans `.gitignore` et ne doit jamais être commité.
+`.env` est dans `.gitignore` et ne doit jamais être commité. Le modèle et la
+voix ne sont lus dans `.env` qu'au premier lancement : ensuite, le choix fait
+dans **Paramètres** (bibliothèque de modèles) et **Voix** est conservé.
 
 ### Variables d'environnement lues par le code
 
@@ -277,16 +280,17 @@ JIMMY_LOG=info
 
 ### Voix
 
-Deux voix françaises sont proposées :
+La voix se choisit dans la vue **Voix** : bibliothèque du catalogue Fish Audio,
+avec recherche et écoute avant choix. Voix de départ :
 
 | Voix | Identifiant | Caractère |
 |---|---|---|
-| **Féminine** (défaut) | `5567200c7d8341738f0892bbacd3be3c` | calme, posée — validée à l'essai |
+| **Le narrateur** (défaut, choisi le 4 octobre) | `4f2a0684dd0247dda68f339738c780e6` | grave, posée |
+| **Féminine** | `5567200c7d8341738f0892bbacd3be3c` | calme, posée |
 | **Clémence** | `a288bdc744da4ad194921adad6863175` | douce, claire |
 
-> Le PLAN.md désigne « Clémence » ; le réglage effectivement validé sur cette
-> machine (skill `synthese-vocale-fr`, 2 octobre 2026) est la voix « Féminine ».
-> Les deux restent disponibles dans les paramètres.
+> Le PLAN.md désignait « Clémence » ; « Féminine » a été la voix par défaut
+> jusqu'au 4 octobre, puis « Le narrateur ».
 
 **L'écoute permanente** se pilote depuis la vue **Voix** — bouton « Activer
 l'écoute » — et s'active automatiquement à la fin de l'onboarding. Tant qu'elle
@@ -357,7 +361,16 @@ automatiquement après l'onboarding). Sinon Jimmy reste muet : c'est voulu.
 ### Tests automatisés
 
 ```powershell
-.\scripts\with-msvc.ps1 cargo test     # 35 tests unitaires
+.\scripts\with-msvc.ps1 cargo test --workspace   # 151 tests unitaires (6 octobre), 0 avertissement
+.\scripts\test-ui.ps1                            # 26 parcours sur la vraie application
+```
+
+Les tests qui consultent de vrais services sont marqués `#[ignore]` et se
+lancent explicitement (le `'--'` entre guillemets : PowerShell avale le `--`
+nu), par exemple les trois formats d'API des modèles :
+
+```powershell
+.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test protocols '--' --ignored --nocapture
 ```
 
 ---
@@ -377,29 +390,33 @@ automatiquement après l'onboarding). Sinon Jimmy reste muet : c'est voulu.
 
 Ces points sont assumés pour la V1 et documentés plutôt que masqués :
 
-1. **Mémoire vectorielle par hachage.** Le moteur (`memory/embed.rs`) projette
-   les termes dans 512 dimensions par hachage. C'est local, rapide et sans
-   dépendance, mais ce n'est **pas** un modèle sémantique : « voiture » et
-   « véhicule » ne se rapprochent pas. Le classement est compensé par une
-   recherche FTS5 lexicale. Le trait `MemoryStore` est le seul point à
-   réécrire pour adopter un vrai modèle d'embeddings.
+1. **Mémoire sémantique dépendante de LM Studio.** Les embeddings viennent de
+   LM Studio (`memory/semantic.rs`) ; s'il est éteint, Jimmy retombe sur le
+   hachage 512 dimensions (`memory/embed.rs`), local mais **non** sémantique
+   (« voiture » et « véhicule » ne se rapprochent pas), compensé par la
+   recherche lexicale FTS5.
 
-2. **Skin unique.** L'architecture prévoit d'autres skins ; seul le renard est
-   implémenté. Le chargeur lit `--skin=` et le chemin de chargement est isolé.
+2. **Skins procéduraux.** Cinq skins (renard, arctique, fennec, ours, robot),
+   construits par primitives Godot : aucun modèle 3D externe.
 
-3. **Mise à jour automatique non branchée.** Il n'existe pas de source de
+3. **Fichiers sensibles : détection par motifs.** Le garde-fou repère les
+   écritures dans les `.env`, clés et secrets d'après la commande ; un script
+   intermédiaire qui ne nomme pas le fichier y échappe. Ce n'est pas un bac à
+   sable.
+
+4. **Mise à jour automatique non branchée.** Il n'existe pas de source de
    distribution publique pour un prototype personnel. La commande
    `check_update` est écrite et branchée sur `JIMMY_UPDATE_ENDPOINT` ; sans
    cette variable, elle le dit clairement plutôt que de faire semblant.
 
-4. **Pas d'export Godot.** L'avatar tourne depuis le projet en mode
+5. **Pas d'export Godot.** L'avatar tourne depuis le projet en mode
    développement. L'export (gabarits ~1 Go) n'a pas été fait : le prototype
    fonctionne en l'état, l'installateur installera l'exécutable pré-compilé.
 
-5. **MCP : stdit seule.** Le client MCP implémente le transport stdio, le plus
+6. **MCP : stdio seule.** Le client MCP implémente le transport stdio, le plus
    répandu. Le transport HTTP streamable n'est pas implémenté.
 
-6. **Latence du modèle STT.** `base-q5` (1,3 s) est le défaut pour le wake
+7. **Latence du modèle STT.** `base-q5` (1,3 s) est le défaut pour le wake
    word ; `small-q5` (4,7 s) est plus précis sur le français. Les deux sont
    sélectionnables dans les paramètres.
 

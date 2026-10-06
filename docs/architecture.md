@@ -174,15 +174,14 @@ requête → vecteur 512 dim ── similarité cosinus ──┐
 requête → FTS5        ── score BM25             ──┴─▶ score pondéré par importance
 ```
 
-Le vecteur vient d'un **vectoriseur de hachage** : normalisation (minuscules,
-sans accents), mots + trigrammes, projection par hachage FNV-1a, poids `tf`
-sous-linéaire, normalisation L2. Zéro dépendance, quelques microsecondes.
-
-Ce n'est **pas** un modèle sémantique. C'est un choix assumé,dicté par les
-priorités du PLAN (simplicité, performance, maintenance) et par le fait qu'un
-modèle d'embeddings ajouterait plusieurs centaines de mégaoctets pour un gain
-marginal sur un prototype personnel. La compensation est la recherche lexicale
-FTS5, et le remplacement est localisé à `MemoryStore`.
+Le vecteur vient d'abord de **LM Studio** (`memory/semantic.rs`, même modèle
+d'embeddings que SynaptiQ) : « véhicule » retrouve « voiture ». LM Studio est
+facultatif : s'il ne répond pas, Jimmy retombe sur le **vectoriseur de
+hachage** (`memory/embed.rs`) — normalisation (minuscules, sans accents), mots
++ trigrammes, projection FNV-1a, poids `tf` sous-linéaire, normalisation L2.
+Zéro dépendance, quelques microsecondes, mais **pas** sémantique ; la
+recherche lexicale FTS5 compense. Ne pas retirer ce repli : c'est lui qui
+garde la mémoire utilisable service éteint.
 
 ### Apprentissage automatique
 
@@ -277,6 +276,19 @@ changer les appelants.
 droit nouveau. Les skills passent par exactement les mêmes vérifications que
 n'importe quel outil.
 
+### Fichiers sensibles : l'accord au cas par cas
+
+Les permissions ci-dessus sont accordées une fois pour toutes ; elles ne
+distinguent pas un `.env` d'un fichier de code. `agent/src/sensitive.rs`
+ajoute une seconde barrière, appelée dans la boucle avant chaque outil : une
+**écriture** repérée dans un fichier sensible (`.env*`, clés, `secret*`,
+`credential*`, dossiers `.ssh/`, `secure/`…) — par `write_file`, une commande
+PowerShell, une commande distante MCP (`vps_exec`, `ssh`, `docker`…) ou un
+envoi de fichier — suspend l'outil et émet `AgentEvent::Approval`. Le Chat
+affiche une carte « Autoriser / Refuser » ; refus, 5 min sans réponse ou
+demande vocale (personne pour cliquer) = outil non exécuté. La lecture reste
+libre. Détection par motifs, pas un bac à sable (HANDOFF, piège 77).
+
 ---
 
 ## 8. Frontend : TypeScript sans framework
@@ -302,11 +314,11 @@ change de nom, il n'y a qu'un fichier à corriger.
 | Clic sur Jimmy ouvre l'interface | ✅ pont HTTP | — |
 | Trois niveaux graphiques | ✅ `low`/`medium`/`high` | — |
 | Webcam / streaming vidéo | ❌ hors périmètre prototype | — |
-| Provider LLM configurable | ✅ catalogue OpenCode Go, sélection en direct | — |
-| Mémoire vectorielle locale | ✅ hachage 512 dim + FTS5 | pas d'embeddings sémantiques |
+| Provider LLM configurable | ✅ catalogue OpenCode Go, sélection en direct, trois formats d'API (Chat, Responses, Messages) | — |
+| Mémoire vectorielle locale | ✅ embeddings LM Studio, repli hachage 512 dim, + FTS5 | sémantique seulement si LM Studio tourne |
 | Skills auto-créés | ✅ | — |
 | MCP | ✅ client stdio | pas de transport HTTP, pas de marketplace |
 | Vault Obsidian dynamique | ✅ heuristique documentée, lecture du vault, écriture des souvenirs | — |
-| Voix « Clémence » | ✅ deux voix, « Féminine » par défaut | voir README |
+| Voix « Clémence » | ✅ bibliothèque Fish Audio, « Le narrateur » par défaut | voir README |
 | Installateur qui vérifie les prérequis | ✅ `scripts/install.ps1` | pas d'export Godot ni d'installateur NSIS signé |
 | Mise à jour automatique | ⚠️ commande écrite, sans source branchée | pas de distribution publique |

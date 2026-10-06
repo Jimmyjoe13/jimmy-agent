@@ -152,7 +152,7 @@ Jimmy est une application que l'utilisateur **utilise en direct**.
 ## 5. Secrets
 
 - **Aucun secret dans un prompt, un commit, un journal, une réponse.** Clés et
-  cookies vivent dans `C:\Users\user\.secrets\<service>.json`, hors dépôt.
+  cookies vivent dans `%USERPROFILE%\.secrets\<service>.json`, hors dépôt.
 - Lecture ciblée d'une seule valeur ; ne jamais afficher le fichier entier.
 - Un secret exposé : révoquer côté service d'abord, régénérer, nettoyer ensuite.
 - `JIMMY_LLM_DUMP` enregistre les requêtes **sans** la clé : ne jamais l'élargir.
@@ -175,7 +175,7 @@ Jimmy est une application que l'utilisateur **utilise en direct**.
 |---|---|---|
 | Du Rust (logique pure) | `.\scripts\with-msvc.ps1 cargo test --workspace` | 0 échec, 0 avertissement |
 | Le frontend | `npm run build` dans `desktop/` | strict, sans erreur |
-| Une vue, une commande Tauri, un événement | `.\scripts\test-ui.ps1` | 15 parcours OK, **0 erreur JavaScript** |
+| Une vue, une commande Tauri, un événement | `.\scripts\test-ui.ps1` | tous les parcours OK (26 au 6 octobre), **0 erreur JavaScript** |
 | La boucle d'agent, les outils, le modèle | `.\scripts\test-happy.ps1 -SkipAudio` | réponse FR avec outils (un échec transitoire du fournisseur : relancer) |
 | L'écoute, Whisper, la synthèse | tests `--ignored` de `agent/tests/audio.rs` | **Jimmy arrêté** (§2) |
 | Le vault | `cargo test --test vault '--' --ignored` | notes trouvées, extraits justes |

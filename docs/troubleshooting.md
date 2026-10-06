@@ -215,6 +215,25 @@ Les chemins sont limités à `C:\Users\**` et `C:\Dev\**` par défaut. Voir
 `permissions.rs` → `AccessRule::default`. Le motif `C:\Users\**` couvre tout
 le profil utilisateur.
 
+### Un modèle ne répond pas : « ModelProtocolUnsupported »
+
+OpenCode Go sert chaque modèle dans un seul format d'API (Chat, Responses ou
+Messages). Jimmy le lit dans le catalogue et le journal l'indique :
+`[llm] « muse-spark-1.3-contributor » : format responses`. Si un modèle hors
+catalogue refuse le format essayé, Jimmy essaie les deux autres et retient le
+bon (`format … retenu après essai`). Un échec qui persiste : relancer
+**Tester** dans la bibliothèque de modèles, puis vérifier le format avec
+`cargo test -p jimmy-agent --test protocols '--' --ignored` (HANDOFF, piège 78).
+
+### Jimmy demande l'autorisation dans le Chat
+
+C'est voulu : il s'apprête à **écrire** dans un fichier sensible (`.env`,
+clé, secret). Une carte « Autoriser / Refuser » apparaît dans le Chat ; sans
+réponse en 5 minutes, c'est un refus. À la voix, la demande est refusée
+d'office : la refaire dans le Chat écrit. Les journaux `[sécurité]` de
+`data/logs/jimmy.log` tracent chaque demande. Une carte pour une simple
+lecture est un bug à signaler (HANDOFF, piège 77).
+
 ### La réponse prend 15 secondes
 
 C'est normal quand quatre outils sont enchaînés : chaque appel LLM est un

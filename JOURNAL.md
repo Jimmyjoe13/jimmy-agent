@@ -7,15 +7,17 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 67 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 78 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
-Le projet tient en **deux journées**. Le **3 octobre 2026**, de 00h29 à 23h :
+Le projet tient en **quatre journées**. Le **3 octobre 2026**, de 00h29 à 23h :
 une session **OpenCode** construit la V1, puis des sessions **Claude Code**
 l'améliorent et la réparent à l'usage. Le **4 octobre**, une journée d'**usage
 réel** (Claude Code) : chaque retour de l'utilisateur est reproduit puis
-corrigé (section 3ter).
+corrigé (section 3ter). Les **5 et 6 octobre** : streaming, garde-fou des
+fichiers sensibles, trois formats d'API des modèles et publication du dépôt
+sur GitHub (section 3quater).
 
 ---
 
@@ -128,7 +130,7 @@ application qui marche, sans demander confirmation à chaque décision, en
 - **APIs validées pour de vrai** : OpenCode Go (l'en-tête `x-opencode-session`
   est obligatoire), Fish Audio via OpenRouter, SynaptiQ local.
 
-### 2.3 Ce qui a été construit en 1h25 (00h29 → 01h53, commit `7c4c995`)
+### 2.3 Ce qui a été construit en 1h25 (00h29 → 01h53, commit `69754b8`)
 
 - Un espace de travail Cargo en deux parties : `agent/` (le cœur, **sans**
   dépendance à Tauri, donc testable sans fenêtre) et `desktop/src-tauri/`
@@ -161,19 +163,19 @@ application qui marche, sans demander confirmation à chaque décision, en
 
 ### 2.5 La suite de la session (10h00 → 14h38)
 
-1. **Raccourci Bureau** (10h04, commit `7ad765a`) : `Jimmy.lnk` lance l'appli et
+1. **Raccourci Bureau** (10h04, commit `93e11a2`) : `Jimmy.lnk` lance l'appli et
    l'avatar sans console. Ce qu'il a fallu corriger pour que ça marche :
    l'avatar démarrait depuis le JavaScript de l'interface (donc pas du tout si la
    fenêtre échouait) → déplacé dans `setup()` côté Rust ; et un doublon
    `frontendDist` dans la config Tauri faisait viser un serveur de développement.
-2. **Voix et mot d'éveil en panne** (11h10, commit `a953f95`) : ta capture
+2. **Voix et mot d'éveil en panne** (11h10, commit `652a978`) : ta capture
    d'écran a conduit à deux vrais bugs, reproduits puis testés.
    - Fish Audio ne produit pas de WAV (HTTP 400) ; il fallait demander du PCM.
      Et `build_output_stream` ne joue rien sans appel à `.play()` : la lecture
      bloquait indéfiniment.
    - La commande d'écoute existait côté Rust mais **n'était jamais appelée** par
      l'interface : le micro n'était jamais ouvert.
-3. **Mise à jour du HANDOFF** (14h26, commit `517e4a7`), à ta demande, pour
+3. **Mise à jour du HANDOFF** (14h26, commit `56430d6`), à ta demande, pour
    préparer la suite : retravailler la qualité graphique de l'avatar et les
    fonctionnalités.
 
@@ -190,7 +192,7 @@ point de départ de la session suivante.
 ## 3. Session 2 — Claude Code : améliorer, puis réparer à l'usage (14h40 → 20h45)
 
 Reprise par la lecture du HANDOFF. Le modèle est passé d'Opus 5.5 à Sonnet 5.5
-en cours de route. 18 commits (`4ebac03` → `e5c37ba`).
+en cours de route. 18 commits (`79d83f0` → `76c23b2`).
 
 ### 3.1 Audit et plan (14h40)
 
@@ -230,19 +232,19 @@ touchait jamais l'avatar (la méthode Rust n'était appelée nulle part).
 
 ### 3.3 Sons d'état, MCP, deux serveurs Whisper, mémoire sémantique (lots 4 à 6)
 
-- **Sons d'état** (`bd29cb8`) : « Oui ? », « C'est prêt. », « Oups… »
+- **Sons d'état** (`3dedf4f`) : « Oui ? », « C'est prêt. », « Oups… »
   synthétisés avec la voix de Jimmy et mis en cache par voix.
-- **MCP** (`8421e6a`) : client en stdio réellement branché, outils exposés au
+- **MCP** (`d64ed54`) : client en stdio réellement branché, outils exposés au
   modèle, outil `mcp_add_server`, lanceur `cmd /C` pour `npx`, délais d'attente.
   Trois défauts trouvés en chemin : serveur introuvable quand son nom contenait
   un espace, noms d'outils refusés par l'API, `isError` traité comme un succès.
-- **Deux serveurs Whisper** (`368dbfa`, ton choix « les deux ») : `base` sur le
+- **Deux serveurs Whisper** (`5c652e9`, ton choix « les deux ») : `base` sur le
   port 8178 pour le mot d'éveil, `small` sur le 8179 pour la commande, avec
   repli automatique si le second ne démarre pas.
 - **Mémoire sémantique** : embeddings par LM Studio (même modèle que SynaptiQ,
   384 dimensions), repli sur le hachage s'il est éteint.
 
-### 3.4 « L'écoute ne fonctionne pas » : audit du fond et de l'interface (`a6237e0`, 16h33)
+### 3.4 « L'écoute ne fonctionne pas » : audit du fond et de l'interface (`14e86e6`, 16h33)
 
 Premier vrai retour d'usage. Au lieu de deviner, l'interface réelle a été
 pilotée à distance (débogage WebView2, Playwright) et les logs de la release —
@@ -268,7 +270,7 @@ Résultat : 12 parcours d'interface sur la vraie application, un scénario
 d'écoute de bout en bout par **injection audio** (ton micro intégré n'entend pas
 les haut-parleurs, donc on ne peut pas tester en faisant parler Jimmy).
 
-### 3.5 Premières conversations réelles (`6bd8b69` puis `2e68bba`, 18h11 → 18h45)
+### 3.5 Premières conversations réelles (`ccf5906` puis `7b26272`, 18h11 → 18h45)
 
 - **« Un mot rapide incompréhensible »** : la sortie audio est entrelacée comme
   l'entrée ; un son mono écrit une case sur deux en stéréo est joué **deux fois
@@ -290,7 +292,7 @@ les haut-parleurs, donc on ne peut pas tester en faisant parler Jimmy).
   le curseur approche, puis revient. On peut le rattraper là où il s'est
   réfugié ; l'endroit où on le lâche devient sa nouvelle place.
 
-### 3.6 « Pas assez fluide » : mesurer avant de corriger (`d31b957`, `ee95eb7`, 19h54 → 20h02)
+### 3.6 « Pas assez fluide » : mesurer avant de corriger (`73eadd4`, `a1c9aa9`, 19h54 → 20h02)
 
 Le journal détaillé (niveaux, durées, textes entendus) a permis de chiffrer ce
 qui était ressenti.
@@ -325,7 +327,7 @@ Incident : la validation complète a été **arrêtée par manque de mémoire** 
 machine (compilation, deux serveurs Whisper, Godot et le modèle en même temps).
 Elle a été relancée en étapes séparées.
 
-### 3.7 L'erreur HTTP 400 et la bibliothèque de modèles (`e5c37ba`, 20h31)
+### 3.7 L'erreur HTTP 400 et la bibliothèque de modèles (`76c23b2`, 20h31)
 
 **L'erreur** : au bout d'une conversation, Jimmy a lu à voix haute
 « HTTP 400 Bad Request… invalid request ». Le journal montrait une longue
@@ -694,6 +696,41 @@ chemin_heureux_analyse_un_dossier --ignored` sur le vrai modèle, deux rejeux �
 réponse d'environ 650 caractères, **190 à 228 dits à voix haute** selon le tour,
 nom de fichier intact.
 
+### Le mot d'arrêt « STOP »
+
+Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,
+il veut pouvoir tout arrêter à la voix. Pendant une tâche, la boucle d'écoute
+attendait sans lire le micro : un guetteur écoute désormais les courtes prises
+de parole et, sur « STOP » (phrase réduite au mot d'arrêt), la tâche est
+abandonnée, ses commandes tuées, la voix coupée ; Jimmy répond « D'accord,
+j'arrête. Je t'écoute. ». Bouton « Arrêter » dans le Chat. Vérifié par un test
+vocal réel (« Stop ! » dit en pleine tâche) et par la suite d'interface (arrêt
+en 64 ms) — piège 71.
+
+### Ce que cette journée a appris
+
+- **Trois bugs « de comportement » étaient des bugs de plomberie** : le fil
+  perdu (un champ JSON mal nommé), le modèle qui revenait tout seul (le
+  `.env`), le modèle vocal effacé (la suite de tests elle-même). Aucun ne se
+  voyait dans le code de la fonction concernée.
+- **Rejouer avant de supposer** : la dérive multilingue semblait liée au
+  nouveau contexte ; 32 rejeux ont montré que non, et que la température n'y
+  pouvait rien.
+- **Une suite de tests touche aux données réelles** : elle doit restaurer
+  exactement ce qu'elle modifie, et lire l'état réel (la session) plutôt que
+  l'affichage (une bulle vocale parasite faussait un parcours).
+- **Un réglage qu'on cherche va là où on le cherche** : la bibliothèque de
+  voix existait, mais sous 36 modèles.
+
+---
+
+## 3quater. Session 5 — 5 et 6 octobre : sécurité, formats d'API, publication (Claude Code)
+
+Session ouverte en reprise : GLM 5.3 Flash (session OpenCode
+`ses_ef36871fdffeEAcmhED3BqZd4r`) avait laissé le streaming du chat à moitié
+fait, formatage cassé et suite d'interface rouge. Travail repris, fini et
+vérifié (25/25), puis la session a suivi l'usage.
+
 ### Le streaming du chat (5 octobre, soir)
 
 Constat chiffré dans le journal du 18:22 : l'appel au modèle a pris **22,5 s**,
@@ -768,31 +805,40 @@ sondés à la main (aller-retour d'outil, flux) avant d'écrire la traduction,
 puis vérifiés par le client de Jimmy sur un vrai modèle de chaque format —
 piège 78.
 
-### Le mot d'arrêt « STOP »
+### La publication sur GitHub (6 octobre)
 
-Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,
-il veut pouvoir tout arrêter à la voix. Pendant une tâche, la boucle d'écoute
-attendait sans lire le micro : un guetteur écoute désormais les courtes prises
-de parole et, sur « STOP » (phrase réduite au mot d'arrêt), la tâche est
-abandonnée, ses commandes tuées, la voix coupée ; Jimmy répond « D'accord,
-j'arrête. Je t'écoute. ». Bouton « Arrêter » dans le Chat. Vérifié par un test
-vocal réel (« Stop ! » dit en pleine tâche) et par la suite d'interface (arrêt
-en 64 ms) — piège 71.
+Demande : préparer le projet pour un dépôt **public**. Audit de tout
+l'historique (pas seulement des fichiers actuels) : aucun secret, mais
+l'adresse personnelle de l'auteur dans 27 commits, l'IP du VPS et le nom
+d'une clé SSH dans un test, des chemins personnels un peu partout, et deux
+chemins personnels **en dur dans le code** (dossier de travail par défaut,
+dossier Godot). Décisions de l'utilisateur : auteur réécrit en adresse
+`noreply` de GitHub, IP et nom de clé effacés de tout l'historique
+(`git filter-repo`, sauvegarde en bundle avant), chemins anonymisés dans le
+code et les docs, licence MIT, dépôt créé sous le compte connecté à `gh`
+(Jimmyjoe13). Effet de bord à connaître : tous les identifiants de commit
+ont changé ; les docs ont été recalées sur les nouveaux grâce à la table
+`.git/filter-repo/commit-map`.
 
-### Ce que cette journée a appris
+### Les docs remises à plat (6 octobre)
 
-- **Trois bugs « de comportement » étaient des bugs de plomberie** : le fil
-  perdu (un champ JSON mal nommé), le modèle qui revenait tout seul (le
-  `.env`), le modèle vocal effacé (la suite de tests elle-même). Aucun ne se
-  voyait dans le code de la fonction concernée.
-- **Rejouer avant de supposer** : la dérive multilingue semblait liée au
-  nouveau contexte ; 32 rejeux ont montré que non, et que la température n'y
-  pouvait rien.
-- **Une suite de tests touche aux données réelles** : elle doit restaurer
-  exactement ce qu'elle modifie, et lire l'état réel (la session) plutôt que
-  l'affichage (une bulle vocale parasite faussait un parcours).
-- **Un réglage qu'on cherche va là où on le cherche** : la bibliothèque de
-  voix existait, mais sous 36 modèles.
+Relecture de toute la documentation contre le code : l'en-tête du HANDOFF
+disait encore « rien n'a été commité » et visait un chantier livré la veille ;
+le README annonçait 35 tests (151), un skin unique (cinq), une mémoire « par
+hachage » (LM Studio d'abord) et l'ancienne voix par défaut ; les consignes
+pointaient des secrets vers un chemin anonymisé. Tout est recalé ; la suite
+d'interface du skin, qui échouait par un délai fixe pendant la relance de
+Godot, attend désormais l'état réel.
+
+### Ce que ces deux jours ont appris
+
+- **Un garde-fou trop zélé est contourné ou désactivé** : onze demandes pour
+  des lectures en une matinée. Une règle de sécurité se teste aussi contre
+  l'usage réel, pas seulement contre l'attaque.
+- **« Le modèle ne répond pas » peut être un problème de format**, pas de
+  modèle : sonder l'API à la main avant de soupçonner le modèle.
+- **Publier, c'est publier l'historique** : un secret retiré d'un fichier
+  reste lisible dans un ancien commit.
 
 ---
 
@@ -852,44 +898,63 @@ en 64 ms) — piège 71.
 
 | Heure | Commit | Contenu |
 |---|---|---|
-| 01:53 | `7c4c995` | V1 : agent, avatar, voix, mémoire, skills, Synaptiq |
-| 01:54 | `fa258af`, `55cd69a` | HANDOFF ; base locale non versionnée |
-| 10:39 | `7ad765a` | raccourci Bureau |
-| 13:28 | `a953f95` | synthèse vocale et écoute permanente réparées |
-| 14:38 | `517e4a7` | HANDOFF réécrit pour la suite |
-| 15:04 | `4ebac03` | avatar : cadrage, AgX, occlusion, ombre au sol |
-| 15:07 | `9bb342a` | proportions, contour, maillage par profil, fourrure |
-| 15:12 | `02cd064` | skins réels |
-| 15:16 | `bd29cb8` | sons d'état |
-| 15:20 | `8421e6a` | MCP en stdio |
-| 15:21 | `b064332` | HANDOFF |
-| 15:34 | `368dbfa` | deux serveurs Whisper, embeddings LM Studio |
-| 15:35 | `18741c5` | HANDOFF : décisions consignées |
-| 16:33 | `a6237e0` | écoute réparée, interface corrigée |
-| 18:11 | `6bd8b69` | voix réparée à l'usage, esquive de l'avatar |
-| 18:45 | `2e68bba` | conversation vocale fluide, auto-réparation |
-| 19:54 | `d31b957` | détection par trames, conversation continue, phases visibles |
-| 20:02 | `ee95eb7` | bruit ambiant : prise abandonnée, seuil appris |
-| 20:31 | `e5c37ba` | erreur 400 corrigée, bibliothèque de modèles |
+| 01:53 | `69754b8` | V1 : agent, avatar, voix, mémoire, skills, Synaptiq |
+| 01:54 | `24a7931`, `43c2032` | HANDOFF ; base locale non versionnée |
+| 10:39 | `93e11a2` | raccourci Bureau |
+| 13:28 | `652a978` | synthèse vocale et écoute permanente réparées |
+| 14:38 | `56430d6` | HANDOFF réécrit pour la suite |
+| 15:04 | `79d83f0` | avatar : cadrage, AgX, occlusion, ombre au sol |
+| 15:07 | `8479526` | proportions, contour, maillage par profil, fourrure |
+| 15:12 | `d3db68c` | skins réels |
+| 15:16 | `3dedf4f` | sons d'état |
+| 15:20 | `d64ed54` | MCP en stdio |
+| 15:21 | `3b49632` | HANDOFF |
+| 15:34 | `5c652e9` | deux serveurs Whisper, embeddings LM Studio |
+| 15:35 | `e99b4ab` | HANDOFF : décisions consignées |
+| 16:33 | `14e86e6` | écoute réparée, interface corrigée |
+| 18:11 | `ccf5906` | voix réparée à l'usage, esquive de l'avatar |
+| 18:45 | `7b26272` | conversation vocale fluide, auto-réparation |
+| 19:54 | `73eadd4` | détection par trames, conversation continue, phases visibles |
+| 20:02 | `a1c9aa9` | bruit ambiant : prise abandonnée, seuil appris |
+| 20:31 | `76c23b2` | erreur 400 corrigée, bibliothèque de modèles |
+
+Depuis (identifiants **après** la réécriture de l'historique du 6 octobre ;
+ceux du tableau ci-dessus ont été recalés de même) :
+
+| Date | Commit | Contenu |
+|---|---|---|
+| 05/10 17:19 | `7186ff4` | Memoire longue : le vault Obsidian remplace Synaptiq |
+| 05/10 17:19 | `39619c8` | Croissance : lecons apres echec, capture de competence, revue, amendements |
+| 05/10 17:19 | `c448133` | Avatar : cycle de vie repare, skins ours et robot, regard vers la camera |
+| 05/10 17:20 | `688a7a7` | Ecoute : hesitations et phrases longues, session persistante, arret STOP |
+| 05/10 17:20 | `bd3dfab` | Agent, outils et noyau : budgets, MCP a la demande, tache longue, historique |
+| 05/10 17:20 | `f20c98c` | Interface : Chat facon Codex, explorateur, bibliotheque de voix, serveurs MCP |
+| 05/10 17:20 | `35edaa0` | Docs : INSTRUCTIONS/CONTRIBUTION/JOURNAL, HANDOFF a jour ; data et skills hors git |
+| 05/10 18:06 | `6ec80da` | Sortie courte et nette : prompt concis et voix bornee |
+| 05/10 21:52 | `fb34d46` | Streaming du chat, correctif HTTP 400 name, apercu ferme par Echap |
+| 05/10 23:40 | `0f291b8` | Fichiers sensibles : aucune modification sans accord explicite |
+| 06/10 11:06 | `a443786` | Fichiers sensibles : n'exiger l'accord que pour une ecriture reperee |
+| 06/10 13:43 | `bb71b2b` | Preparation de la publication : licence MIT, chemins personnels anonymises |
+| 06/10 16:21 | `d55e183` | Modeles : prise en charge des trois formats d'API (Chat, Responses, Messages) |
 
 ---
 
 ## 8. Reste à faire et questions ouvertes
 
-0. **Sortie de Jimmy** — texte court et net fait le 5 octobre (section
-   « Sortie » du prompt + borne de l'oral `limit_for_speech`) ; reste à
-   confirmer en usage réel, et la voix qui ne récite pas le code. Les lots du
-   3 au 5 octobre sont **commités** (7 commits, `e5c37ba` → `1f6f19c`). Reste
-   à **régénérer les clés MCP** exposées (`aggregate` dans `jimmy.log`,
-   `skillsmp` dans `data/config.json`) et à masquer les secrets dans le
-   journal des arguments d'outils.
+0. **État au 6 octobre** : tout est commité ; dépôt **public**
+   github.com/Jimmyjoe13/jimmy-agent (licence MIT). Reste à **régénérer les
+   clés exposées** (`aggregate` dans `jimmy.log`, `skillsmp` dans
+   `data/config.json`, `.env.api` de JobXpress lu en clair par le modèle le
+   5 octobre) et à masquer les secrets dans les résultats d'outils. La
+   sortie courte reste à confirmer en usage réel, comme Muse Spark 1.3
+   (format Responses) en conversation.
 1. **Utiliser Jimmy au quotidien à la voix** pendant une semaine : c'est le seul
    test qui répond à la question du PLAN (la voix apporte-t-elle quelque chose ?).
    Vérifier surtout : plusieurs questions d'affilée, une exploration longue avec
    outils, le panneau des modèles.
 2. **Relire les notes que Jimmy écrit dans le vault** (`0_Inbox/Jimmy`) : dire
    si le tri du dossier est le bon, et si ses souvenirs sont utiles ou bavards.
-3. **Pousser sur le dépôt distant** : rien n'a été publié, à décider.
+3. ~~Pousser sur le dépôt distant~~ : publié le 6 octobre (section 3quater).
 4. ~~Tester un vrai serveur MCP du catalogue~~ : fait le 4 octobre (obsidian,
    aggregate, skillsmp, ajoutés par Jimmy lui-même). Reste : charger leurs
    outils à la demande (~13 k jetons de définitions par appel).
@@ -921,7 +986,9 @@ en 64 ms) — piège 71.
 | `agent/src/core/agent.rs` | boucle de l'agent (outils, limites, conclusion) |
 | `agent/src/core/history.rs` | historique complet et `conversation()` |
 | `agent/src/voice/listener.rs`, `vad.rs` | boucle d'écoute et détecteur de parole |
-| `agent/src/providers/llm.rs` | client du modèle, liste et test des modèles |
+| `agent/src/providers/llm.rs` | client du modèle, choix du format, liste et test des modèles |
+| `agent/src/providers/protocol.rs` | formats d'API Chat, Responses, Messages (corps, réponses, flux) |
+| `agent/src/sensitive.rs` | garde-fou des fichiers sensibles (détection, carte d'autorisation) |
 | `desktop/src/views/models.ts` | panneau des modèles |
 | `godot/scripts/main.gd`, `jimmy.gd` | scène, esquive, zone cliquable ; personnage et skins |
 | `scripts/test-ui.ps1`, `scripts/ui-test/` | parcours de l'interface sur la vraie application |

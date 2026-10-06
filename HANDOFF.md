@@ -1,25 +1,17 @@
 # HANDOFF
 
-État du prototype au **5 octobre 2026 (soir)**, après deux jalons : la
-**croissance** (leçons, compétences auto-écrites, revue, amendements — 4 lots
-vérifiés sur le vrai modèle) et l'**interface Chat façon Codex** (men-
-tions « @ », chemins cliquables, bloc « travaux » avec diff, historique
-groupé + `Ctrl+K` — 25/25 parcours). **Rien n'a été commité** : le lot des
-4 et 5 octobre est dans l'arbre de travail, à relire avant commit.
+État du prototype au **6 octobre 2026**. Depuis le 5 au soir : la **sortie
+courte et nette** (prompt concis, voix bornée), le **streaming** du chat, le
+**garde-fou des fichiers sensibles** (accord explicite pour toute écriture,
+lecture libre), la **prise en charge des trois formats d'API** des modèles
+(Muse Spark, GPT, Grok, Qwen 3.8, MiniMax utilisables) et la **publication**
+du dépôt sur GitHub (public, licence MIT, historique réécrit sans données
+personnelles). Tout est commité ; `main` est poussé jusqu'à `bb71b2b`.
 
-**Objectif de la prochaine session :** la **sortie de Jimmy**, pas son
-cœur. Constat d'usage : la synthèse vocale lit **tout** le texte — Jimmy
-répond en langage de développement, avec du code — et c'est indigeste. Deux
-planches donc, à décomposer en lots avec tests :
-1. **Texte court et net.** Réponses courtes, sans blabla inutile, précises :
-   Jimmy n'explique que l'essentiel et va droit au but. Côté prompt (une
-   consigne en `IDENTITY`/amendement), côté extraction vocale (ce qui est
-   dit ≠ ce qui est affiché — le mécanisme `clean_markdown` existe déjà :
-   s'en servir davantage), côté modèle s'il déborde.
-2. **Voix qui ne récite pas le code.** La lecture TTS filtre déjà le
-   Markdown (`App::speak`) : vérifier en réel sur des réponses à code, puis
-   resserrer — un code d'un tour se dit en « j'ai modifié F » à voix haute,
-   pas ligne par ligne.
+**Objectif de la prochaine session :** l'**usage réel**. Utiliser Jimmy au
+quotidien avec un modèle des nouveaux formats (Muse Spark 1.3 : surveiller
+qu'il ne commente pas sa « consigne développeur » au lieu de répondre), et
+vérifier que la carte d'autorisation n'apparaît que pour des écritures.
 Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
@@ -66,6 +58,11 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | Revue périodique | `--test happy_path la_revue_propose_sans_appliquer -- --ignored` : 2 leçons en mémoire → session « Revue » avec une skill proposée (16,6 s) ; seconde revue immédiate non due (idempotence) |
 | Filet d'amendement | `--test amendment l_amendement_ne_degrade_pas_les_reponses -- --ignored` : A/B sur 3 demandes réelles (sans/avec l'amendement, `JIMMY_AMENDMENT`), 0 dérive, longueur comparable, 28 s |
 | **Chat façon Codex (lots 0-4)** | `test-ui.ps1` : 25/25 — menu « @ » (1 item, insertion sans envoi), puce de chemin → aperçu avec ligne surlignée, bloc « travaux » (`reussite-47.txt`), historique groupé (3 groupes) + recherche + Ctrl+K ; 126 tests verts ; `fs_search`/`fs_diff` testés unitairement sur tempdir |
+| **Sortie courte (5 octobre)** | prompt « Sortie » + `limit_for_speech` (240 caractères dits, le reste à l'écran) |
+| **Streaming (5 octobre)** | `test-ui.ps1` 25/25 : réponse écrite en direct, `[llm] premier fragment après … ms` au journal (pièges 74-76) |
+| **Fichiers sensibles (5-6 octobre)** | tests `sensitive` (dont les 11 lectures réelles du 6 octobre, libres, et 8 écritures déguisées, bloquées) ; parcours UI : carte « garde-N.env », refus respecté (piège 77) |
+| **Trois formats d'API (6 octobre)** | `--test protocols -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) — outil appelé, résultat relu, réponse en flux ; test de bibliothèque vert pour les trois (piège 78) |
+| **État au 6 octobre** | 151 tests unitaires, 0 avertissement ; `test-ui.ps1` : **26/26**, 0 erreur JS |
 
 ---
 
@@ -191,7 +188,7 @@ session à zéro (l'historique de l'ancienne session reste lisible dans le Chat)
 
 ---
 
-# Fait pendant cette session (commits 4ebac03 → 368dbfa)
+# Fait pendant cette session (commits 79d83f0 → 5c652e9)
 
 ## Avatar
 
@@ -1140,24 +1137,41 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
 - **La voix reste sur `Final`** : lire les fragments dirait les annonces
   d'itération. La voix anticipée dès la première phrase est différée.
 
+### Décisions prises (5-6 octobre 2026 — sécurité, modèles, publication)
+
+- **Fichiers sensibles : accord au cas par cas, dans le Chat** (choix de
+  l'utilisateur parmi deux) : une carte « Autoriser / Refuser » suspend
+  l'outil plutôt qu'un refus sec. À la voix, refus d'office. **Seule une
+  écriture repérée déclenche la carte** : la lecture, le filtrage, le masquage
+  et l'usage d'une clé (`ssh -i`) restent libres (piège 77).
+- **Le format d'API vient du catalogue** (`provider.npm`), avec repli par
+  essai sur `ModelProtocolUnsupported` ; les trois formats sont maintenus
+  (consigne : « tout type de format », piège 78).
+- **Dépôt public** github.com/Jimmyjoe13/jimmy-agent, licence MIT. Historique
+  réécrit (`git filter-repo`) : auteur noreply, IP du VPS et nom de clé
+  retirés ; les anciens commits gardent des chemins `C:\Users\…` sans secret.
+  Plus aucun chemin personnel en dur : le dossier de travail par défaut et
+  le dossier Godot se calculent depuis `%USERPROFILE%`.
+
 ### Ensuite
 
-1. **UI/UX de l'onglet Chat, lot 2** : le lot 1 (projet par conversation,
-   explorateur) est fait (piège 68). Restent : « @ » dans la saisie pour citer
-   un fichier du projet, chemins cliquables dans les réponses de Jimmy,
-   historique groupé par projet.
-2. **Committer le lot du 4 octobre** (44 fichiers modifiés ou nouveaux) :
-   relire le diff fichier par fichier, un commit par sujet.
-3. **Régénérer la clé du serveur MCP `aggregate`** et masquer les secrets dans
-   le journal des arguments d'outils.
-4. **Charger les outils MCP à la demande** : ~13 k des ~15 k jetons par appel
-   sont des définitions d'outils (74 pour `aggregate`).
-5. **Utiliser Jimmy au quotidien une semaine** — le seul test qui compte.
+1. **Usage réel avec un modèle Responses** (Muse Spark 1.3) : vérifier qu'il
+   répond sans commenter sa consigne. Sinon, passer le prompt système en
+   message `system` dans `input` plutôt qu'en `instructions`
+   (`protocol::responses_body`).
+2. **Régénérer les clés exposées** : serveur MCP `aggregate` (en clair dans
+   `jimmy.log`), clés du `.env.api` de JobXpress (lues en clair par le modèle
+   le 5 octobre). Puis masquer les valeurs `KEY=`/`TOKEN=`/`SECRET=` dans les
+   résultats d'outils avant envoi au modèle (aujourd'hui, seul le prompt le
+   demande).
+3. **Garde-fou des fichiers sensibles** : il repère par motifs ; un script
+   intermédiaire qui ne nomme pas le fichier y échappe. À durcir seulement si
+   l'usage montre un contournement.
+4. **Utiliser Jimmy au quotidien une semaine** — le seul test qui compte.
    Vérifier que l'apprentissage écrit bien ses notes dans
    `C:\Obsidian\Jimmy\0_Inbox\Jimmy\` et qu'elles sont utiles à relire.
-4. Vérifier en conditions réelles un serveur MCP du catalogue (`npx -y
-   @modelcontextprotocol/server-filesystem <dossier>`) et l'écoute à voix
-   humaine, à distance du micro intégré (regarder le vumètre de la vue Voix).
+5. Vérifier en conditions réelles l'écoute à voix humaine, à distance du
+   micro intégré (regarder le vumètre de la vue Voix).
 6. Serveurs whisper orphelins : si Jimmy est tué brutalement, ses
    `whisper-server` survivent et sont réutilisés au lancement suivant (le
    contrôle de santé les trouve). Sans gravité, mais un orphelin lancé avec un
@@ -1165,9 +1179,9 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
 
 ### Différé
 
-7. Export Godot (~1 Go de gabarits) pour que l'installateur n'installe pas le
+- Export Godot (~1 Go de gabarits) pour que l'installateur n'installe pas le
    moteur complet.
-8. Mise à jour automatique, quand il existera une distribution.
+- Mise à jour automatique, quand il existera une distribution.
 
 ---
 
@@ -1181,11 +1195,12 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
 .\scripts\build.ps1 -Release -Bundles   # + installateur NSIS
 .\scripts\test-happy.ps1       # test de bout en bout + chaîne audio
 .\scripts\test-happy.ps1 -SkipAudio
-.\scripts\test-ui.ps1        # 15 parcours UI sur la vraie application (CDP)
+.\scripts\test-ui.ps1        # 26 parcours UI sur la vraie application (CDP)
 .\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test audio ecoute_ '--' --ignored --nocapture --test-threads=1
 .\scripts\shortcut.ps1         # raccourci Bureau
 .\scripts\shortcut.ps1 -Autostart   # démarrage avec Windows
-.\scripts\with-msvc.ps1 cargo test
+.\scripts\with-msvc.ps1 cargo test --workspace
+.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test protocols '--' --ignored --nocapture   # 3 formats d'API, vrais modèles
 ```
 
 **Toujours `build.ps1`, jamais `cargo build --release`** : c'est la CLI Tauri

@@ -33,7 +33,9 @@ C'est pourquoi tous les scripts passent par `scripts/with-msvc.ps1` :
 | Besoin | Commande |
 |---|---|
 | Compiler | `.\scripts\with-msvc.ps1 cargo build` |
-| Tests unitaires | `.\scripts\with-msvc.ps1 cargo test` |
+| Compiler la release | **toujours** `.\scripts\build.ps1 -Release` (depuis PowerShell) |
+| Tests unitaires | `.\scripts\with-msvc.ps1 cargo test --workspace` |
+| Parcours de l'interface | `.\scripts\test-ui.ps1` (arrête puis relance Jimmy) |
 | Test du chemin heureux | `.\scripts\test-happy.ps1` |
 | Interface seule | `cd desktop; npm run dev` |
 | Vérifier le projet Godot | `Godot.exe --headless --path godot --quit-after 120` |
@@ -133,12 +135,21 @@ affichées.
 
 ## Tests
 
-35 tests unitaires couvrent les parties où une erreur serait silencieuse :
-similarité vectorielle, correspondance de permissions, détection du wake word,
-découpage des phrases longues, extraction mémoire, analyse des permissions.
+151 tests unitaires (6 octobre) couvrent les parties où une erreur serait
+silencieuse : similarité vectorielle, permissions, fichiers sensibles, wake
+word, découpage des phrases, extraction mémoire, formats d'API des modèles
+(corps, réponses et flux de Chat, Responses et Messages).
 
 ```powershell
-.\scripts\with-msvc.ps1 cargo test
+.\scripts\with-msvc.ps1 cargo test --workspace   # 0 échec, 0 avertissement
+.\scripts\test-ui.ps1                            # 26 parcours sur la vraie application
+```
+
+Les tests qui consultent de vrais services sont `#[ignore]`. PowerShell avale
+le `--` nu : le mettre entre guillemets.
+
+```powershell
+.\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test protocols '--' --ignored --nocapture
 ```
 
 Le test du chemin heureux est ignoré par défaut : il consomme de vrais crédits.

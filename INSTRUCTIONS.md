@@ -3,7 +3,7 @@
 À lire **en premier**, par tout agent (Claude Code, OpenCode, Codex…) ou toute
 personne qui touche au projet. Ce document résume les règles **non
 négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérifications),
-`HANDOFF.md` (état technique et **71 pièges numérotés**) et `JOURNAL.md`
+`HANDOFF.md` (état technique et **78 pièges numérotés**) et `JOURNAL.md`
 (historique). Chaque règle ci-dessous a déjà coûté une régression réelle.
 
 ---
@@ -86,6 +86,9 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Voix | Ce qui doit survivre à la boucle d'écoute va sur `App`, pas dans la boucle | 54 |
 | Voix | Toute tâche passe par `App::cancellable` (arrêt « STOP ») ; ne pas contourner | 71 |
 | Vault | Partagé avec d'autres agents : Jimmy n'écrit que dans `0_Inbox/Jimmy` et distingue ses notes | 66 |
+| Modèle | Chaque modèle a **un** format d'API (Chat, Responses, Messages), lu dans le catalogue ; un appel passe par `LlmClient::send`, jamais par une URL `/chat/completions` en dur | 78 |
+| Sécurité | Une écriture dans un fichier sensible passe par `sensitive::authorize` (carte dans le Chat) ; la lecture reste libre | 77 |
+| Chat | Le premier appel au modèle est en flux (`chat_stream`) ; les chemins de secours rejouent `chat` sans flux | 74 |
 
 ## 6. Tests d'interface : ils touchent aux données réelles
 
@@ -94,13 +97,19 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 - Lire l'**état réel** (session, commande `status`), pas l'affichage : une
   commande vocale parasite peut s'afficher dans le Chat.
 - Supprimer les sessions créées par le test.
-- Un échec isolé de « Skin » ou d'une étape gênée par l'écoute se **relance**
-  avant d'enquêter (instabilités connues, piège 62).
+- Un échec isolé d'une étape gênée par l'écoute se **relance** avant
+  d'enquêter (instabilités connues, piège 62). « Skin » attend désormais
+  l'état du bouton (Godot se relance à chaque changement) au lieu d'un délai
+  fixe : un échec y est un vrai signal.
 
 ## 7. Secrets et données
 
 - Aucun secret dans un prompt, un commit, un journal ou une réponse. Clés dans
-  `C:\Users\user\.secrets\`, lecture ciblée d'une seule valeur.
+  `%USERPROFILE%\.secrets\`, lecture ciblée d'une seule valeur.
+- **Le dépôt est public** (github.com/Jimmyjoe13/jimmy-agent, depuis le
+  6 octobre) : aucun chemin personnel, IP, nom de clé, adresse ni valeur
+  réelle dans le code, les tests ou les docs — des exemples neutres
+  (`C:\Users\user`, `203.0.113.10`, `vps.key`).
 - `data/` (base, journaux, audio) ne se committe jamais et ne se recopie pas
   dans une réponse.
 - **Ouvert** : la clé du serveur MCP `aggregate` figure en clair dans
@@ -114,8 +123,12 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 - Commits en français, un sujet par commit, qui dit quoi et pourquoi.
 - Avant de committer un gros lot : relire le diff fichier par fichier et
   relancer les vérifications du §3.
-- État au 4 octobre 2026 : **tout le travail du 4 octobre est non commité**
-  (dernier commit `e5c37ba`).
+- Dépôt distant : `origin` = github.com/Jimmyjoe13/jimmy-agent (**public**).
+  Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
+  (l'historique a été réécrit le 6 octobre pour retirer l'adresse
+  personnelle : les identifiants de commit d'avant ont changé).
+- État au 6 octobre 2026 : tout est commité ; `main` est publié jusqu'à
+  `bb71b2b`, les commits suivants attendent une demande de push.
 
 ## 9. Fin de travail
 
@@ -136,11 +149,17 @@ Bloqué : <ce qui empêche d'avancer, ou "rien">
   (Fish Audio `4f2a0684dd0247dda68f339738c780e6`).
 - Jimmy doit être **réactif et aller au bout** d'une tâche validée, en disant
   où il en est ; « STOP » l'arrête à tout moment.
-- **Sortie courte et nette (validée 5 octobre, à mettre en œuvre)** : les
+- **Sortie courte et nette (validée et livrée le 5 octobre)** : les
   réponses de Jimmy doivent être courtes, sans blabla inutile, précises — il
   n'explique que l'essentiel et va droit au but. La synthèse vocale ne doit
   pas réciter du code ni du jargon de dev ; l'écran peut être plus détaillé
-  que la voix, l'inverse est interdit. Chantier de la session suivante.
+  que la voix, l'inverse est interdit.
+- **Fichiers sensibles** (5-6 octobre) : Jimmy ne modifie jamais un `.env`,
+  une clé ou un secret sans accord explicite (carte dans le Chat) ; il ne
+  doit **pas** demander pour une simple lecture (« il demande trop
+  l'autorisation »). Piège 77.
+- **Tous les modèles du compte doivent marcher**, quel que soit leur format
+  d'API (6 octobre). Piège 78.
 - Ouvrir un fichier = **application par défaut de Windows**.
 - Prochains chantiers validés : lot 2 du Chat livré (5 octobre : @-mentions,
   chemins cliquables, bloc travaux + diff, historique groupé) ; **tâches
