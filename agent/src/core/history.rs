@@ -368,17 +368,17 @@ mod tests {
         let a = h.create_session("a").unwrap();
         let b = h.create_session("b").unwrap();
         assert_eq!(h.project(&a).unwrap(), None);
-        h.set_project(&a, Some("C:\\Users\\jimmy\\Projet\\alpha")).unwrap();
-        h.set_project(&b, Some("C:\\Users\\jimmy\\Projet\\beta")).unwrap();
+        h.set_project(&a, Some("C:\\Users\\user\\Projet\\alpha")).unwrap();
+        h.set_project(&b, Some("C:\\Users\\user\\Projet\\beta")).unwrap();
         h.append(&b, &Message::user("salut")).unwrap();
-        assert_eq!(h.project(&a).unwrap().as_deref(), Some("C:\\Users\\jimmy\\Projet\\alpha"));
+        assert_eq!(h.project(&a).unwrap().as_deref(), Some("C:\\Users\\user\\Projet\\alpha"));
         let recents = h.recent_projects(10).unwrap();
         assert_eq!(recents.len(), 2);
         assert!(recents[0].ends_with("beta"), "le plus récent d'abord : {recents:?}");
         // Détacher, et un projet vide ne compte pas.
         h.set_project(&a, Some("  ")).unwrap();
         assert_eq!(h.project(&a).unwrap(), None);
-        assert_eq!(h.sessions(10).unwrap().iter().find(|s| s.id == b).unwrap().project.as_deref(), Some("C:\\Users\\jimmy\\Projet\\beta"));
+        assert_eq!(h.sessions(10).unwrap().iter().find(|s| s.id == b).unwrap().project.as_deref(), Some("C:\\Users\\user\\Projet\\beta"));
     }
 
     /// La conversation ne contient jamais d'outil : ni appel, ni résultat.

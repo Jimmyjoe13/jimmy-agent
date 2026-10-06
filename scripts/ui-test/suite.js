@@ -215,7 +215,7 @@ let stepPage = null;
   // Chemin cliquable (façon Codex) : un chemin absolu dans une réponse devient
   // une puce ; son clic ouvre l'aperçu (avec saut de ligne quand « :n »).
   await step("Chat : un chemin dans la réponse s'ouvre en aperçu", async () => {
-    const target = "C:\\Users\\jimmy\\Projet\\jimmy-agent-personnel\\HANDOFF.md:3";
+    const target = `${path.resolve(__dirname, "..", "..", "HANDOFF.md")}:3`;
     const input = p.locator(".composer-input");
     // L'attente après l'envoi : une seule demande, une réponse pilote.
     await input.fill(`Réponds UNIQUEMENT par ce chemin, copié exactement, sans phrase : ${target}`);

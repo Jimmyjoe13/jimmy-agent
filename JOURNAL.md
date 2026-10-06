@@ -80,7 +80,7 @@ opencode -s ses_f0143431fffevk3YBOk6F7BJPM
 | | |
 |---|---|
 | Titre | « Développement de l'agent desktop JIMMY selon PLAN.md » |
-| Dossier | `C:/Users/jimmy/Projet/jimmy-agent-personnel` |
+| Dossier | `C:/Users/user/Projet/jimmy-agent-personnel` |
 | Agent et modèle | `build`, modèle `space-bunny-free` (fournisseur OpenCode Go, variante `max`) |
 | Période | 3 octobre 2026, de 00h29 à 14h26 |
 | Activité | 581 messages de l'agent : 280 commandes shell, 199 éditions, 84 lectures, 82 écritures, 16 recherches |
@@ -411,7 +411,7 @@ Analyse demandée à partir du journal et de la base. Deux causes distinctes.
 
 1. **Un outil gelait la conversation.** Le cas réel : « Le contenu du dossier
    agent-pentest ». `list_directory` répond en 0,2 s, puis `search_files` sur
-   `C:\Users\jimmy\Projet` tourne **4 min 22 s** à lire chaque fichier pour y
+   `C:\Users\user\Projet` tourne **4 min 22 s** à lire chaque fichier pour y
    chercher une chaîne, sans aucune borne. La conversation reste muette ; le
    budget vocal de 90 s ne peut rien interrompre, il se teste *entre* les
    itérations, jamais pendant un outil. Au retour, budget dépassé : un dernier

@@ -407,4 +407,4 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
 
 ## Licence
 
-MIT — prototype personnel.
+MIT — voir [LICENSE](LICENSE). Prototype personnel.

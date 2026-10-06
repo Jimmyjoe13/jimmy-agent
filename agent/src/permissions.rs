@@ -234,13 +234,13 @@ mod tests {
     fn lecture_bloquee_refuse() {
         let mut perms = Permissions::default();
         perms.read.granted = false;
-        assert!(perms.check(Capability::Read, "C:\\Users\\jimmy\\notes.txt").is_err());
+        assert!(perms.check(Capability::Read, "C:\\Users\\user\\notes.txt").is_err());
     }
 
     #[test]
     fn chemins_autorises_respectes() {
         let perms = Permissions::default();
-        assert!(perms.check(Capability::Read, r"C:\Users\jimmy\Projet\a.rs").is_ok());
+        assert!(perms.check(Capability::Read, r"C:\Users\user\Projet\a.rs").is_ok());
         assert!(perms.check(Capability::Read, r"C:\Windows\System32\config").is_err());
     }
 

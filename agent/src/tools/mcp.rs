@@ -240,7 +240,7 @@ impl Tool for McpAddServer {
 
     fn description(&self) -> &str {
         "Branche un serveur MCP (transport stdio) et rend ses outils disponibles \
-         immédiatement. Exemple de commande : [\"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"C:/Users/jimmy/Documents\"]. \
+         immédiatement. Exemple de commande : [\"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"C:/Users/user/Documents\"]. \
          Le serveur est enregistré dans la configuration et relancé aux prochains démarrages."
     }
 

@@ -160,7 +160,7 @@ Deux causes distinctes, retrouvées dans `data/logs/jimmy.log` et dans
 
 Diagnostic posé sur un cas réel : demande « Le contenu du dossier
 agent-pentest », l'agent appelle 2 outils. `list_directory` répond en 0,2 s,
-puis **`search_files` sur `C:\Users\jimmy\Projet` tourne 4 min 22 s**
+puis **`search_files` sur `C:\Users\user\Projet` tourne 4 min 22 s**
 (20:43:10 → 20:47:32, dossier de travail = 73 projets). Il lit chaque fichier
 du dossier de travail pour y chercher une chaîne, sans borne de temps. La
 conversation reste muette pendant tout ce temps ; le budget vocal de 90 s ne
@@ -1035,7 +1035,7 @@ bouton grisé fait expirer un clic en 30 s sans autre message — le parcours
 
 **77. Un fichier sensible n'est jamais modifié sans accord explicite.** Cas
 réel du 5 octobre : dans la conversation JobXpress, Jimmy a réécrit
-`/home/jimmy/jobxpress/secure/.env.api` sur le VPS (`vps_exec` : `cp …;
+`/home/user/app/secure/.env.api` sur le VPS (`vps_exec` : `cp …;
 python3 <<'PY'`) puis reconstruit le conteneur, sans rien demander ; il avait
 aussi affiché ce `.env` en clair (`cat -A`). Les permissions V1, accordées une
 fois pour toutes, ne distinguent pas un `.env` d'un fichier de code.

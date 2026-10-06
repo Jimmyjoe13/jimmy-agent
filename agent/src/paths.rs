@@ -175,8 +175,10 @@ pub fn find_godot_exe(configured: &str) -> Result<PathBuf> {
     // dossier du même nom que l'exécutable : on explore donc les dossiers
     // versionnés aussi, et on privilégie la build standard (sans C#).
     let mut roots: Vec<PathBuf> = vec![PathBuf::from(r"C:\Dev\Godot")];
-    for extra in [r"C:\Program Files\Godot", r"C:\Users\jimmy\Godot"] {
-        roots.push(PathBuf::from(extra));
+    roots.push(PathBuf::from(r"C:\Program Files\Godot"));
+    // Installation dans le dossier de l'utilisateur (`%USERPROFILE%\Godot`).
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        roots.push(PathBuf::from(home).join("Godot"));
     }
     for root in roots {
         let Ok(entries) = std::fs::read_dir(&root) else {

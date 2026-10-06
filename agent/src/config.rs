@@ -454,7 +454,10 @@ impl Default for Settings {
             ui: UiSettings::default(),
             startup: StartupMode::default(),
             mcp_servers: Vec::new(),
-            workspace: "C:\\Users\\jimmy\\Projet".into(),
+            // Dossier de projets par défaut : %USERPROFILE%\Projet.
+            workspace: std::env::var("USERPROFILE")
+                .map(|home| format!("{home}\\Projet"))
+                .unwrap_or_else(|_| "C:\\Projet".into()),
         }
     }
 }

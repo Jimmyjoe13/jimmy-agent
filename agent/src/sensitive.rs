@@ -2,7 +2,7 @@
 //! l'utilisateur.
 //!
 //! Cas réel du 5 octobre 2026 : dans une conversation sur JobXpress, Jimmy a
-//! sauvegardé puis réécrit `/home/jimmy/jobxpress/secure/.env.api` sur le VPS
+//! sauvegardé puis réécrit `/home/user/app/secure/.env.api` sur le VPS
 //! (`vps_exec` : `cp …; python3 <<'PY' …`) et relancé le conteneur, sans rien
 //! demander. Les permissions de la V1 (accordées une fois pour toutes) ne
 //! distinguent pas un `.env` d'un fichier de code.
@@ -470,9 +470,9 @@ mod tests {
     /// d'un `.env` de production par un script Python.
     #[test]
     fn la_reecriture_reelle_du_env_est_reperee() {
-        let command = "cd /home/jimmy/jobxpress/repo && git pull --ff-only 2>&1 | tail -3; \
-            cp /home/jimmy/jobxpress/secure/.env.api /home/jimmy/jobxpress/secure/.env.api.bak-20261005; \
-            python3 <<'PY'\nopen('/home/jimmy/jobxpress/secure/.env.api','w').write(x)\nPY";
+        let command = "cd /home/user/app/repo && git pull --ff-only 2>&1 | tail -3; \
+            cp /home/user/app/secure/.env.api /home/user/app/secure/.env.api.bak-20261005; \
+            python3 <<'PY'\nopen('/home/user/app/secure/.env.api','w').write(x)\nPY";
         let args = json!({"server": "vps", "tool": "vps_exec", "arguments": {"command": command}});
         assert!(needs_approval("mcp_call", &args).is_some());
     }
@@ -481,9 +481,9 @@ mod tests {
     #[test]
     fn les_lectures_restent_libres() {
         for command in [
-            "cat -A /home/jimmy/jobxpress/secure/.env.api | sed -n '1,40p' | head -45",
-            "echo '--- .env.api (deploy) ---' ; grep -E 'OPENCODE|SESSION' /home/jimmy/jobxpress/repo/deploy/.env.api | sed -E 's/(KEY=).*/\\1***/'",
-            "ls -la /home/jimmy/jobxpress/repo/deploy/.env.api 2>/dev/null",
+            "cat -A /home/user/app/secure/.env.api | sed -n '1,40p' | head -45",
+            "echo '--- .env.api (deploy) ---' ; grep -E 'OPENCODE|SESSION' /home/user/app/repo/deploy/.env.api | sed -E 's/(KEY=).*/\\1***/'",
+            "ls -la /home/user/app/repo/deploy/.env.api 2>/dev/null",
             "Get-Content .env | Select-String KEY",
         ] {
             assert_eq!(command_modifies_sensitive(command), None, "{command}");
@@ -496,12 +496,12 @@ mod tests {
     #[test]
     fn les_lectures_du_6_octobre_restent_libres() {
         for command in [
-            r#"Get-Content "C:\Users\jimmy\synaptiq\.env" | ForEach-Object { if ($_ -match '^\s*#' -or $_ -eq '') { $_ } else { ($_ -replace '=.+', '=***') } }"#,
+            r#"Get-Content "C:\Users\user\synaptiq\.env" | ForEach-Object { if ($_ -match '^\s*#' -or $_ -eq '') { $_ } else { ($_ -replace '=.+', '=***') } }"#,
             r#"if (Test-Path "$env:USERPROFILE\.ssh\config") { Get-Content "$env:USERPROFILE\.ssh\config" } else { "pas de config ssh" }; ls "$env:USERPROFILE\.ssh" | Select-Object Name"#,
-            r#"Get-Content C:\Users\jimmy\.ssh\known_hosts | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique"#,
-            r#"Select-String -Path C:\Users\jimmy\aggregate-full-app\.env -Pattern "^(SSH_HOST|SSH_USER|SSH_PORT|SSH_KEY_FILE)=" | ForEach-Object { $_.Line }"#,
-            r#"ssh -i "C:\Users\jimmy\Serveur Ubuntu\vps.key" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes ubuntu@203.0.113.10 "hostname; uptime; free -h; df -h /""#,
-            r#"ssh -i "C:\Users\jimmy\Serveur Ubuntu\vps.key" -o BatchMode=yes ubuntu@203.0.113.10 "docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}' 2>&1 | head -20""#,
+            r#"Get-Content C:\Users\user\.ssh\known_hosts | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique"#,
+            r#"Select-String -Path C:\Users\user\aggregate-full-app\.env -Pattern "^(SSH_HOST|SSH_USER|SSH_PORT|SSH_KEY_FILE)=" | ForEach-Object { $_.Line }"#,
+            r#"ssh -i "C:\Users\user\Serveur Ubuntu\vps.key" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes ubuntu@203.0.113.10 "hostname; uptime; free -h; df -h /""#,
+            r#"ssh -i "C:\Users\user\Serveur Ubuntu\vps.key" -o BatchMode=yes ubuntu@203.0.113.10 "docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}' 2>&1 | head -20""#,
             r#"findstr /B "SYNAPTIQ_AUTH_REQUIRED SYNAPTIQ_LLM_BASE_URL" .env | findstr /V KEY SECRET PASSWORD TOKEN"#,
             r#"Select-String -Path .env -Pattern '^SYNAPTIQ_AUTH_REQUIRED|^SYNAPTIQ_JUDGE' | ForEach-Object { $_.Line -replace '(KEY|SECRET|PASSWORD)=.*', '$1=***' }"#,
             r#"Select-String -Path .env -Pattern 'EMBED|LLM|JUDGE' | ForEach-Object { ($_.Line -split '=')[0] }"#,
@@ -532,7 +532,7 @@ mod tests {
     /// `--env-file` : docker lit le fichier, il ne le modifie pas.
     #[test]
     fn docker_compose_avec_env_file_est_libre() {
-        let command = "cd /home/jimmy/jobxpress/repo/deploy && sudo docker compose --env-file .env.api up -d --build api 2>&1 | tail -15";
+        let command = "cd /home/user/app/repo/deploy && sudo docker compose --env-file .env.api up -d --build api 2>&1 | tail -15";
         assert_eq!(command_modifies_sensitive(command), None);
     }
 
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn les_fichiers_sensibles_sont_reconnus() {
-        for path in [".env", "C:\\proj\\.env.local", "/srv/prod.env", "server.key", "/home/j/.ssh/config", "client_secret.json", "/home/jimmy/jobxpress/secure/api.conf"] {
+        for path in [".env", "C:\\proj\\.env.local", "/srv/prod.env", "server.key", "/home/j/.ssh/config", "client_secret.json", "/home/user/app/secure/api.conf"] {
             assert!(is_sensitive_path(path), "{path}");
         }
         for path in [".env.example", "src/main.rs", "environment.ts", "README.md", "keyboard.rs"] {

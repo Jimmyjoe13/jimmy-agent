@@ -152,7 +152,7 @@ Jimmy est une application que l'utilisateur **utilise en direct**.
 ## 5. Secrets
 
 - **Aucun secret dans un prompt, un commit, un journal, une réponse.** Clés et
-  cookies vivent dans `C:\Users\jimmy\.secrets\<service>.json`, hors dépôt.
+  cookies vivent dans `C:\Users\user\.secrets\<service>.json`, hors dépôt.
 - Lecture ciblée d'une seule valeur ; ne jamais afficher le fichier entier.
 - Un secret exposé : révoquer côté service d'abord, régénérer, nettoyer ensuite.
 - `JIMMY_LLM_DUMP` enregistre les requêtes **sans** la clé : ne jamais l'élargir.

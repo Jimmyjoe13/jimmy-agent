@@ -100,7 +100,7 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 ## 7. Secrets et données
 
 - Aucun secret dans un prompt, un commit, un journal ou une réponse. Clés dans
-  `C:\Users\jimmy\.secrets\`, lecture ciblée d'une seule valeur.
+  `C:\Users\user\.secrets\`, lecture ciblée d'une seule valeur.
 - `data/` (base, journaux, audio) ne se committe jamais et ne se recopie pas
   dans une réponse.
 - **Ouvert** : la clé du serveur MCP `aggregate` figure en clair dans
