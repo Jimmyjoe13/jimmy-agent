@@ -2,7 +2,7 @@
 //!
 //! Le prompt n'est pas un bloc figé : il est assemblé à chaque tour à partir de
 //! ce que Jimmy sait *au moment précis* de la demande — identité, outils
-//! disponibles, skills catalogue, souvenirs pertinents, notes du vault.
+//! disponibles, skills suggérés, souvenirs pertinents, notes du vault.
 //!
 //! Assembler à la demande (et non une fois au démarrage) évite deux pièges :
 //! un prompt qui devient faux après une modification des paramètres, et un
@@ -77,6 +77,9 @@ n'existe : c'est un programme personnel.
 - Un skill ne te donne aucun droit supplémentaire : les permissions de
   l'utilisateur s'appliquent à toutes les actions, y compris celles décrites
   dans un skill.
+- Tes skills (procédures nommées) : `list_skills` pour voir leurs noms,
+  `read_skill` pour charger celui qu'il faut avant d'agir. N'invente pas une
+  procédure de tête quand un skill existe : cherche d'abord.
 
 ## Sortie : courte, nette, précise
 Ce que tu écris est lu à voix haute, tel quel (voir « Voix ») : chaque phrase
@@ -192,9 +195,8 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
         parts.push(block.clone());
     }
 
-    if !ctx.skills.list().map(|s| s.is_empty()).unwrap_or(true) {
-        parts.push(ctx.skills.catalogue());
-    }
+    // Plus de catalogue injecté : 3 noms suggérés + phrase d'orientation
+    // vers list_skills (voir section Mémoire et skills). Coût constant.
 
     if let Some(block) = &ctx.vault_block {
         if !block.trim().is_empty() {
@@ -301,6 +303,43 @@ mod tests {
         // Les préfixes ne sont pas répétés : la liste reste légère.
         assert!(!summary.contains("mcp_aggregate__"), "{summary}");
         assert!(summary.chars().count() < 1500, "{} caractères", summary.chars().count());
+    }
+
+    /// Le prompt ne porte jamais le catalogue : ni nom ni description d'un
+    /// skill existant n'y figure, même avec une demande qui les évoque.
+    /// Seuls les 3 noms suggérés et l'orientation vers list_skills y sont.
+    #[test]
+    fn pas_de_catalogue_dans_le_prompt() {
+        let settings = Settings::default();
+        let db = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::db::Db::open_in_memory().expect("db"),
+        ));
+        let memory = MemoryStore::new(db);
+        let dir = std::env::temp_dir().join(format!("prompt-nocatalogue-{}", uuid::Uuid::new_v4()));
+        let skills = crate::skills::SkillStore::new(dir).unwrap();
+        skills.write("Atelier Vert", "Peindre des volets en vert.", "1. Poncer. 2. Peindre.").unwrap();
+        skills.write("Boulon Jaune", "Serrer des boulons jaunes.", "1. Cle de 13. 2. Serrer.").unwrap();
+        let registry = ToolRegistry::new();
+        registry.register_defaults(&crate::tools::ToolDeps {
+            http: reqwest::Client::new(),
+        });
+        let system = build_system(&PromptContext {
+            settings: &settings,
+            memory: &memory,
+            skills: &skills,
+            registry: &registry,
+            request: "bonjour",
+            memory_block: None,
+            vault_block: None,
+            recent_tools: None,
+            amendments: None,
+            voice: false,
+        });
+        assert!(!system.contains("Atelier"), "{system}");
+        assert!(!system.contains("volets"), "{system}");
+        assert!(!system.contains("Boulon"), "{system}");
+        assert!(system.contains("list_skills"), "{system}");
+        assert!(system.contains("read_skill"), "{system}");
     }
 
     /// Les amendements actés se retrouvent dans le prompt système, avec leur

@@ -571,6 +571,7 @@ pub async fn run(
         let llm = deps.llm.clone();
         let memory = deps.memory.clone();
         let skills = deps.skills.clone();
+        let data_dir = deps.data_dir.clone();
         let settings = settings.clone();
         let request = request.clone();
         let answer = final_text.clone();
@@ -609,34 +610,65 @@ pub async fn run(
             // Un appel de plus, en tâche de fond, au-delà du seuil seulement :
             // une question simple n'apprend rien de procédural.
             if settings.skills.auto_capture && tools_used.len() >= 3 {
-                match crate::skills::capture::capture(
+                // Barrière 2e occurrence : un besoin vu une seule fois se
+                // note et ne capture pas. Sans elle, ~15 skills par jour en
+                // usage réel, sans qu'aucun besoin ne revienne.
+                if !crate::skills::demand::note_request(&data_dir, &request) {
+                    log::info!("[skills] besoin inédit, pas de capture");
+                } else if let Some(proposal) = crate::skills::capture::capture(
                     &llm, &settings, &request, &answer, &tools_used, &skills,
                 )
                 .await
                 {
-                    Some(proposal) => {
-                        let honed = skills.load(&proposal.name).is_ok();
-                        match skills.write(&proposal.name, &proposal.description, &proposal.body) {
-                            Ok(path) => {
-                                log::info!(
-                                    "[skills] compétence {} : {} ({})",
-                                    if honed { "aiguisée" } else { "capturée" },
-                                    proposal.name,
-                                    path.display()
-                                );
-                                if let Some(events) = weak.upgrade() {
-                                    let _ = events
-                                        .send(AgentEvent::Memory {
-                                            action: "skill".into(),
-                                            detail: proposal.name.clone(),
-                                        })
-                                        .await;
-                                }
-                            }
-                            Err(error) => log::warn!("[skills] capture non écrite : {error}"),
-                        }
+                    // Cible d'écriture, dans l'ordre : désignation du modèle
+                    // (`proche:`, vérifiée), fusion forcée sur similarité
+                    // stricte (0,6 calibré), création sinon.
+                    enum Target {
+                        Honed(String),
+                        Forced(String),
+                        New,
                     }
-                    None => {}
+                    let target = match &proposal.close_to {
+                        Some(name) if skills.load(name).is_ok() => Target::Honed(name.clone()),
+                        _ => match skills.find_similar(&proposal.name, &proposal.description) {
+                            Some(known) => {
+                                log::info!(
+                                    "[skills] fusion forcée : « {} » rejoint « {} »",
+                                    proposal.name, known.name
+                                );
+                                Target::Forced(known.name)
+                            }
+                            None => Target::New,
+                        },
+                    };
+                    let (name, honed) = match target {
+                        Target::Honed(name) | Target::Forced(name) => (name, true),
+                        Target::New => (proposal.name.clone(), false),
+                    };
+                    let written = if honed {
+                        skills.update_body(&name, &proposal.body)
+                    } else {
+                        skills.write(&proposal.name, &proposal.description, &proposal.body)
+                    };
+                    match written {
+                        Ok(path) => {
+                            log::info!(
+                                "[skills] compétence {} : {} ({})",
+                                if honed { "aiguisée" } else { "capturée" },
+                                name,
+                                path.display()
+                            );
+                            if let Some(events) = weak.upgrade() {
+                                let _ = events
+                                    .send(AgentEvent::Memory {
+                                        action: "skill".into(),
+                                        detail: name.clone(),
+                                    })
+                                    .await;
+                            }
+                        }
+                        Err(error) => log::warn!("[skills] capture non écrite : {error}"),
+                    }
                 }
             }
         });

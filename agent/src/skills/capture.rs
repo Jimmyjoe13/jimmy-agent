@@ -10,9 +10,10 @@
 //!
 //! Deux garde-fous, même esprit que l'extraction de mémoire :
 //!
-//! * le catalogue des skills existants est fourni à l'extracteur : un besoin
-//!   déjà couvert ne crée pas un doublon, il peut **aiguiser** le skill
-//!   existant (même nom = réécriture, cf. SkillWeaver) ;
+//! * le modèle désigne d'abord le skill existant le plus proche (`proche:`,
+//!   vérifié côté code : un nom inconnu est ignoré) ; à défaut, une similarité
+//!   stricte (0,6, calibrée sur le corpus réel) force la fusion au lieu de
+//!   créer un quasi-doublon ;
 //! * réponse illisible = rien n'est capturé, jamais d'échec. Deux tentatives,
 //!   jamais plus — l'extraction tourne en tâche de fond, aucune latence pour
 //!   l'utilisateur.
@@ -24,14 +25,18 @@ use crate::skills::SkillStore;
 
 const CAPTURE: &str = r#"Tu condenses une trajectoire réussie d'un assistant en une compétence réutilisable.
 
-Réponds exactement avec ces trois lignes (ou uniquement [] si rien ne mérite un skill) :
+Réponds exactement avec ces quatre lignes (ou uniquement [] si rien ne mérite un skill) :
+proche: NOM exact du skill existant le plus proche, ou aucun
 name: nom-court-en-tirets
 description: quand utiliser ce skill, une phrase
 body: les étapes, numérotées, chaque étape sur sa propre ligne
 
 Règles :
 - La trajectoire a mobilisé plusieurs outils : ce que le skill doit transmettre est la DÉMARCHE (comment chercher, quoi vérifier, dans quel ordre), pas le résultat de la fois passée.
-- Un skill de la liste couvre déjà ce besoin ? Réponds [] — sauf si tu peux le nettement améliorer : alors réutilise son NOM exact et réécris son corps.
+- Un skill de la liste couvre déjà ce besoin ? Nomme-le dans `proche:` et
+  réutilise son NOM exact dans `name:` (aiguisage : son corps sera réécrit,
+  pas de doublon). Tu ne crées un nom nouveau que si aucun existant ne
+  convient, et tu l'écris dans `proche: aucun`.
 - Le corps : étapes généralisables (patterns plutôt que chemins d'un seul usage), sans secret, sans coordonnées.
 - Une trajectoire banale (une lecture, une question sans outils) → []."#;
 
@@ -40,6 +45,9 @@ pub struct ProposedSkill {
     pub name: String,
     pub description: String,
     pub body: String,
+    /// Nom existant désigné par le modèle (`proche:`), le cas échéant.
+    /// Vérifié par l'appelant : un nom inconnu est ignoré, pas créé.
+    pub close_to: Option<String>,
 }
 
 /// Tente de condenser la trajectoire en skill. `tools_used` = noms des outils
@@ -122,6 +130,7 @@ fn parse(raw: &str) -> Option<ProposedSkill> {
     let mut name = String::new();
     let mut description = String::new();
     let mut body = String::new();
+    let mut close_to: Option<String> = None;
     let mut in_body = false;
     for line in raw.lines() {
         if in_body {
@@ -132,6 +141,12 @@ fn parse(raw: &str) -> Option<ProposedSkill> {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("name:") {
             name = SkillStore::slugify(rest.trim());
+        } else if let Some(rest) = trimmed.strip_prefix("proche:") {
+            // `aucun`, vide ou illisible = pas de désignation.
+            let slug = SkillStore::slugify(rest.trim());
+            if !slug.is_empty() && slug != "skill" && slug != "aucun" {
+                close_to = Some(slug);
+            }
         } else if let Some(rest) = trimmed.strip_prefix("description:") {
             description = rest.trim().to_string();
         } else if trimmed.starts_with("body:") {
@@ -165,7 +180,7 @@ fn parse(raw: &str) -> Option<ProposedSkill> {
     };
     let description = truncate(&description, 200);
     let body = truncate(&body, 3000);
-    Some(ProposedSkill { name, description, body })
+    Some(ProposedSkill { name, description, body, close_to })
 }
 
 #[cfg(test)]
@@ -184,6 +199,20 @@ mod tests {
     #[test]
     fn renoncement_explicite() {
         assert!(parse("[]").is_none());
+    }
+
+    #[test]
+    fn proche_designe_ou_aucun() {
+        let raw = "proche: diagnostiquer-demarrage-docker\nname: diagnostiquer-demarrage-docker\ndescription: Quand Docker refuse de demarrer.\nbody: 1. Regarder les journaux du service.";
+        let proposal = parse(raw).expect("propose");
+        assert_eq!(proposal.close_to.as_deref(), Some("diagnostiquer-demarrage-docker"));
+        let raw = "proche: aucun\nname: truc-neuf\ndescription: Un besoin jamais vu nulle part ailleurs.\nbody: 1. Faire la chose demandeuse en premier lieu.";
+        let proposal = parse(raw).expect("propose");
+        assert!(proposal.close_to.is_none());
+        // Sans ligne proche : creation, comme avant.
+        let raw = "name: truc-neuf\ndescription: Un besoin jamais vu nulle part ailleurs.\nbody: 1. Faire la chose demandeuse en premier lieu.";
+        let proposal = parse(raw).expect("propose");
+        assert!(proposal.close_to.is_none());
     }
 
     #[test]
