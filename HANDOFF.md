@@ -1080,6 +1080,28 @@ Vérifié par `--test protocols -- --ignored` (un vrai modèle par format, tour
 d'outil puis réponse en flux). Les résultats de test de la bibliothèque sont
 passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
 
+ **79. Un filet sans réarmement devient une fausse erreur.** Le filet de 3
+ minutes du Chat (`chat.ts`, `armSafety`) était armé à l'envoi et jamais
+ réarmé : une tâche longue mais vivante (outils, fragments en flux)
+ affichait l'erreur quand même, puis la vraie réponse arrivait dans une
+ bulle séparée — gênant sans rien bloquer (6 octobre, soir). Corrigé par un
+ réarmement à chaque signe de vie (`pokeSafety` : outil, fragment, étape,
+ mémoire, Vault, skill) et un drapeau `safetyOn` (`clearTimeout` seul ne dit
+ pas si le filet est armé). L'erreur ne sort plus qu'après 3 min de silence
+ total. Règle : tout délai de sécurité se réarme sur activité, et son état
+ (armé/expiré/suspendu) vit dans une variable, pas dans l'existence du timer.
+
+ **80. Comparer des snapshots d'avatar sans attendre la fin de la bulle
+ fausse la mesure.** `/state listening` affiche la bulle et elle reste 12 s
+ (`BUBBLE_HIDE_DELAY`) : tous les snapshots pris entre-temps montrent la
+ bulle, pas la pose (36 % de pixels « différents » pour tous les états —
+ c'était la bulle). Et le % brut est dominé par le fond noir (~80 % de
+ l'image) : même un bras levé ne fait que ~3,5 %. Règle : laisser passer
+ 13 s après le dernier état à bulle, mesurer sur la région du personnage
+ (x 150-410, y 230-620), et prouver un geste par le mouvement entre deux
+ images rapprochées (cheer : ~15 % à 0,3 s d'intervalle, contre ~2-4 % pour
+ la seule respiration).
+
 ---
 
 ## Prochaines étapes
@@ -1153,6 +1175,51 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
   Plus aucun chemin personnel en dur : le dossier de travail par défaut et
   le dossier Godot se calculent depuis `%USERPROFILE%`.
 
+### Décisions prises (6 octobre 2026, soir — avatar marquant et filet)
+
+- **Gestes marquants, pas poses plus fortes seulement** : les poses ×2-3
+  restent statiques à l'œil ; ce qui se remarque, c'est le mouvement. Quatre
+  gestes additifs et auto-extinguibles (`nod`, `perk`, `cheer`, `shake`
+  dans `jimmy.gd`), qui survivent aux changements d'état (un `success`
+  suivi de `speaking` joue sa joie par-dessus la parole, sans la retarder).
+- **`success`/`error` branchés pour de vrai** : les relais Chat et voix
+  (desktop `commands.rs`) émettent `Success` après une tâche outillée
+  aboutie, `Error` sur échec fatal — jamais après un « STOP » ni pour une
+  réponse sans outil. `speak_for` ne retombe plus sur ces états transitoires
+  (sinon bras en V figés après chaque réponse).
+- **Filet 3 min réarmé sur activité** (piège 79) au lieu d'augmenté ou
+  supprimé : son rôle est le silence total, pas la lenteur.
+
+### Décisions prises (6 octobre 2026, soir — skills à coût constant)
+
+Constat chiffré (demande de l'utilisateur) : 32 skills dont 31 capturés en
+2 jours (~15/jour), catalogue injecté à chaque appel = ~1 800 jetons
+(~37 % du prompt), +900 par jour. L'aiguisage prévu ne s'est jamais
+déclenché (0/31) : croissance strictement additive.
+- **D — coût constant** : catalogue retiré du prompt ; restent 3 noms
+  suggérés + phrase vers `list_skills` / `read_skill` (découverte à la
+  demande, comme les MCP). `catalogue()` supprimé (ni appelant ni test).
+- **B — aiguisage réparé sans fusion abusive** : la similarité lexicale ne
+  peut pas décider seule (0,56 sur des sujets différents — calibré sur le
+  corpus avant codage). Le modèle désigne (`proche:`, vérifié) ; à défaut,
+  fusion forcée seulement à 0,6 (aucun faux positif mesuré) ; sinon création.
+- **C — barrière 2e occurrence** (`skills/demand.rs`, `data/skill_demand.json`,
+  cap 300) : première fois on note, on ne capture pas. Mots > 3 lettres,
+  3 communs minimum + recouvrement 0,5 (une requête pauvre ne valide rien).
+- **Existants améliorés si nécessaire → non** : aucune paire à 0,6 dans les
+  32, rien à fusionner. Descriptions conservées (le rappel `suggest` en a
+  besoin, étendu au corps) ; elles ne coûtent plus rien depuis D.
+
+ **81. Un bras qui traverse le torse disparaît dedans, pas derrière.**
+ `jimmy.gd` applique `arm_l` en miroir (`-_pose`) mais `arm_r` brut : avec
+ des valeurs symétriques (`1,10 / -1,10`), les deux bras penchaient du même
+ côté, et dès que l'angle grandissait le bras droit traversait le torse
+ (même plan z = 0) — invisible, « caché derrière le corps ». Vérifié sur
+ snapshots : success ne montrait qu'un bras. Règle : valeurs positives des
+ deux côtés (miroir partout) ; aucun membre ne doit viser le centre du
+ torse dans le plan z = 0 — une main-au-menton exigerait un décalage en z.
+ Au passage : 2,20 rad collait les bras aux oreilles, 1,90 fait un vrai V.
+
 ### Ensuite
 
 1. **Usage réel avec un modèle Responses** (Muse Spark 1.3) : vérifier qu'il
@@ -1176,6 +1243,15 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
    `whisper-server` survivent et sont réutilisés au lancement suivant (le
    contrôle de santé les trouve). Sans gravité, mais un orphelin lancé avec un
    autre modèle serait réutilisé tel quel.
+
+7. Parcours « fichier sensible » en échec 3× le 6 octobre au soir (25/26 à
+   chaque fois) : la demande partait mais le modèle répondait en texte sans
+   appeler `write_file` (tour à 0 outil en ~12 s), donc pas de carte. Trois
+   repros ciblées le même soir (session neuve, fil court, fil complet de la
+   suite) : carte en moins de 5 s à chaque fois, refus respecté — mécanisme
+   sain, côté modèle au moment des suites. À surveiller : si ça se répète
+   hors pic, rouvrir l'enquête côté envoi (`submit` ignoré si un tour est
+   encore en cours ?) plutôt que côté garde-fou.
 
 ### Différé
 

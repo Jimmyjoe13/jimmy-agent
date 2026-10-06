@@ -939,6 +939,104 @@ ceux du tableau ci-dessus ont été recalés de même) :
 
 ---
 
+## 3quinquies. Session 6 — 6 octobre, soir : avatar marquant et filet 3 min
+
+Demande de l'utilisateur en deux temps : les animations de l'avatar selon
+ses états sont trop discrètes (« on ne fait pas la différence »), puis un
+message fantôme pendant les longues tâches (« Pas de réponse après
+3 minutes » alors que Jimmy travaille encore).
+
+### Audit avatar : pourquoi on ne voyait rien
+
+Mesuré dans `POSES` (`godot/scripts/jimmy.gd`) : idle→listening = 8° de
+tête, le reste à ±0,1 rad, le tout lissé par `POSE_SPEED = 7.0` — à 4 m de
+caméra, ~10 px de différence. Et les états marqués n'étaient jamais émis :
+`success`/`waiting` jamais, `error` que sur crash du Chat. Le quotidien,
+c'était quatre poses quasi identiques.
+
+### Lot B livré : poses ×2-3, quatre gestes, success/error branchés
+
+- Poses amplifiées (tête listening −0,30, thinking yaw −0,55, bras success
+  ±2,20, tête error +0,45…), oreilles 9°→16° plus fréquentes, queue ×1,5.
+- Quatre gestes additifs et auto-extinguibles : `nod` à l'écoute, `perk` en
+  réflexion, `cheer` (3 sauts) en succès, `shake` en échec. Ils survivent
+  aux changements d'état : la joie joue par-dessus la parole, sans retarder
+  la voix. `speak_for` ne retombe plus sur les états transitoires (sinon
+  bras en V figés après chaque réponse).
+- Relais Chat et voix (`commands.rs`) : `Success` après tâche outillée
+  aboutie, `Error` sur échec fatal — jamais après un « STOP », jamais pour
+  une réponse sans outil. `STOPPED_REPLY` rendue publique pour ce garde-fou.
+
+Vérifié : 151 tests Rust, build release, snapshots des 8 états. Poses
+distinctes à l'œil (face / profil / tête basse / bras levé : 6,5–13 % de la
+région personnage contre 3,8 % de bruit) et geste prouvé en mouvement
+(cheer : ~15 % entre deux images à 0,3 s). Leçon de mesure (piège 80) : la
+bulle reste 12 s et le fond noir domine le % brut.
+
+### Filet 3 min : l'erreur fantôme
+
+Le filet était armé à l'envoi et jamais réarmé : tâche longue mais vivante →
+erreur, puis vraie réponse dans une autre bulle. Corrigé par réarmement à
+chaque signe de vie (`pokeSafety`) + drapeau `safetyOn` (piège 79).
+`npm run build` strict OK.
+
+### test-ui 25/26, deux fois : le fournisseur, pas le code
+
+Le parcours « fichier sensible » a expiré 2× (150 s sans carte). Le journal
+a tranché : aucun appel modèle ni outil entre l'envoi et le rappel mémoire,
+2 min 25 de vide — le fournisseur n'a pas répondu à temps. Repro ciblée le
+même soir : carte en <5 s, refus respecté, aucun fichier écrit. Mécanisme
+sain ; à surveiller (point 7 de « Ensuite » dans le HANDOFF).
+
+Constat au passage : `HANDOFF.md` contient des `é` doublement encodés
+(« passÃ©s » en bytes) sur certaines lignes — probablement un script de
+ré-encodage passé le 6 octobre. Laissé tel quel (un changement = un besoin),
+mais les futurs ajouts s'ancrent sur de l'ASCII pour ne pas casser l'outil
+d'édition.
+
+## 3sexies. Session 7 — 6 octobre, soir : skills à coût constant (D+B+C)
+
+Demande : Jimmy crée des skills en autonomie — le contexte de base ne va-t-il
+pas exploser ? Analyse d'abord (sans toucher au code) : validée en tendance.
+32 skills dont 31 capturés en 2 jours (~15/jour) ; catalogue injecté à chaque
+appel = ~7 300 caractères ≈ 1 800 jetons (~37 % du prompt) ; +900 par jour.
+Les corps (52 Ko) ne coûtent rien (`read_skill` à la demande). L'aiguisage
+prévu ne s'est jamais déclenché (0/31) : le modèle préfère toujours créer.
+
+Livré (go de l'utilisateur : D+B+C + existants si nécessaire) :
+- **D** : catalogue retiré du prompt (`catalogue()` supprimé) ; restent 3 noms
+  suggérés + phrase vers `list_skills`/`read_skill`. Coût skills constant.
+- **B** : ligne `proche:` obligatoire et vérifiée + fusion forcée à 0,6.
+  La similarité lexicale seule fusionnerait à tort (0,56 mesuré sur des sujets
+  différents) : calibré sur le corpus réel AVANT de coder, seuil strict.
+- **C** : `skills/demand.rs` — première occurrence notée sans capture
+  (`data/skill_demand.json`, cap 300), capture dès la 2e. Mots > 3 lettres,
+  3 communs + recouvrement 0,5 minimum.
+- **Existants** : `suggest` cherche aussi dans les corps (rappel sans jeton) ;
+  aucune paire à 0,6 dans les 32 → rien à fusionner ; descriptions gardées
+  (utiles au rappel, gratuites depuis D).
+
+Vérifié : 8 nouveaux tests unitaires verts (`cargo test` 0 échec, 0 warning),
+build release, test-ui 25/26 — seul le parcours sensible échoue (3×, modèle
+qui répond sans outil ; 3 repros ciblées OK, voir point 7 de « Ensuite »).
+
+Deux incidents d'outillage, sans suite : un `}` orphelin laissé par l'éditeur
+(rattrapé par `cargo test`, pas par relecture) et un `#[test]` volé au test
+voisin lors d'une insertion (3 warnings, réparés). Règle rappelée : après
+toute insertion entre deux tests, vérifier les attributs voisins.
+
+## 3septies. Session 8 — 6 octobre, soir : le bras caché (piège 81)
+
+Retour d'usage : un bras de Jimmy disparaît derrière le corps. Cause lue
+dans le code, pas devinée : `_arm_l` nie la pose, `_arm_r` la garde brute —
+avec des valeurs symétriques les deux bras penchaient du même côté, et le
+droit traversait le torse. Corrigé en miroir partout (sauf thinking, dont
+la main-au-menton traversait aussi : remplacée par un bras visible), V de
+success 2,20 → 1,90 (les bras touchaient les oreilles), cheer ±0,55 pour
+ne pas croiser les mains. Vérifié par snapshots : V ouvert à deux bras,
+profil à deux bras. L'avatar a été rechargé deux fois par le chien de garde
+(tuer son Godot), Jimmy n'a jamais été arrêté.
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 6 octobre** : tout est commité ; dépôt **public**
