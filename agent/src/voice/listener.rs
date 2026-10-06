@@ -529,8 +529,10 @@ async fn answer_command(
     outcome
 }
 
-/// Phrase dite après un arrêt d'urgence.
-const STOPPED_REPLY: &str = "D'accord, j'arrête. Je t'écoute.";
+/// Phrase dite après un arrêt d'urgence. Publique : le relais d'événements
+/// (crate desktop) s'en sert pour ne pas jouer la joie (`success`) quand
+/// Jimmy vient en fait d'être arrêté.
+pub const STOPPED_REPLY: &str = "D'accord, j'arrête. Je t'écoute.";
 /// Parole maximale d'un ordre d'arrêt : au-delà, ce n'est pas « STOP ».
 const STOP_MAX_VOICED_MS: u64 = 1500;
 

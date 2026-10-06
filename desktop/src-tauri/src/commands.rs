@@ -101,6 +101,10 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
 
         // Relais des événements vers le frontend et vers l'avatar Godot.
         let relay = tauri::async_runtime::spawn(async move {
+            // `success` ne se fête que pour une tâche outillée qui aboutit :
+            // une simple réponse sans outil reste en `speaking`, sans saut.
+            let mut tools_seen = false;
+            let mut failed = false;
             while let Some(event) = rx.recv().await {
                 if let Some(window) = &forward_window {
                     let _ = window.emit("agent-event", &event);
@@ -110,7 +114,19 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
                     AgentEvent::State { state, detail } => {
                         let _ = relay_avatar.set_state(*state, detail).await;
                     }
+                    AgentEvent::ToolStart { .. } => {
+                        tools_seen = true;
+                    }
+                    AgentEvent::Failed { .. } => {
+                        failed = true;
+                        let _ = relay_avatar.set_state(AvatarState::Error, "").await;
+                    }
                     AgentEvent::Final { text } => {
+                        // Le geste `cheer` de Godot est additif : il joue
+                        // par-dessus la parole qui suit, sans la retarder.
+                        if tools_seen && !failed {
+                            let _ = relay_avatar.set_state(AvatarState::Success, "").await;
+                        }
                         relay_avatar.say(text, 0).await;
                     }
                     _ => {}
@@ -581,6 +597,10 @@ pub async fn start_listening(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
 
     let relay = tauri::async_runtime::spawn(async move {
+        // Même règle que le relais du Chat : joie seulement pour une tâche
+        // outillée qui aboutit, jamais après un « STOP » (voir STOPPED_REPLY).
+        let mut tools_seen = false;
+        let mut failed = false;
         while let Some(event) = rx.recv().await {
             if let Some(window) = &handle {
                 let _ = window.emit("agent-event", &event);
@@ -589,7 +609,20 @@ pub async fn start_listening(
                 AgentEvent::State { state, detail } => {
                     let _ = avatar.set_state(*state, detail).await;
                 }
+                AgentEvent::ToolStart { .. } => {
+                    tools_seen = true;
+                }
+                AgentEvent::Failed { .. } => {
+                    failed = true;
+                    let _ = avatar.set_state(AvatarState::Error, "").await;
+                }
                 AgentEvent::Final { text } => {
+                    if tools_seen
+                        && !failed
+                        && text != jimmy_agent::voice::listener::STOPPED_REPLY
+                    {
+                        let _ = avatar.set_state(AvatarState::Success, "").await;
+                    }
                     avatar.say(text, 0).await;
                 }
                 _ => {}
