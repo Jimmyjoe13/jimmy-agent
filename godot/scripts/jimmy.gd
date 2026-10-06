@@ -25,55 +25,65 @@ const SPEAKING := "speaking"
 
 ## Posture cible par état. Toute nouvelle entrée ajoute un état sans toucher
 ## au reste du code : c'est le point d'extension prévu par le PLAN.
+## Réglage « gestes marqués » (oct. 2026) : les écarts idle→état sont ×2 à ×3
+## par rapport à la V1 (quelques degrés = invisible à 4 m de caméra). Chaque
+## valeur a été poussée jusqu'à être lisible en un coup d'œil sur snapshot.
 const POSES := {
+	## Convention bras : valeurs positives = vers l'extérieur, en miroir
+	## (`_arm_l` nie, `_arm_r` garde — voir `_apply_pose`). Un `arm_r`
+	## négatif envoie la main droite VERS le centre, à travers le torse
+	## (même plan z = 0) : le bras disparaît dans le corps. Donc toujours
+	## positif des deux côtés ; l'asymétrie se joue sur les montants.
 	"idle": {
 		"head_pitch": 0.0, "head_yaw": 0.0, "head_roll": 0.0,
 		"body_pitch": 0.0, "body_yaw": 0.0,
-		"arm_l": 0.10, "arm_r": -0.10,
+		"arm_l": 0.10, "arm_r": 0.10,
 		"jaw": 0.0, "ear": 0.0, "lean": 0.0, "bounce": 0.5,
 	},
 	"listening": {
-		"head_pitch": -0.14, "head_yaw": 0.10, "head_roll": 0.12,
-		"body_pitch": -0.05, "body_yaw": 0.0,
-		"arm_l": 0.05, "arm_r": -0.05,
-		"jaw": 0.04, "ear": -0.25, "lean": 0.10, "bounce": 0.7,
+		"head_pitch": -0.30, "head_yaw": 0.22, "head_roll": 0.20,
+		"body_pitch": -0.08, "body_yaw": 0.0,
+		"arm_l": 0.35, "arm_r": 0.35,
+		"jaw": 0.06, "ear": -0.45, "lean": 0.22, "bounce": 1.1,
 	},
 	"thinking": {
-		"head_pitch": -0.20, "head_yaw": -0.28, "head_roll": -0.05,
-		"body_pitch": -0.04, "body_yaw": 0.05,
-		"arm_l": 0.20, "arm_r": -1.15,
-		"jaw": 0.0, "ear": 0.05, "lean": 0.04, "bounce": 0.35,
+		"head_pitch": -0.38, "head_yaw": -0.55, "head_roll": -0.10,
+		"body_pitch": -0.06, "body_yaw": 0.12,
+		"arm_l": 0.30, "arm_r": 0.45,
+		"jaw": 0.0, "ear": 0.10, "lean": 0.08, "bounce": 0.5,
 	},
 	"speaking": {
-		"head_pitch": 0.02, "head_yaw": 0.0, "head_roll": 0.0,
-		"body_pitch": 0.02, "body_yaw": 0.0,
-		"arm_l": 0.18, "arm_r": -0.35,
-		"jaw": 0.55, "ear": 0.12, "lean": 0.12, "bounce": 0.9,
+		"head_pitch": 0.06, "head_yaw": 0.0, "head_roll": 0.0,
+		"body_pitch": 0.04, "body_yaw": 0.0,
+		"arm_l": 0.30, "arm_r": 0.55,
+		"jaw": 0.75, "ear": 0.18, "lean": 0.20, "bounce": 1.3,
 	},
-	# États additionnels (extension trivial, non utilisés par défaut en V1).
+	# États additionnels : bras en V franc et menton relevé (victoire lisible),
+	# tête basse et oreilles plaquées (échec lisible). `success`/`error` sont
+	# émis par les relais Tauri en fin de tâche outillée (sinon jamais vus).
 	"executing": {
-		"head_pitch": -0.08, "head_yaw": 0.18, "head_roll": 0.0,
-		"body_pitch": 0.05, "body_yaw": -0.10,
-		"arm_l": 0.85, "arm_r": -0.85,
-		"jaw": 0.10, "ear": -0.15, "lean": 0.16, "bounce": 1.0,
+		"head_pitch": -0.12, "head_yaw": 0.28, "head_roll": 0.0,
+		"body_pitch": 0.08, "body_yaw": -0.16,
+		"arm_l": 1.10, "arm_r": 1.10,
+		"jaw": 0.12, "ear": -0.25, "lean": 0.24, "bounce": 1.4,
 	},
 	"success": {
-		"head_pitch": 0.10, "head_yaw": 0.0, "head_roll": 0.0,
-		"body_pitch": -0.08, "body_yaw": 0.0,
-		"arm_l": 1.30, "arm_r": -1.30,
-		"jaw": 0.35, "ear": -0.30, "lean": -0.06, "bounce": 1.2,
+		"head_pitch": -0.18, "head_yaw": 0.0, "head_roll": 0.0,
+		"body_pitch": -0.12, "body_yaw": 0.0,
+		"arm_l": 1.90, "arm_r": 1.90,
+		"jaw": 0.45, "ear": -0.45, "lean": -0.10, "bounce": 1.6,
 	},
 	"error": {
-		"head_pitch": 0.28, "head_yaw": 0.0, "head_roll": 0.16,
-		"body_pitch": 0.12, "body_yaw": 0.0,
-		"arm_l": 0.30, "arm_r": -0.30,
-		"jaw": 0.18, "ear": 0.35, "lean": 0.22, "bounce": 0.4,
+		"head_pitch": 0.45, "head_yaw": 0.0, "head_roll": 0.22,
+		"body_pitch": 0.18, "body_yaw": 0.0,
+		"arm_l": 0.45, "arm_r": 0.45,
+		"jaw": 0.22, "ear": 0.60, "lean": 0.35, "bounce": 0.25,
 	},
 	"waiting": {
-		"head_pitch": -0.06, "head_yaw": 0.22, "head_roll": -0.08,
+		"head_pitch": -0.10, "head_yaw": 0.35, "head_roll": -0.12,
 		"body_pitch": 0.0, "body_yaw": 0.0,
-		"arm_l": 0.12, "arm_r": -0.12,
-		"jaw": 0.0, "ear": 0.0, "lean": 0.05, "bounce": 0.45,
+		"arm_l": 0.18, "arm_r": 0.18,
+		"jaw": 0.0, "ear": 0.0, "lean": 0.08, "bounce": 0.6,
 	},
 }
 
@@ -181,6 +191,13 @@ var _outline: StandardMaterial3D
 var _plain_cache: Dictionary = {}
 var _say_until := 0.0
 var _previous_state := ""
+## Geste ponctuel (« one-shot ») joué par-dessus la pose de fond : c'est lui
+## qui rend l'animation marquante, la pose seule restant lisible mais statique.
+## Le geste survit aux changements d'état (ex. `success` puis `speaking`) :
+## il est additif et s'éteint seul à la fin de sa durée.
+var _gesture := ""
+var _gesture_t := 0.0
+var _gesture_dur := 0.0
 
 var _mat_fur: StandardMaterial3D
 var _mat_cream: StandardMaterial3D
@@ -240,12 +257,42 @@ func set_state(new_state: String) -> void:
 		return
 	_previous_state = state
 	state = key
+	# Un geste franc à l'entrée de chaque état : sans lui, seule la pose
+	# (statique) change et l'œil ne remarque rien.
+	match key:
+		LISTENING:
+			_trigger_gesture("nod", 0.7)
+		THINKING:
+			_trigger_gesture("perk", 0.8)
+		"success":
+			_trigger_gesture("cheer", 1.6)
+		"error":
+			_trigger_gesture("shake", 1.8)
+
+
+## Déclenche un geste ponctuel (remplace celui en cours, aucun empilement).
+func _trigger_gesture(kind: String, duration: float) -> void:
+	_gesture = kind
+	_gesture_t = 0.0
+	_gesture_dur = maxf(0.2, duration)
+
+
+## Enveloppe du geste : 0 aux bords, 1 au milieu (montée/descente douces,
+## pas de saut visible à l'apparition ni à la disparition).
+func _gesture_env() -> float:
+	if _gesture == "" or _gesture_dur <= 0.0:
+		return 0.0
+	return sin(clampf(_gesture_t / _gesture_dur, 0.0, 1.0) * PI)
 
 
 ## Durée forcée de l'animation « speaking » (le temps de lire la bulle).
 ## Renvoie la durée réellement retenue.
 func speak_for(seconds: float) -> float:
 	set_state(SPEAKING)
+	# `success`/`error` sont transitoires : la parole qui suit ne doit pas y
+	# revenir ensuite (bras en V figés après chaque réponse, sinon).
+	if _previous_state == "success" or _previous_state == "error":
+		_previous_state = IDLE
 	var effective := maxf(0.4, seconds)
 	_say_until = _t + effective
 	return effective
@@ -289,6 +336,14 @@ func _update_glance(delta: float) -> void:
 func _process(delta: float) -> void:
 	_t += delta
 
+	# Horloge du geste ponctuel : il s'éteint seul, même si l'état a changé.
+	if _gesture != "":
+		_gesture_t += delta
+		if _gesture_t >= _gesture_dur:
+			_gesture = ""
+			_gesture_t = 0.0
+			_gesture_dur = 0.0
+
 	if state == SPEAKING and _t > _say_until:
 		set_state(_previous_state if _previous_state != SPEAKING else IDLE)
 
@@ -315,6 +370,9 @@ func _apply_pose(delta: float) -> void:
 	var breathe := sin(_t * 1.6)
 	var sway := sin(_t * 0.7)
 	var bounce: float = _pose["bounce"]
+	# Pendant la joie, tout s'emballe : respiration, balancement et queue.
+	if _gesture == "cheer":
+		bounce = maxf(bounce, 1.6)
 
 	# Corps : respiration + balancement de vie.
 	_body.position.y = 0.02 * breathe * bounce
@@ -346,9 +404,10 @@ func _apply_pose(delta: float) -> void:
 	_arm_l.rotation.z = -_pose["arm_l"] - deg_to_rad(4.0) * breathe * bounce
 	_arm_r.rotation.z = _pose["arm_r"] + deg_to_rad(4.0) * breathe * bounce
 
-	# Oreilles : mouvement Fin.
+	# Oreilles : mouvement franc et fréquent (avant : 9° tous les ~5 s,
+	# à peine visible). Une oreille qui se dresse se remarque.
 	var ear: float = _pose["ear"]
-	var twitch := deg_to_rad(9.0) * maxf(0.0, sin(_t * 0.9)) if fmod(_t, 5.3) < 0.4 else 0.0
+	var twitch := deg_to_rad(16.0) * maxf(0.0, sin(_t * 1.1)) if fmod(_t, 3.1) < 0.5 else 0.0
 	_ear_l.rotation.x = ear + twitch
 	_ear_r.rotation.x = ear - twitch * 0.6
 
@@ -369,11 +428,45 @@ func _apply_pose(delta: float) -> void:
 		pupil.position.x = lerpf(pupil.position.x, clampf(look.x * 0.03, -0.012, 0.012), follow)
 		pupil.position.y = lerpf(pupil.position.y, clampf(look.y * 0.03, -0.008, 0.008), follow)
 
+	# Geste ponctuel : couche additive par-dessus la pose de fond. Chaque
+	# geste tient en une phrase lisible : hochement, redressement, saut,
+	# secouement. L'enveloppe (`env`) évite tout saut aux bords.
+	var env := _gesture_env()
+	if env > 0.0:
+		var k := clampf(_gesture_t / _gesture_dur, 0.0, 1.0)
+		match _gesture:
+			"nod":
+				# Deux hochements francs (« bien reçu »).
+				var nod := -0.22 * sin(k * PI * 4.0) * env
+				_head.rotation.x += nod
+				_torso.rotation.x += nod * 0.3
+			"perk":
+				# Redressement + oreilles dressées (« je réfléchis »).
+				_head.rotation.x += -0.14 * env
+				_ear_l.rotation.x += -0.30 * env
+				_ear_r.rotation.x += -0.30 * env
+			"cheer":
+				# Trois petits sauts, bras levés en V ouvert (« c'est prêt ! »).
+				# ±0,55 : avec la pose success (1,9), les mains montent sans se
+				# toucher au-dessus de la tête.
+				_body.position.y += 0.13 * absf(sin(k * PI * 3.0))
+				_arm_l.rotation.z += -0.55 * env
+				_arm_r.rotation.z += 0.55 * env
+				_head.rotation.x += -0.12 * env
+			"shake":
+				# Secouement de tête + buste affaissé (« raté »).
+				_head.rotation.y += 0.38 * sin(_gesture_t * 15.0) * env
+				_head.rotation.x += 0.10 * env
+				_torso.rotation.x += 0.08 * env
+				_arm_l.rotation.z += -0.15 * env
+				_arm_r.rotation.z += 0.15 * env
+
 	# Queue : remuage en cascade, plus rapide quand Jimmy est enthousiaste.
-	var speed := 1.6 + 2.4 * bounce
+	# Amplitude ×1,5 par rapport à la V1 : le remuage doit se voir.
+	var speed := 1.2 + 3.4 * bounce
 	for i in _tail.size():
 		var phase := _t * speed - i * 0.42
-		var amount := (i + 1) * 0.13
+		var amount := (i + 1) * 0.19
 		_tail[i].rotation.y = sin(phase) * amount
 		_tail[i].rotation.x = deg_to_rad(-3.0) + cos(phase * 0.8) * amount * 0.25
 
