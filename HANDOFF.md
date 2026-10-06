@@ -1044,10 +1044,17 @@ fichier sensible (`.env*` sauf `.example`/`.sample`…, `*.pem`/`*.key`, clés
 SSH, `secret*`, `credential*`, dossiers `secure/`, `secrets/`, `.ssh/`…) :
 `write_file`, `run_command`, `mcp_call` à commande (`vps_exec`…) ou
 d'écriture (`upload`, `put`…). La lecture reste libre, `--env-file` aussi
-(docker lit le fichier). Une commande qui nomme un fichier sensible n'est
-libre que si **chaque** segment est une lecture connue (`cat`, `grep`, `sed`
-sans `-i`…) sans redirection ni heredoc ; les guillemets sont masqués avant
-le découpage (`grep -E 'A|B'`). La boucle d'agent suspend alors l'outil
+(docker lit le fichier). Seule une **écriture repérée** déclenche la demande
+(6 octobre : l'ancienne règle « lecture connue sinon suspect » a demandé onze
+accords en une matinée pour des `Get-Content`, `Select-String`, `findstr`,
+`ssh -i x.key`, aucun n'écrivant). Écriture = redirection `>` vers le
+fichier, verbe d'écriture (`WRITE_VERBS` : `rm`, `mv`, `tee`, `Set-Content`,
+`Out-File`, `Remove-Item`…), destination d'une copie (`cp a .env` ; `cp .env
+/tmp` reste libre), `sed -i`/`perl -i`, `find -delete`, script heredoc ou
+`python -c` qui écrit, API .NET (`[IO.File]::Write…`). Les commandes
+porteuses (`ssh`, `docker`, `sh -c`…) sont analysées récursivement. Le
+découpage (`segments`) respecte les guillemets et sépare aussi sur `( ) { }`
+(blocs PowerShell). La boucle d'agent suspend alors l'outil
 (`sensitive::authorize`, appelé dans `core/agent.rs`), émet
 `AgentEvent::Approval`, et le Chat affiche une carte « Autoriser / Refuser »
 (`approval_respond`). Refus, 5 min sans réponse, STOP ou demande **vocale** =

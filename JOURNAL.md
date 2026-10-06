@@ -749,6 +749,13 @@ Refuser » dans le Chat qui suspend l'outil (plutôt qu'un refus sec qui
 obligerait à tout faire à la main). À la voix, refus immédiat : personne ne
 peut cliquer. Détail et limites au piège 77.
 
+Le lendemain matin, l'utilisateur : « il demande trop l'autorisation ». Le
+journal `[sécurité]` montrait onze demandes, toutes pour des lectures
+(PowerShell, `findstr`, `ssh -i clé.key`) : la règle partait d'une liste de
+commandes de lecture surtout Unix et jugeait suspect tout le reste. Elle est
+inversée : seule une écriture repérée demande l'accord. Les onze commandes
+réelles sont devenues un test.
+
 ### Le mot d'arrêt « STOP »
 
 Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,

@@ -81,104 +81,222 @@ fn find_sensitive(text: &str) -> Option<String> {
         .map(|token| token.to_string())
 }
 
-/// Commandes qui ne font que lire (premier mot d'un segment).
-const READ_ONLY: &[&str] = &[
-    "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg", "ls", "ll", "dir", "stat",
-    "file", "wc", "readlink", "realpath", "test", "[", "[[", "echo", "printf", "diff", "cmp", "md5sum",
-    "sha1sum", "sha256sum", "sort", "uniq", "cut", "tr", "awk", "sed", "find", "cd", "pwd", "which",
-    "type", "jq", "column", "xxd", "hexdump", "base64", "true", "false", "exit", "get-content", "gc",
-    "select-string", "get-childitem", "gci", "test-path", "get-item", "gi", "resolve-path",
-    "measure-object", "select-object", "where-object", "format-list", "format-table", "out-string",
-    "out-null", "write-output", "write-host", "sls",
+// Seule une **écriture** repérée déclenche la demande : lire, filtrer,
+// masquer ou se servir d'une clé (`ssh -i x.key`) reste libre. Le 6 octobre,
+// l'approche inverse (liste de commandes de lecture, tout le reste suspect) a
+// demandé onze accords en une matinée pour des `Get-Content`, `Select-String`,
+// `findstr` et `ssh -i` : aucune n'écrivait.
+
+/// Commandes qui modifient les fichiers qu'elles nomment (Unix, PowerShell
+/// et ses alias, cmd).
+const WRITE_VERBS: &[&str] = &[
+    "mv", "rm", "unlink", "shred", "truncate", "dd", "tee", "touch", "chmod", "chown", "chattr",
+    "ssh-keygen", "set-content", "sc", "add-content", "ac", "out-file", "clear-content", "clc",
+    "remove-item", "ri", "del", "erase", "rmdir", "rd", "move-item", "mi", "move", "rename-item",
+    "rni", "ren", "rename", "new-item", "ni", "tee-object", "set-item", "si", "set-acl", "icacls",
 ];
 
-/// Une ligne de commande (PowerShell ou shell distant) qui touche un fichier
-/// sensible sans être une pure lecture. Renvoie le fichier en cause.
-pub fn command_modifies_sensitive(command: &str) -> Option<String> {
-    // `docker compose --env-file X` lit X, il ne le modifie pas.
-    let mut cleaned = String::new();
-    let mut skip_next = false;
-    for token in command.split(' ') {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if token == "--env-file" {
-            skip_next = true;
-            continue;
-        }
-        if token.starts_with("--env-file=") {
-            continue;
-        }
-        cleaned.push_str(token);
-        cleaned.push(' ');
-    }
-    let target = find_sensitive(&cleaned)?;
-    if is_read_only(&cleaned) {
-        None
-    } else {
-        Some(target)
-    }
+/// Commandes de copie : seule la **destination** est modifiée (copier un
+/// `.env` ailleurs le lit).
+const COPY_VERBS: &[&str] = &["cp", "copy", "copy-item", "cpi", "scp", "rsync", "install", "ln", "xcopy", "robocopy"];
+
+/// Interpréteurs dont le script (`-c`, `-e`) peut écrire.
+const INTERPRETERS: &[&str] = &["python", "python3", "py", "node", "perl", "ruby", "php", "deno", "bun"];
+
+/// Commandes qui en exécutent une autre (distante, conteneur, sous-shell) :
+/// la commande portée est analysée à son tour.
+const WRAPPERS: &[&str] = &[
+    "ssh", "bash", "sh", "zsh", "dash", "pwsh", "powershell", "cmd", "wsl", "docker", "kubectl",
+    "su", "runuser", "xargs", "invoke-expression", "iex",
+];
+
+/// Mots placés devant la vraie commande, sans effet propre.
+const PREFIXES: &[&str] = &["sudo", "doas", "env", "nohup", "time", "exec", "if", "then", "else", "elif", "do", "while", "until", "!"];
+
+/// Une commande d'un segment : ses mots (guillemets retirés) et les cibles de
+/// ses redirections `>` / `>>`.
+#[derive(Default)]
+struct Segment {
+    words: Vec<String>,
+    targets: Vec<String>,
 }
 
-/// Le texte entre guillemets remplacé par des `_` : un `|` ou un `>` dans un
-/// motif (`grep -E 'A|B'`) n'est pas un tube ni une redirection.
-fn mask_quoted(command: &str) -> String {
+/// Découpe une ligne de commande en segments, hors guillemets : `; | & \n`
+/// séparent les commandes ; `( ) { }` ouvrent ou ferment un bloc (sous-shell,
+/// bloc PowerShell) dont le premier mot est une nouvelle commande. Un `|` ou
+/// un `>` entre guillemets (`grep -E 'A|B'`) n'est donc ni un tube ni une
+/// redirection.
+fn segments(command: &str) -> Vec<Segment> {
+    let mut out = Vec::new();
+    let mut seg = Segment::default();
+    let mut word = String::new();
+    let mut has_word = false; // un mot est commencé (même `''`)
+    let mut redirect = false; // le prochain mot est la cible d'un `>`
     let mut quote: Option<char> = None;
-    command
-        .chars()
-        .map(|c| match quote {
-            Some(q) if c == q => {
+    let mut chars = command.chars().peekable();
+
+    // Range le mot en cours, comme argument ou comme cible de redirection.
+    let flush = |seg: &mut Segment, word: &mut String, has_word: &mut bool, redirect: &mut bool| {
+        if *has_word {
+            if *redirect {
+                seg.targets.push(std::mem::take(word));
+                *redirect = false;
+            } else {
+                seg.words.push(std::mem::take(word));
+            }
+        }
+        word.clear();
+        *has_word = false;
+    };
+
+    while let Some(c) = chars.next() {
+        if let Some(q) = quote {
+            if c == q {
                 quote = None;
-                c
+            } else {
+                word.push(c);
             }
-            Some(_) => '_',
-            None => {
-                if c == '\'' || c == '"' {
-                    quote = Some(c);
+            continue;
+        }
+        match c {
+            '\'' | '"' => {
+                quote = Some(c);
+                has_word = true;
+            }
+            '>' => {
+                // `2>` : le chiffre est un descripteur, pas un mot.
+                if has_word && word.chars().all(|d| d.is_ascii_digit() || d == '*') {
+                    word.clear();
+                    has_word = false;
+                } else {
+                    flush(&mut seg, &mut word, &mut has_word, &mut redirect);
                 }
-                c
+                while chars.peek() == Some(&'>') {
+                    chars.next();
+                }
+                // `>&1`, `>&2` : vers un autre descripteur, aucun fichier.
+                if chars.peek() == Some(&'&') {
+                    chars.next();
+                    while chars.peek().is_some_and(|d| d.is_ascii_digit()) {
+                        chars.next();
+                    }
+                } else {
+                    redirect = true;
+                }
             }
-        })
-        .collect()
+            ';' | '|' | '&' | '\n' | '(' | ')' | '{' | '}' => {
+                flush(&mut seg, &mut word, &mut has_word, &mut redirect);
+                redirect = false;
+                if !seg.words.is_empty() || !seg.targets.is_empty() {
+                    out.push(std::mem::take(&mut seg));
+                }
+            }
+            '<' => flush(&mut seg, &mut word, &mut has_word, &mut redirect),
+            c if c.is_whitespace() => flush(&mut seg, &mut word, &mut has_word, &mut redirect),
+            c => {
+                word.push(c);
+                has_word = true;
+            }
+        }
+    }
+    flush(&mut seg, &mut word, &mut has_word, &mut redirect);
+    if !seg.words.is_empty() || !seg.targets.is_empty() {
+        out.push(seg);
+    }
+    out
 }
 
-/// La commande ne fait-elle que lire ? Au moindre doute : non.
-fn is_read_only(command: &str) -> bool {
-    let lower = mask_quoted(&command.to_lowercase());
-    // Heredoc : un script complet (python3 <<'PY' …) peut tout écrire.
-    if lower.contains("<<") {
-        return false;
+/// Le mot désigne-t-il (ou contient-il) un fichier sensible ?
+fn sensitive_word(word: &str) -> Option<String> {
+    if is_sensitive_path(word) {
+        Some(word.to_string())
+    } else {
+        find_sensitive(word)
     }
-    // Redirections vers un fichier. Celles vers la sortie standard ou le néant
-    // sont retirées d'abord.
-    let mut probe = lower.clone();
-    for harmless in ["2>&1", "1>&2", ">&2", ">&1", "&>/dev/null", "2>/dev/null", ">/dev/null", "> /dev/null", "2>$null", ">$null"] {
-        probe = probe.replace(harmless, " ");
+}
+
+/// Un script (heredoc, `python -c`) qui écrit : ouverture en écriture,
+/// suppression, renommage, copie.
+fn script_writes(script: &str) -> bool {
+    let s = script.to_lowercase();
+    [
+        "'w'", "\"w\"", "'a'", "\"a\"", "'w+'", "'wb'", "'a+'", "'r+'", "write", "unlink", "os.remove",
+        "rename", "shutil.", "truncate", "appendfile", "rmsync", "copyfile", "set-content", "out-file",
+    ]
+    .iter()
+    .any(|marker| s.contains(marker))
+}
+
+/// Destination d'une copie : `-Destination X`, sinon le dernier argument
+/// positionnel (s'il y en a au moins deux).
+fn destination<'a>(rest: &[&'a str]) -> Option<&'a str> {
+    if let Some(i) = rest.iter().position(|w| w.eq_ignore_ascii_case("-destination")) {
+        return rest.get(i + 1).copied();
     }
-    if probe.contains('>') {
-        return false;
+    let positional: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).collect();
+    if positional.len() >= 2 {
+        positional.last().copied()
+    } else {
+        None
     }
-    probe
-        .split(|c| c == ';' || c == '|' || c == '&' || c == '\n')
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .all(|segment| {
-            let mut words = segment
-                .split_whitespace()
-                // Préfixes sans effet propre : sudo, variables d'environnement.
-                .skip_while(|w| *w == "sudo" || (w.contains('=') && !w.starts_with('-')));
-            let Some(verb) = words.next() else { return true };
-            let verb = verb.rsplit('/').next().unwrap_or(verb);
-            let rest: Vec<&str> = words.collect();
-            match verb {
-                // `sed -i`, `awk -i inplace` : édition en place.
-                "sed" | "awk" => !rest.iter().any(|w| *w == "-i" || w.starts_with("-i") || w.starts_with("--in-place") || *w == "inplace"),
-                // `find -delete` / `-exec` : effet de bord.
-                "find" => !rest.iter().any(|w| *w == "-delete" || *w == "-exec" || *w == "-execdir"),
-                verb => READ_ONLY.contains(&verb),
+}
+
+/// Le segment (mots d'une commande) écrit-il dans un fichier sensible ?
+fn words_modify(words: &[&str]) -> Option<String> {
+    let start = words
+        .iter()
+        .position(|w| !PREFIXES.contains(&w.to_lowercase().as_str()) && !(w.contains('=') && !w.starts_with('-')))?;
+    let (verb, rest) = words[start..].split_first()?;
+    let verb = verb.to_lowercase();
+    let verb = verb.rsplit(['/', '\\']).next().unwrap_or(&verb).trim_end_matches(".exe");
+    let any_sensitive = || rest.iter().find_map(|w| sensitive_word(w));
+    let has_flag = |pred: &dyn Fn(&str) -> bool| rest.iter().any(|w| pred(w));
+    match verb {
+        v if COPY_VERBS.contains(&v) => destination(rest).and_then(sensitive_word),
+        v if WRITE_VERBS.contains(&v) => any_sensitive(),
+        // Édition en place : `sed -i`, `perl -i`, `awk -i inplace`.
+        "sed" | "perl" if has_flag(&|w| w.starts_with("-i") || w.starts_with("--in-place")) => any_sensitive(),
+        "awk" | "gawk" if has_flag(&|w| w == "inplace") => any_sensitive(),
+        "find" if has_flag(&|w| ["-delete", "-exec", "-execdir"].contains(&w)) => any_sensitive(),
+        v if INTERPRETERS.contains(&v) => rest
+            .iter()
+            .filter(|w| script_writes(w))
+            .find_map(|w| sensitive_word(w)),
+        // Commande portée : chaque argument (la commande distante entre
+        // guillemets) et chaque suite d'arguments (`docker cp a c:/app/.env`).
+        v if WRAPPERS.contains(&v) => rest
+            .iter()
+            .find_map(|w| if w.contains(' ') { command_modifies_sensitive(w) } else { None })
+            .or_else(|| (0..rest.len()).find_map(|i| words_modify(&rest[i..]))),
+        _ => None,
+    }
+}
+
+/// Une ligne de commande (PowerShell ou shell distant) qui **écrit** dans un
+/// fichier sensible. Renvoie le fichier en cause ; `None` pour une lecture.
+pub fn command_modifies_sensitive(command: &str) -> Option<String> {
+    let lower = command.to_lowercase();
+    // Heredoc : un script complet (`python3 <<'PY' … open(x,'w')`).
+    if let Some(at) = lower.find("<<") {
+        let body = lower[at..].split_once('\n').map_or("", |(_, b)| b);
+        if script_writes(body) {
+            if let Some(target) = find_sensitive(command) {
+                return Some(target);
             }
-        })
+        }
+    }
+    // Appels .NET depuis PowerShell : `[IO.File]::WriteAllText('.env', …)`.
+    if ["::write", "::append", "::delete", "::copy", "::move", "::replace"].iter().any(|m| lower.contains(m)) {
+        if let Some(target) = find_sensitive(command) {
+            return Some(target);
+        }
+    }
+    segments(command).iter().find_map(|seg| {
+        seg.targets
+            .iter()
+            .find_map(|t| sensitive_word(t))
+            .or_else(|| words_modify(&seg.words.iter().map(String::as_str).collect::<Vec<_>>()))
+    })
 }
 
 /// Noms d'outils MCP qui écrivent (envoi, création, mise à jour, suppression).
@@ -369,6 +487,45 @@ mod tests {
             "Get-Content .env | Select-String KEY",
         ] {
             assert_eq!(command_modifies_sensitive(command), None, "{command}");
+        }
+    }
+
+    /// Les onze commandes du 6 octobre qui ont toutes demandé un accord :
+    /// aucune n'écrit (lecture masquée, filtre, clé SSH utilisée). Les trois
+    /// dernières, tronquées dans le journal, sont complétées à l'identique.
+    #[test]
+    fn les_lectures_du_6_octobre_restent_libres() {
+        for command in [
+            r#"Get-Content "C:\Users\jimmy\synaptiq\.env" | ForEach-Object { if ($_ -match '^\s*#' -or $_ -eq '') { $_ } else { ($_ -replace '=.+', '=***') } }"#,
+            r#"if (Test-Path "$env:USERPROFILE\.ssh\config") { Get-Content "$env:USERPROFILE\.ssh\config" } else { "pas de config ssh" }; ls "$env:USERPROFILE\.ssh" | Select-Object Name"#,
+            r#"Get-Content C:\Users\jimmy\.ssh\known_hosts | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique"#,
+            r#"Select-String -Path C:\Users\jimmy\aggregate-full-app\.env -Pattern "^(SSH_HOST|SSH_USER|SSH_PORT|SSH_KEY_FILE)=" | ForEach-Object { $_.Line }"#,
+            r#"ssh -i "C:\Users\jimmy\Serveur Ubuntu\vps.key" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes ubuntu@203.0.113.10 "hostname; uptime; free -h; df -h /""#,
+            r#"ssh -i "C:\Users\jimmy\Serveur Ubuntu\vps.key" -o BatchMode=yes ubuntu@203.0.113.10 "docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}' 2>&1 | head -20""#,
+            r#"findstr /B "SYNAPTIQ_AUTH_REQUIRED SYNAPTIQ_LLM_BASE_URL" .env | findstr /V KEY SECRET PASSWORD TOKEN"#,
+            r#"Select-String -Path .env -Pattern '^SYNAPTIQ_AUTH_REQUIRED|^SYNAPTIQ_JUDGE' | ForEach-Object { $_.Line -replace '(KEY|SECRET|PASSWORD)=.*', '$1=***' }"#,
+            r#"Select-String -Path .env -Pattern 'EMBED|LLM|JUDGE' | ForEach-Object { ($_.Line -split '=')[0] }"#,
+            "cp /srv/app/.env /tmp/sauvegarde-lisible",
+        ] {
+            assert_eq!(command_modifies_sensitive(command), None, "{command}");
+        }
+    }
+
+    /// Les écritures déguisées restent repérées : distante, conteneur, script,
+    /// bloc PowerShell, API .NET.
+    #[test]
+    fn les_ecritures_indirectes_sont_reperees() {
+        for command in [
+            r#"ssh -i "C:\k\vps.key" ubuntu@1.2.3.4 "echo X=1 >> /srv/app/.env""#,
+            "ssh vps sed -i s/a/b/ /srv/app/.env",
+            "docker cp ./nouveau c1:/app/.env",
+            r#"docker exec c1 sh -c "printf 'X=1' > /app/.env""#,
+            r#"python3 -c "open('/srv/.env','w').write('x')""#,
+            r#"if (Test-Path x) { Set-Content -Path .env -Value 1 }"#,
+            r#"[IO.File]::WriteAllText('C:\app\.env', 'x')"#,
+            "Get-Content a.txt | Out-File C:\\app\\.env",
+        ] {
+            assert!(command_modifies_sensitive(command).is_some(), "{command}");
         }
     }
 
