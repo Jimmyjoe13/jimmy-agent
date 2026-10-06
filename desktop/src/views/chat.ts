@@ -36,6 +36,9 @@ export function chatView(ctx: AppContext): HTMLElement {
   let sessionId: string | null = ctx.lastSessionId;
   let pending: HTMLElement | null = null;
   let safety = 0;
+  // Filet armé ou non : `clearTimeout` seul ne suffit pas à le savoir.
+  // Sans ce drapeau, impossible de distinguer « jamais armé » de « expiré ».
+  let safetyOn = false;
   // Bulle en cours d'écriture en flux (`delta`) : la réponse s'affiche pendant
   // que le modèle génère, au lieu d'un bloc unique à la fin. Transitoire :
   // `final` la remplace par la réponse complète, un appel d'outil la résout
@@ -305,6 +308,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       sendButton.removeAttribute("disabled");
       sendButton.textContent = "Envoyer";
       window.clearTimeout(safety);
+      safetyOn = false;
     }
   }
 
@@ -577,16 +581,27 @@ export function chatView(ctx: AppContext): HTMLElement {
     }
   }
 
-  /** Filet : sans réponse au bout de 3 minutes, la bulle d'attente devient une
-   *  erreur. Suspendu pendant une demande d'autorisation (l'utilisateur peut
-   *  prendre son temps), réarmé après sa réponse. */
+  /** Filet : sans signe de vie au bout de 3 minutes, la bulle d'attente
+   *  devient une erreur. Réarmé à chaque activité (outil, fragment, étape) :
+   *  avant, une tâche longue mais vivante affichait l'erreur quand même.
+   *  Suspendu pendant une demande d'autorisation (l'utilisateur peut prendre
+   *  son temps), réarmé après sa réponse. */
   function armSafety() {
     window.clearTimeout(safety);
+    safetyOn = true;
     safety = window.setTimeout(() => {
+      safetyOn = false;
       if (pending || streaming) {
         settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
       }
     }, ANSWER_TIMEOUT_MS);
+  }
+
+  /** Un événement du tour en cours prouve que Jimmy travaille : le filet
+   *  repart de zéro. Sans tour suivi (filet jamais armé, ex. commande vocale),
+   *  ne rien faire : ne pas étendre le périmètre du filet en douce. */
+  function pokeSafety() {
+    if (safetyOn && (pending || streaming)) armSafety();
   }
 
   // Cartes d'autorisation ouvertes, par identifiant de demande.
@@ -624,6 +639,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     else append(card);
     stream.scrollTop = stream.scrollHeight;
     window.clearTimeout(safety);
+    safetyOn = false;
   }
 
   /** Clôt une carte : accord, refus, ou `null` = expirée / sans objet. */
@@ -721,6 +737,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           if (path && !turnFiles.includes(path)) turnFiles.push(path);
         }
         logActivity(activityLine("outil", "tool", h("code", {}, event.name ?? "?")));
+        pokeSafety();
         break;
       case "toolEnd":
         logActivity(
@@ -732,19 +749,24 @@ export function chatView(ctx: AppContext): HTMLElement {
             event.durationMs ? h("em", {}, `${event.durationMs} ms`) : null,
           ),
         );
+        pokeSafety();
         break;
       case "memory":
         logActivity(activityLine("mémoire", "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        pokeSafety();
         break;
       case "skill":
         logActivity(activityLine("compétence", "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        pokeSafety();
         break;
       case "progress":
         // Étape d'une longue tâche vocale (aussi dite à voix haute).
         logActivity(activityLine("étape", "tool", h("span", { class: "activity-detail" }, event.text ?? "")));
+        pokeSafety();
         break;
       case "vault":
         logActivity(activityLine("Vault", "vault", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        pokeSafety();
         break;
       case "spoken":
         // Commande vocale : affichée comme un message de l'utilisateur, avec
@@ -765,6 +787,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         const target = streamingTarget();
         target.append(event.text ?? "");
         stream.scrollTop = stream.scrollHeight;
+        pokeSafety();
         break;
       }
       case "approval":
