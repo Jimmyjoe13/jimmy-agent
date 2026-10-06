@@ -18,7 +18,10 @@ type Role = "main" | "voice";
 type Stored = ModelTest & { at: number };
 type Sort = "recommended" | "name" | "speed" | "context" | "recent";
 
-const STORAGE_KEY = "jimmy.llm-tests.v1";
+// v2 (6 octobre) : Jimmy parle désormais les trois formats d'API du
+// fournisseur ; les échecs gardés en v1 (« ModelProtocolUnsupported » de Muse
+// Spark, GPT, Grok, Qwen 3.8…) sont oubliés plutôt que de griser ces modèles.
+const STORAGE_KEY = "jimmy.llm-tests.v2";
 /** Un test plus vieux que cela est refait avant de choisir le modèle. */
 const FRESH_MS = 24 * 3600 * 1000;
 const CONCURRENCY = 3;

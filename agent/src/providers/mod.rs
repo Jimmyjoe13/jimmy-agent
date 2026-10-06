@@ -8,6 +8,7 @@
 
 pub mod avatar;
 pub mod llm;
+pub mod protocol;
 pub mod stt;
 pub mod tts;
 

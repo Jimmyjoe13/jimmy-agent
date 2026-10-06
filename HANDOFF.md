@@ -1062,6 +1062,27 @@ outil non exécuté, et le modèle reçoit la consigne de ne pas contourner (rè
 8 du prompt). Limite connue : détection par motifs, un script intermédiaire
 qui ne nomme pas le fichier y échappe.
 
+**78. Chaque modèle a son format d'API.** OpenCode Go sert un modèle dans un
+seul des trois formats : Chat (`/chat/completions`), Responses (`/responses`,
+OpenAI : Muse Spark, GPT, Grok) ou Messages (`/messages`, Anthropic : Qwen
+3.7+/3.8, MiniMax). Appelé dans un autre format, il répond `400
+ModelProtocolUnsupported` : le 6 octobre, Muse Spark 1.3 restait muet car
+Jimmy ne parlait que Chat (12 modèles du catalogue sur 34 dans ce cas). Le format
+vient du catalogue public (`provider.npm` : `@ai-sdk/openai` → Responses,
+`@ai-sdk/anthropic` → Messages, sinon Chat), mis en cache par modèle
+(`LlmClient::protocol`). Sur `ModelProtocolUnsupported` malgré tout (modèle
+hors catalogue), `LlmClient::send` essaie les autres formats et retient le bon.
+La traduction (corps, réponse entière, flux SSE) vit dans
+`providers/protocol.rs`. Particularités : Messages veut la clé dans
+`x-api-key` (sinon `401 Missing API key`), le système à part, l'alternance
+stricte des rôles (résultats d'outil regroupés dans un message utilisateur) et
+aucun bloc de texte vide ; Responses veut le système dans `instructions` et
+les outils à plat (`{type, name, parameters}`). Le raisonnement (chiffré ou
+`thinking`) n'est jamais renvoyé : l'aller-retour d'outil marche sans.
+Vérifié par `--test protocols -- --ignored` (un vrai modèle par format, tour
+d'outil puis réponse en flux). Les résultats de test de la bibliothèque sont
+passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
+
 ---
 
 ## Prochaines étapes

@@ -756,6 +756,18 @@ commandes de lecture surtout Unix et jugeait suspect tout le reste. Elle est
 inversée : seule une écriture repérée demande l'accord. Les onze commandes
 réelles sont devenues un test.
 
+### Muse Spark muet : les trois formats d'API (6 octobre)
+
+L'utilisateur voulait Muse Spark 1.3 comme modèle ; il ne répondait pas. Une
+sonde directe a donné la cause : `400 ModelProtocolUnsupported`. Le
+fournisseur sert chaque modèle dans un seul format, et le catalogue le dit ;
+Jimmy n'en parlait qu'un. Douze modèles du catalogue étaient inutilisables sans
+que personne ne le sache, la bibliothèque les marquait simplement « cassés ».
+Consigne : « tout type de format ». Les formats Responses et Messages ont été
+sondés à la main (aller-retour d'outil, flux) avant d'écrire la traduction,
+puis vérifiés par le client de Jimmy sur un vrai modèle de chaque format —
+piège 78.
+
 ### Le mot d'arrêt « STOP »
 
 Demande de l'utilisateur : la transcription lance parfois des tâches pour rien,

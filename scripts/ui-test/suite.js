@@ -373,13 +373,23 @@ let stepPage = null;
 
   await step("Skin : changement appliqué et bouton actif mis à jour", async () => {
     await nav("Skin");
+    // Le changement de skin relance Godot : sa durée varie (1,5 s fixes ont
+    // échoué le 6 octobre). On attend l'état du bouton, 15 s au plus.
+    const actif = async (label) => {
+      await p
+        .waitForFunction(
+          (text) => [...document.querySelectorAll("button")].some((b) => b.textContent.includes(text) && b.className === "primary"),
+          label,
+          { timeout: 15000, polling: 200 },
+        )
+        .catch(() => {});
+      return p.locator("button", { hasText: label }).getAttribute("class");
+    };
     await p.locator("button", { hasText: "Fennec" }).click();
-    await p.waitForTimeout(1500);
-    const cls = await p.locator("button", { hasText: "Fennec" }).getAttribute("class");
+    const cls = await actif("Fennec");
     expect(cls === "primary", `bouton Fennec : ${cls}`);
     await p.locator("button", { hasText: "Renard roux" }).click();
-    await p.waitForTimeout(1500);
-    const back = await p.locator("button", { hasText: "Renard roux" }).getAttribute("class");
+    const back = await actif("Renard roux");
     expect(back === "primary", `retour renard : ${back}`);
     const dodge = p.locator(".card", { hasText: "Comportement" }).locator("input[type=checkbox]");
     expect((await dodge.count()) === 1, "interrupteur d'esquive absent");
@@ -441,25 +451,40 @@ let stepPage = null;
       expect(filtered > 0 && filtered < total, `recherche « glm » : ${filtered} sur ${total}`);
       await search.fill("");
 
-      // Un modèle que le fournisseur refuse ne peut pas devenir le modèle principal.
-      const grok = p.locator(".model-row", { hasText: "grok-4.6" });
-      if ((await grok.count()) > 0) {
-        const button = grok.locator("button", { hasText: "Principal" });
-        if (await button.isDisabled()) {
-          // Déjà marqué « cassé » par un test précédent (résultats gardés dans
-          // le localStorage) : le bouton est grisé, le refus est déjà acquis.
-          expect((await grok.getAttribute("class"))?.includes("is-broken"), "grok-4.6 grisé sans être marqué cassé");
-        } else {
-          await button.click();
-          await p.waitForFunction(
-            () => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("ne répond pas")),
-            null,
-            { timeout: 90000 },
-          );
-        }
-        const after = (await p.locator(".model-current code").first().textContent()) ?? "";
-        expect(after === main, `le modèle principal a changé alors que le test a échoué : ${after}`);
+      // Muse Spark 1.3 n'accepte que le format Responses : muet avant le
+      // 6 octobre (Jimmy ne parlait que Chat), il doit fonctionner, outils compris.
+      const muse = p.locator(".model-row", { hasText: "muse-spark-1.3-contributor" });
+      if ((await muse.count()) > 0) {
+        await muse.locator("button", { hasText: "Tester" }).click();
+        await muse.locator(".model-test.good, .model-test.warn, .model-test.bad").waitFor({ timeout: 90000 });
+        const verdict = (await muse.locator(".model-test").first().textContent()) ?? "";
+        expect((await muse.locator(".model-test.good").count()) === 1, `muse-spark-1.3-contributor : « ${verdict} »`);
       }
+
+      // Un modèle qui a échoué au test ne peut pas devenir le modèle principal.
+      // Plus aucun modèle du compte n'échoue depuis la prise en charge des trois
+      // formats : l'échec est simulé dans les résultats gardés, puis restauré.
+      const KEY = "jimmy.llm-tests.v2";
+      const savedTests = await p.evaluate((key) => localStorage.getItem(key), KEY);
+      try {
+        await p.evaluate((key) => {
+          const tests = JSON.parse(localStorage.getItem(key) ?? "{}");
+          tests["grok-4.6"] = { model: "grok-4.6", ok: false, tools: false, latency_ms: 0, tools_latency_ms: 0, reply: "", error: "HTTP 400 — échec simulé", tested_at: new Date().toISOString(), at: Date.now() };
+          localStorage.setItem(key, JSON.stringify(tests));
+        }, KEY);
+        await nav("Historique");
+        await nav("Paramètres");
+        await p.waitForSelector(".model-row", { timeout: 40000 });
+        const grok = p.locator(".model-row", { hasText: "grok-4.6" });
+        if ((await grok.count()) > 0) {
+          expect((await grok.getAttribute("class"))?.includes("is-broken"), "grok-4.6 en échec sans être marqué cassé");
+          expect(await grok.locator("button", { hasText: "Principal" }).isDisabled(), "un modèle en échec reste choisissable");
+        }
+      } finally {
+        await p.evaluate(([key, value]) => (value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value)), [KEY, savedTests]);
+      }
+      const after = (await p.locator(".model-current code").first().textContent()) ?? "";
+      expect(after === main, `le modèle principal a changé : ${after}`);
 
       // Choix d'un modèle vocal fonctionnel, puis retrait.
       const flash = p.locator(".model-row", { hasText: "glm-5.3-flash" });
