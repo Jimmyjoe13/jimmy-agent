@@ -7,7 +7,7 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 83 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 84 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
@@ -1070,6 +1070,18 @@ Deux corrections, validées par l'utilisateur : budget de fond 60 étapes /
 20 min, et les commandes d'inspection comptées comme lectures pour que le
 rappel « agis ou conclus » parte enfin (piège 83, mesuré sur les 63
 commandes réelles de la session).
+
+### La vision de la fenêtre active (7 octobre, après-midi)
+
+Demande : que Jimmy voie ce que fait l'utilisateur, seulement à sa demande.
+Vérifié avant tout code : les deux modèles du quotidien acceptent l'image
+(catalogue), puis une sonde brute dans les trois formats — bloquée d'abord
+par Cloudflare et l'en-tête de session (piège 84), ensuite « rouge, bleu »
+quatre fois sur quatre. Choix de l'utilisateur : déclenchement par lui seul
+(bouton ou phrase, aucun outil pour le modèle), fenêtre active seule.
+Livré en trois lots : image dans les messages (trois formats), capture
+`xcap` qui écarte Jimmy et son avatar, déclencheurs Chat et voix avec
+vérification du modèle. L'image ne touche jamais le disque.
 
 ## 8. Reste à faire et questions ouvertes
 

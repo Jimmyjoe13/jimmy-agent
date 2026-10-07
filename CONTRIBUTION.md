@@ -162,8 +162,10 @@ Jimmy est une application que l'utilisateur **utilise en direct**.
 ## 6. Mémoire, vault et identité
 
 - La mémoire persistante de Jimmy est **le vault Obsidian**
-  (`C:\Obsidian\Jimmy`), dossier d'écriture `0_Inbox/Jimmy` (piège 53). Synaptiq
-  n'est plus branché : ne pas le réintroduire sans décision de l'utilisateur.
+  (`C:\Obsidian\Jimmy`), dossier d'écriture `0_Inbox/Jimmy` (piège 53). SynaptiQ est
+  branché depuis le 7 octobre **par MCP seulement** (serveur `synaptiq` de la
+  config, identité `jimmy`), à côté du vault : pas de rappel ni d'écriture
+  automatiques sans nouvelle décision de l'utilisateur.
 - Jimmy **lit** tout le vault mais n'**écrit** que dans son dossier. Ne jamais
   modifier, déplacer ou supprimer une note existante du vault.
 - Ne pas confondre le second cerveau de l'agent et celui de l'utilisateur : les

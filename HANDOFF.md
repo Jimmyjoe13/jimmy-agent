@@ -63,6 +63,7 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | **Fichiers sensibles (5-6 octobre)** | tests `sensitive` (dont les 11 lectures réelles du 6 octobre, libres, et 8 écritures déguisées, bloquées) ; parcours UI : carte « garde-N.env », refus respecté (piège 77) |
 | **Trois formats d'API (6 octobre)** | `--test protocols -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) — outil appelé, résultat relu, réponse en flux ; test de bibliothèque vert pour les trois (piège 78) |
 | **État au 6 octobre** | 151 tests unitaires, 0 avertissement ; `test-ui.ps1` : **26/26**, 0 erreur JS |
+| **Vision (7 octobre)** | sonde brute puis `--test protocols chaque_format_lit_une_image -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) lisent « rouge, bleu » sur une image générée, en flux ; `--test screen -- --ignored` : fenêtre active capturée hors du processus appelant (1461×720, JPEG) ; 175 tests unitaires ; `test-ui.ps1` : **27/28**, 0 erreur JS (échec « fichier sensible » : le modèle répond sans outil, 3e fois de suite avec Muse Spark) |
 | **Tâches de fond (7 octobre)** | `--test background` (6 tests, tâches simulées : passage en fond, STOP épargne le fond, « arrête tout », bouton de la tâche, une seule à la fois, pas pendant une autorisation) ; 165 tests unitaires, 0 avertissement ; `test-ui.ps1` : **27/27**, 0 erreur JS — parcours réel : passage en fond 15 s après l'outil, question en parallèle répondue, fin dans le fil |
 
 ---
@@ -1117,6 +1118,14 @@ passés en `jimmy.llm-tests.v2` pour oublier les anciens échecs de format.
   utilisable quand LM Studio est éteint.
 - **Mémoire longue = vault Obsidian** (3 octobre, nuit) : plus de service
   externe. Souvenirs en notes Markdown, recherche plein texte locale.
+  **Complété le 7 octobre** : SynaptiQ rebranché **par MCP**, comme Claude
+  Code (choix de l'utilisateur parmi MCP seul / MCP + mémoire automatique /
+  automatique seule) — serveur `synaptiq` dans `mcp_servers`, identité
+  `SYNAPTIQ_AGENT_ID=jimmy` (une identité = un cerveau : Jimmy ne lit pas les
+  souvenirs de Claude Code), outils à la demande (`mcp_call`). Le vault
+  reste sa mémoire lisible ; aucun rappel ni écriture automatique dans
+  SynaptiQ. L'API est jointe en `127.0.0.1:8000` par un tunnel SSH vers le
+  serveur (relancé au démarrage de Windows).
 
 ### Décisions prises (4 octobre 2026)
 
@@ -1246,6 +1255,38 @@ déclenché (0/31) : croissance strictement additive.
  commande distante de `ssh` analysée, redirection vers `$null` tolérée.
  Mesuré sur les 63 commandes réelles de la session : 0 → 40 lectures au moins. Et
  une tâche de fond a désormais 60 étapes / 20 min.
+
+ **84. Une sonde HTTP brute vers OpenCode Go échoue avant même le
+ modèle.** Sonde de la vision (7 octobre) en Python : `403 error code:
+ 1010` (Cloudflare refuse l'User-Agent de Python), puis `400
+ MissingSessionID` (« Request is missing x-opencode-session »). Le client
+ de Jimmy envoie déjà les deux (`jimmy/0.1 (desktop agent)` et la session
+ `LlmClient::new`) : ce ne sont pas des erreurs de format. Règle : toute
+ sonde hors de Jimmy envoie ces deux en-têtes, sinon on conclut à tort
+ qu'un format ou une fonction est refusé.
+
+### Décisions prises (7 octobre 2026 — vision de la fenêtre active)
+
+Demande : que Jimmy ait le contexte de ce que fait l'utilisateur, **seulement
+quand il le demande**. Choix de l'utilisateur :
+- **Déclenchement par l'utilisateur seul** : bouton « Joindre ma fenêtre »
+  du Chat (capture au clic, vignette retirable, `screen_capture` /
+  `screen_discard`) ou phrase explicite au Chat comme à la voix
+  (`screen::wants_screen` : « regarde mon écran », « tu vois ma fenêtre ? »,
+  « ce que je fais » — « l'écran de login » ne capture rien). **Aucun outil
+  de capture** n'est donné au modèle.
+- **Fenêtre active seule** : on écarte le processus de Jimmy et l'avatar
+  (cliquer dans le Chat met Jimmy au premier plan), puis la fenêtre au
+  premier plan si elle reste, sinon la plus haute de la pile
+  (`screen::pick`, crate `xcap`). Réduite à 1600 px, JPEG qualité 80.
+- **Jamais sur disque** : `Message::images` est hors sérialisation ;
+  l'historique garde « (Capture d'écran jointe : « titre ».) ». Les captures
+  du bouton attendent en mémoire (3 au plus).
+- **Modèle sans vision** (catalogue, `modalities.input`) : l'image n'est pas
+  envoyée et Jimmy le dit (`App::images_for`). MiMo-V2.6-Flash et Muse Spark
+  1.3 lisent les images.
+- La suite d'interface vérifie bouton, vignette et retrait **sans envoyer**
+  l'écran réel au fournisseur.
 
 ### Décisions prises (7 octobre 2026 — tâches de fond)
 
