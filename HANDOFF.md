@@ -1234,6 +1234,19 @@ déclenché (0/31) : croissance strictement additive.
  place de fond) — le parcours suivant attend qu'elle se libère et vérifie
  que le bandeau porte **son** titre, sinon il lit celui du précédent.
 
+ **83. Un rappel qui compte toute commande comme une action ne part
+ jamais.** Usage réel du 7 octobre : deux demandes de suite (tunnel SSH vers
+ un serveur, reconfiguration de clients MCP) ont chacune épuisé 25 étapes en
+ inspection — clés essayées une à une, `Get-ChildItem`, `ssh … docker ps`,
+ `Test-Path` — puis conclu « reste à faire », sans rien changer.
+ Le rappel « agis ou conclus » (`EXPLORATION_NUDGE`, étapes 6 et 10)
+ n'existe que si `acts == 0` ; or tout `run_command` comptait comme une
+ action. `sensitive::command_is_read_only` classe désormais une commande
+ d'inspection comme lecture — **liste blanche** (verbe inconnu = action),
+ commande distante de `ssh` analysée, redirection vers `$null` tolérée.
+ Mesuré sur les 63 commandes réelles de la session : 0 → 40 lectures au moins. Et
+ une tâche de fond a désormais 60 étapes / 20 min.
+
 ### Décisions prises (7 octobre 2026 — tâches de fond)
 
 Demande de l'utilisateur : « laisser le chat le plus disponible possible en
@@ -1258,6 +1271,10 @@ lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
   premier plan, comme avant.
 - **Pas de persistance** : le registre (`agent/src/tasks.rs`) vit en
   mémoire ; un redémarrage de Jimmy perd la tâche en cours.
+- **Budget élargi en fond** (choix de l'utilisateur après usage réel) :
+  60 étapes et 20 min au lieu de 25 étapes et 10 min. Relu à chaque étape
+  (`agent::step_budget`, drapeau `AgentDeps::background`) : le premier plan
+  garde ses limites, une tâche gagne le sien dès son passage en fond.
 - Mécanique : `App::start_task` (Chat et voix) remplace `cancellable` ; ses
   événements passent tels quels au premier plan, puis `Detached` et tout
   enveloppé dans `Background` (avatar non sollicité, sauf succès/erreur à la

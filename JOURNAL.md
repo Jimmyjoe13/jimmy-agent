@@ -7,7 +7,7 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 82 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 83 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
@@ -1061,6 +1061,15 @@ demande, les 15 s faisaient partir en fond une tâche dont le premier appel au
 modèle avait pris 26 s, au moment même où elle demandait une autorisation.
 Le délai part maintenant du premier outil, et jamais pendant une carte
 d'autorisation.
+
+Premier usage réel le matin même : « il reste bloqué depuis deux prompts ».
+Le journal disait autre chose — chaque demande tournait 6 à 7 minutes en
+fond puis concluait « reste à faire » : 25 étapes d'inspection (clés SSH
+essayées une à une, la bonne trouvée à l'étape 17), plus d'étapes pour agir.
+Deux corrections, validées par l'utilisateur : budget de fond 60 étapes /
+20 min, et les commandes d'inspection comptées comme lectures pour que le
+rappel « agis ou conclus » parte enfin (piège 83, mesuré sur les 63
+commandes réelles de la session).
 
 ## 8. Reste à faire et questions ouvertes
 
