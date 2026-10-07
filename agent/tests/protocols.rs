@@ -83,3 +83,33 @@ async fn le_test_de_modele_passe_dans_chaque_format() {
         assert!(test.ok && test.tools, "{model} : {test:?}");
     }
 }
+
+/// Vision (7 octobre) : une image jointe est lue par un vrai modèle de
+/// chaque format, en flux, par le client de Jimmy. Image générée (gauche
+/// rouge, droite bleue) : aucune donnée personnelle.
+#[tokio::test]
+#[ignore = "consulte de vrais services ; à lancer explicitement"]
+async fn chaque_format_lit_une_image() {
+    use base64::Engine;
+    let llm = client();
+    let rgba = image::RgbaImage::from_fn(96, 64, |x, _| if x < 48 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) });
+    let (jpeg, _, _) = jimmy_agent::screen::encode_jpeg(&rgba, 1600).unwrap();
+    let image = jimmy_agent::core::types::Image {
+        media_type: "image/jpeg".into(),
+        base64: base64::engine::general_purpose::STANDARD.encode(&jpeg),
+        label: "test".into(),
+    };
+    for model in MODELES {
+        let messages = vec![Message::user_with_images(
+            "Quelles sont les deux couleurs de cette image, de gauche à droite ? Réponds en deux mots.",
+            vec![image.clone()],
+        )];
+        let reply = llm
+            .chat_stream(model, &messages, &[], None, 2048, |_| {})
+            .await
+            .unwrap_or_else(|e| panic!("{model} : image refusée : {e}"));
+        let text = reply.content.to_lowercase();
+        println!("{model} : {}", reply.content.trim());
+        assert!(text.contains("rouge") && text.contains("bleu"), "{model} n'a pas lu l'image : {text}");
+    }
+}

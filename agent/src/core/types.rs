@@ -41,10 +41,36 @@ pub struct ToolCall {
     pub arguments: serde_json::Value,
 }
 
+/// Image jointe à une demande de l'utilisateur (capture de la fenêtre
+/// active, vision du 7 octobre). Jamais sérialisée : ni dans l'historique, ni
+/// dans les journaux de requêtes — seule une note « (capture jointe : …) »
+/// reste dans le texte du message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    /// `image/jpeg` ou `image/png`.
+    pub media_type: String,
+    /// Contenu encodé en base64.
+    pub base64: String,
+    /// Ce que montre l'image (titre de la fenêtre) : pour la note de
+    /// l'historique et pour l'interface.
+    pub label: String,
+}
+
+impl Image {
+    /// URL `data:` (formats Chat et Responses).
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    /// Images jointes (messages de l'utilisateur seulement). Hors
+    /// sérialisation : une capture d'écran ne doit jamais aller sur disque.
+    #[serde(skip)]
+    pub images: Vec<Image>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +87,7 @@ impl Message {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
         }
     }
 
@@ -71,6 +98,7 @@ impl Message {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
         }
     }
 
@@ -81,6 +109,7 @@ impl Message {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
         }
     }
 
@@ -91,14 +120,35 @@ impl Message {
             tool_calls: None,
             tool_call_id: Some(call_id.into()),
             name: Some(name.into()),
+            images: Vec::new(),
         }
+    }
+
+    /// Demande de l'utilisateur avec des images jointes.
+    pub fn user_with_images(content: impl Into<String>, images: Vec<Image>) -> Self {
+        let mut message = Message::user(content);
+        message.images = images;
+        message
     }
 
     /// Version OpenAI-compatible.
     pub fn to_wire(&self) -> serde_json::Value {
         let mut map = serde_json::Map::new();
         map.insert("role".into(), serde_json::Value::String(self.role.as_str().into()));
-        map.insert("content".into(), serde_json::Value::String(self.content.clone()));
+        // Avec image : contenu en parties (texte puis images), forme validée
+        // par la sonde du 7 octobre (mimo-v2.6-flash, glm-5.3-flash).
+        let content = if self.images.is_empty() {
+            serde_json::Value::String(self.content.clone())
+        } else {
+            let mut parts = vec![serde_json::json!({ "type": "text", "text": self.content })];
+            parts.extend(
+                self.images
+                    .iter()
+                    .map(|image| serde_json::json!({ "type": "image_url", "image_url": { "url": image.data_url() } })),
+            );
+            serde_json::Value::Array(parts)
+        };
+        map.insert("content".into(), content);
         if let Some(calls) = &self.tool_calls {
             if !calls.is_empty() {
                 map.insert(

@@ -392,6 +392,15 @@ impl LlmClient {
             .unwrap_or_default())
     }
 
+    /// Le modèle accepte-t-il une image en entrée ? D'après le catalogue
+    /// (`modalities.input`). `None` : catalogue injoignable ou modèle absent —
+    /// l'appelant tente alors quand même.
+    pub async fn accepts_images(&self, model: &str) -> Option<bool> {
+        let models = self.catalog_models(false).await.ok()?;
+        let input = models.get(model)?.get("modalities")?.get("input")?.as_array()?.clone();
+        Some(input.iter().any(|kind| kind == "image"))
+    }
+
     /// Entrées du fournisseur `opencode-go` dans le catalogue public.
     async fn catalog_models(
         &self,

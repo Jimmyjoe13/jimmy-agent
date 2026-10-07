@@ -110,6 +110,7 @@ impl History {
                 tool_calls: tool_calls.and_then(|raw| serde_json::from_str(&raw).ok()),
                 tool_call_id: None,
                 name: tool_name,
+                images: Vec::new(),
             });
         }
         if out.len() > limit {

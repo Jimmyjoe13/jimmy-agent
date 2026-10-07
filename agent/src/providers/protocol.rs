@@ -338,7 +338,14 @@ fn responses_body(model: &str, messages: &[Message], tools: &[ToolSpec], max_tok
     for message in messages {
         match message.role {
             Role::System => {}
-            Role::User => input.push(json!({ "role": "user", "content": message.content })),
+            Role::User if message.images.is_empty() => input.push(json!({ "role": "user", "content": message.content })),
+            // Avec image : parties `input_text` / `input_image` (sonde du
+            // 7 octobre, muse-spark-1.3-contributor).
+            Role::User => {
+                let mut parts = vec![json!({ "type": "input_text", "text": message.content })];
+                parts.extend(message.images.iter().map(|image| json!({ "type": "input_image", "image_url": image.data_url() })));
+                input.push(json!({ "role": "user", "content": parts }));
+            }
             Role::Assistant => {
                 if !message.content.trim().is_empty() {
                     input.push(json!({ "role": "assistant", "content": message.content }));
@@ -498,6 +505,15 @@ fn messages_body(model: &str, messages: &[Message], tools: &[ToolSpec], max_toke
         match message.role {
             Role::System => {}
             Role::User => {
+                // Images d'abord, puis le texte (sonde du 7 octobre,
+                // qwen3.8-flash) : base64 brut et type de média à part.
+                for image in &message.images {
+                    push_block(
+                        &mut out,
+                        "user",
+                        json!({ "type": "image", "source": { "type": "base64", "media_type": image.media_type, "data": image.base64 } }),
+                    );
+                }
                 // Un bloc de texte vide est refusé par l'API.
                 if !message.content.trim().is_empty() {
                     push_block(&mut out, "user", json!({ "type": "text", "text": message.content }));
@@ -803,6 +819,35 @@ mod tests {
     }
 
     // ── Responses ──
+
+    /// Une image jointe part dans la forme acceptée par chaque format (sonde
+    /// réelle du 7 octobre : les quatre modèles ont lu « rouge, bleu »).
+    #[test]
+    fn une_image_jointe_suit_le_format_de_chaque_api() {
+        let image = crate::core::types::Image { media_type: "image/jpeg".into(), base64: "QUJD".into(), label: "Éditeur".into() };
+        let messages = vec![
+            Message::system("Tu es Jimmy."),
+            Message::user_with_images("Que vois-tu ?", vec![image]),
+        ];
+        let chat = Protocol::Chat.body("m", &messages, &[], None, 512, false);
+        let parts = &chat["messages"][1]["content"];
+        assert_eq!(parts[0], json!({ "type": "text", "text": "Que vois-tu ?" }));
+        assert_eq!(parts[1], json!({ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } }));
+
+        let responses = Protocol::Responses.body("m", &messages, &[], None, 512, false);
+        let parts = &responses["input"][0]["content"];
+        assert_eq!(parts[0], json!({ "type": "input_text", "text": "Que vois-tu ?" }));
+        assert_eq!(parts[1], json!({ "type": "input_image", "image_url": "data:image/jpeg;base64,QUJD" }));
+
+        let anthropic = Protocol::Messages.body("m", &messages, &[], None, 512, false);
+        let blocks = &anthropic["messages"][0]["content"];
+        assert_eq!(blocks[0], json!({ "type": "image", "source": { "type": "base64", "media_type": "image/jpeg", "data": "QUJD" } }));
+        assert_eq!(blocks[1], json!({ "type": "text", "text": "Que vois-tu ?" }));
+
+        // Sans image : le texte reste une simple chaîne (rien ne change).
+        let plain = Protocol::Chat.body("m", &[Message::user("Bonjour")], &[], None, 512, false);
+        assert_eq!(plain["messages"][0]["content"], "Bonjour");
+    }
 
     /// Corps tel qu'accepté par Muse Spark 1.3 (sonde du 6 octobre) : système
     /// en `instructions`, appels et résultats en éléments reliés par `call_id`.

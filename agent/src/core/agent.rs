@@ -95,9 +95,31 @@ pub async fn run(
     session_id: String,
     request: String,
     tool_context: ToolContext,
+    events: tokio::sync::mpsc::Sender<AgentEvent>,
+) -> Result<AgentAnswer> {
+    run_with_images(deps, settings, session_id, request, Vec::new(), tool_context, events).await
+}
+
+/// Comme [`run`], avec des images jointes à la demande (capture de la fenêtre
+/// active, déclenchée par l'utilisateur seul). Les images partent au modèle
+/// avec la demande ; l'historique n'en garde qu'une note (`screen_note`).
+pub async fn run_with_images(
+    deps: Arc<AgentDeps>,
+    settings: Settings,
+    session_id: String,
+    request: String,
+    images: Vec<crate::core::types::Image>,
+    tool_context: ToolContext,
     mut events: tokio::sync::mpsc::Sender<AgentEvent>,
 ) -> Result<AgentAnswer> {
     let started = Instant::now();
+    // Message de l'utilisateur tel qu'envoyé au modèle (images comprises), et
+    // tel qu'historisé (texte + note, jamais l'image).
+    let user_message = Message::user_with_images(request.clone(), images.clone());
+    let stored_request = match screen_note(&images) {
+        Some(note) => format!("{request}\n\n{note}"),
+        None => request.clone(),
+    };
 
     emit(
         &mut events,
@@ -150,13 +172,13 @@ pub async fn run(
 
     // 2. Historique récent de la session.
     messages.extend(deps.history.conversation(&session_id, 20)?);
-    messages.push(Message::user(request.clone()));
+    messages.push(user_message.clone());
 
     deps.history
         .auto_title(&session_id, &request)
         .catch();
     deps.history
-        .append(&session_id, &Message::user(request.clone()))
+        .append(&session_id, &Message::user(stored_request.clone()))
         .catch();
 
     let mut specs = deps.registry.specs();
@@ -247,7 +269,7 @@ pub async fn run(
                 )
                 .await;
                 let system = messages.remove(0);
-                messages = vec![system, Message::user(request.clone())];
+                messages = vec![system, user_message.clone()];
                 deps.llm
                     .chat(&model, &messages, &specs, settings.llm.temperature, settings.llm.max_tokens)
                     .await?
@@ -368,6 +390,7 @@ pub async fn run(
                 tool_calls: Some(reply.tool_calls.clone()),
                 tool_call_id: None,
                 name: None,
+                images: Vec::new(),
             })
             .catch();
 
@@ -797,6 +820,16 @@ fn progress_phrase(content: &str, calls: &[crate::core::types::ToolCall]) -> Opt
 }
 
 /// Outils qui ne font que lire : ils ne comptent pas comme une action.
+/// Note gardée dans l'historique à la place des images : le modèle sait au
+/// tour suivant qu'une capture a été vue, sans que l'image soit stockée.
+fn screen_note(images: &[crate::core::types::Image]) -> Option<String> {
+    if images.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = images.iter().map(|image| format!("« {} »", image.label)).collect();
+    Some(format!("(Capture d'écran jointe : {}.)", labels.join(", ")))
+}
+
 /// Budget d'une demande : étapes et durée totale. Au premier plan, celui des
 /// réglages (25 en vocal) et 10 min — même durée qu'à l'écrit : MiMo met 3 à
 /// 4 minutes pour une tâche de code, 180 s coupaient avant l'écriture. En
@@ -967,6 +1000,13 @@ impl Catch for Result<String> {
 #[cfg(test)]
 mod degenerate_tests {
     use super::*;
+
+    #[test]
+    fn l_historique_garde_une_note_pas_l_image() {
+        let image = crate::core::types::Image { media_type: "image/jpeg".into(), base64: "QUJD".into(), label: "Visual Studio Code".into() };
+        assert_eq!(screen_note(&[]), None);
+        assert_eq!(screen_note(&[image]).as_deref(), Some("(Capture d'écran jointe : « Visual Studio Code ».)"));
+    }
 
     #[test]
     fn une_tache_de_fond_a_un_budget_elargi() {

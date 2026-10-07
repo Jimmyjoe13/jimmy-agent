@@ -69,6 +69,17 @@ export interface AgentEvent {
   event?: AgentEvent;
 }
 
+/** Capture de la fenêtre active en attente d'envoi (`screen_capture`). */
+export interface ScreenCapture {
+  id: string;
+  label: string;
+  app: string;
+  width: number;
+  height: number;
+  /** Image en URL `data:` pour la vignette. */
+  preview: string;
+}
+
 /** Tâche de l'agent en cours (`tasks_list`). */
 export interface TaskInfo {
   id: string;
@@ -393,8 +404,10 @@ export const api = {
     }>("bootstrap"),
   status: () => invoke<Status>("status"),
   /** `project` : seulement pour le premier message d'une conversation neuve. */
-  chat: (sessionId: string | null, message: string, project?: string | null) =>
-    invoke<string>("chat", { request: { sessionId, message, project: project ?? null } }),
+  chat: (sessionId: string | null, message: string, project?: string | null, captureId?: string | null) =>
+    invoke<string>("chat", { request: { sessionId, message, project: project ?? null, captureId: captureId ?? null } }),
+  screenCapture: () => invoke<ScreenCapture>("screen_capture"),
+  screenDiscard: (id: string) => invoke<boolean>("screen_discard", { id }),
   pickFolder: () => invoke<string | null>("pick_folder"),
   projectsRecent: () => invoke<{ recent: ProjectInfo[]; default: ProjectInfo }>("projects_recent"),
   sessionSetProject: (sessionId: string, project: string | null) =>

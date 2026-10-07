@@ -363,6 +363,27 @@ let stepPage = null;
     return `fond après ${detachedAfter} s, « ${parallel.trim()} » en parallèle, fin : « ${fin.slice(0, 40)} »`;
   });
 
+  // Vision (7 octobre) : le bouton capture la fenêtre active (hors Jimmy),
+  // la vignette s'affiche et se retire. Rien n'est envoyé : la suite ne doit
+  // pas transmettre l'écran réel au fournisseur (lecture d'image prouvée par
+  // `--test protocols chaque_format_lit_une_image`).
+  await step("Chat : « Joindre ma fenêtre » capture et se retire", async () => {
+    await p.locator(".capture-button").click();
+    await p.waitForSelector(".capture-chip:not([hidden]) .capture-thumb", { timeout: 15_000 });
+    const label = ((await p.locator(".capture-label").textContent()) ?? "").trim();
+    expect(/^Fenêtre jointe : « .+ »$/.test(label), `libellé de la capture : « ${label} »`);
+    const ok = await p.evaluate(() => {
+      const img = document.querySelector(".capture-thumb");
+      return img instanceof HTMLImageElement && img.src.startsWith("data:image/jpeg;base64,");
+    });
+    expect(ok, "vignette absente ou pas en JPEG");
+    // La fenêtre principale de Jimmy s'intitule « Jimmy » : elle doit être écartée.
+    expect(label !== "Fenêtre jointe : « Jimmy »", "la capture vise la fenêtre de Jimmy");
+    await p.locator(".capture-chip button", { hasText: "Retirer" }).click();
+    await p.waitForSelector(".capture-chip[hidden]", { state: "attached", timeout: 5000 });
+    return label;
+  });
+
   await step("Voix : activer, état conservé entre vues, couper", async () => {
     await nav("Voix");
     let state = await p.locator(".listen-state").textContent();

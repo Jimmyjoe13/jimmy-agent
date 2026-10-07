@@ -243,6 +243,8 @@ pub fn run() {
                 commands::mcp_servers,
                 commands::agent_stop,
                 commands::tasks_list,
+                commands::screen_capture,
+                commands::screen_discard,
                 commands::task_stop,
                 commands::tts_voices,
                 commands::tts_search_voices,

@@ -474,10 +474,19 @@ async fn answer_command(
     // Tâche suivie : interruptible par « STOP » tant qu'elle est au premier
     // plan, et passée en arrière-plan si elle dure (`App::start_task`).
     let deps = app.deps_voice();
-    let request = command.to_string();
+    // Vision : « regarde mon écran » joint la fenêtre active (jamais sans
+    // phrase explicite, `screen::wants_screen`).
+    let (images, note) = app.images_for(command, None, true).await;
+    if let Some(image) = images.first() {
+        emit(events, AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) }).await;
+    }
+    let request = match note {
+        Some(note) => format!("{command}\n\n{note}"),
+        None => command.to_string(),
+    };
     let run_session = session.clone();
     let ticket = app.start_task(&session, command, relay_tx, move |tx, background| {
-        crate::core::agent::run(deps.in_task(background), settings, run_session, request, tool_context, tx)
+        crate::core::agent::run_with_images(deps.in_task(background), settings, run_session, request, images, tool_context, tx)
     });
     let wait = ticket.wait();
     tokio::pin!(wait);

@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod paths;
 pub mod permissions;
 pub mod providers;
+pub mod screen;
 pub mod sensitive;
 pub mod skills;
 pub mod tasks;
@@ -93,6 +94,10 @@ pub struct App {
     /// Registre des tâches : passage en arrière-plan, arrêt ciblé, bandeau
     /// du Chat et bloc du prompt (voir `tasks`).
     pub tasks: Arc<tasks::Tasks>,
+    /// Captures prises par le bouton « Joindre ma fenêtre » du Chat, en
+    /// attente du message qui les emporte (les 3 dernières, en mémoire
+    /// seulement : une capture ne va jamais sur disque).
+    pending_captures: std::sync::Mutex<Vec<(String, core::types::Image)>>,
 }
 
 /// Compte une tâche en cours le temps de son exécution.
@@ -353,6 +358,7 @@ impl App {
             stop_signal: tokio::sync::watch::channel(0).0,
             running: std::sync::atomic::AtomicUsize::new(0),
             tasks: Arc::new(tasks::Tasks::default()),
+            pending_captures: std::sync::Mutex::new(Vec::new()),
         }))
     }
 
@@ -535,6 +541,81 @@ impl App {
         while self.is_busy() && started.elapsed() < max {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
+    }
+
+    /// Capture la fenêtre active, hors fenêtres de Jimmy et de son avatar
+    /// (voir `screen`). Appelée sur demande de l'utilisateur seulement.
+    pub async fn capture_screen(&self) -> Result<screen::Capture> {
+        let mut excluded = vec![std::process::id()];
+        if let Some(pid) = self.godot.lock().await.as_ref().and_then(|child| child.id()) {
+            excluded.push(pid);
+        }
+        tokio::task::spawn_blocking(move || screen::capture_active_window(&excluded))
+            .await
+            .map_err(|e| Error::Tool(format!("capture d'écran interrompue : {e}")))?
+    }
+
+    /// Garde une capture du bouton du Chat jusqu'à l'envoi du message.
+    /// Renvoie son identifiant.
+    pub fn stash_capture(&self, image: core::types::Image) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut pending = self.pending_captures.lock().unwrap_or_else(|e| e.into_inner());
+        pending.push((id.clone(), image));
+        let excess = pending.len().saturating_sub(3);
+        pending.drain(..excess);
+        id
+    }
+
+    /// Reprend (et retire) une capture en attente.
+    pub fn take_capture(&self, id: &str) -> Option<core::types::Image> {
+        let mut pending = self.pending_captures.lock().unwrap_or_else(|e| e.into_inner());
+        let index = pending.iter().position(|(pending_id, _)| pending_id == id)?;
+        Some(pending.remove(index).1)
+    }
+
+    /// Images d'une demande : la capture du bouton (`capture_id`) ou, sur
+    /// phrase explicite (« regarde mon écran »), une capture prise maintenant.
+    /// Renvoie aussi une note à ajouter à la demande quand l'image ne peut pas
+    /// partir (capture impossible, modèle qui ne lit pas les images) : Jimmy le
+    /// dit au lieu de répondre à l'aveugle.
+    pub async fn images_for(
+        &self,
+        request: &str,
+        capture_id: Option<&str>,
+        voice: bool,
+    ) -> (Vec<core::types::Image>, Option<String>) {
+        let image = match capture_id.and_then(|id| self.take_capture(id)) {
+            Some(image) => image,
+            None if screen::wants_screen(request) => match self.capture_screen().await {
+                Ok(capture) => capture.image,
+                Err(error) => {
+                    log::warn!("[vision] capture impossible : {error}");
+                    return (
+                        Vec::new(),
+                        Some(format!("(La capture de la fenêtre demandée a échoué : {error}. Dis-le simplement.)")),
+                    );
+                }
+            },
+            None => return (Vec::new(), None),
+        };
+        let settings = self.settings();
+        let model = if voice && !settings.llm.voice_model.trim().is_empty() {
+            settings.llm.voice_model.trim().to_string()
+        } else {
+            settings.llm.model.clone()
+        };
+        if self.llm.accepts_images(&model).await == Some(false) {
+            log::warn!("[vision] le modèle {model} ne lit pas les images : capture non envoyée");
+            return (
+                Vec::new(),
+                Some(format!(
+                    "(L'utilisateur voulait te montrer sa fenêtre « {} », mais le modèle {model} ne lit pas les images : \
+                     dis-le-lui et propose d'en choisir un qui les lit, comme MiMo ou Muse Spark.)",
+                    image.label
+                )),
+            );
+        }
+        (vec![image], None)
     }
 
     /// Connecte les serveurs MCP configurés et ajoute leurs outils au

@@ -64,6 +64,9 @@ pub struct ChatRequest {
     /// Projet choisi avant le premier message d'une conversation neuve.
     #[serde(default)]
     pub project: Option<String>,
+    /// Capture du bouton « Joindre ma fenêtre » (`screen_capture`).
+    #[serde(default)]
+    pub capture_id: Option<String>,
 }
 
 #[tauri::command]
@@ -90,6 +93,14 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
     let (settings, tool_context) = app.session_context(&session_id);
     let deps = app.deps();
     let window_label = state.window.clone();
+    // Vision : capture du bouton, ou phrase explicite (« regarde mon écran »).
+    let (images, note) = app.images_for(&message, request.capture_id.as_deref(), false).await;
+    if let (Some(image), Some(window)) = (images.first(), &window_label) {
+        let _ = window.emit(
+            "agent-event",
+            AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) },
+        );
+    }
     let avatar = app.avatar.clone();
     let cue_app = app.clone();
     let answer_session = session_id.clone();
@@ -143,9 +154,12 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         // (`App::start_task`) — ce relais continue de la transmettre.
         let stop_session = answer_session.clone();
         let run_session = answer_session.clone();
-        let request = message.clone();
+        let request = match note {
+            Some(note) => format!("{message}\n\n{note}"),
+            None => message.clone(),
+        };
         let ticket = cue_app.start_task(&answer_session, &message, tx, move |tx, background| {
-            jimmy_agent::core::agent::run(deps.in_task(background), settings, run_session, request, tool_context, tx)
+            jimmy_agent::core::agent::run_with_images(deps.in_task(background), settings, run_session, request, images, tool_context, tx)
         });
         let outcome = match ticket.wait().await {
             jimmy_agent::TaskOutcome::Done(outcome) => outcome,
@@ -500,6 +514,26 @@ pub async fn tts_remove_voice(state: State<'_, AppState>, id: String) -> std::re
 #[tauri::command]
 pub async fn agent_stop(state: State<'_, AppState>) -> std::result::Result<bool, String> {
     Ok(state.app.request_stop())
+}
+
+/// Capture de la fenêtre active pour le prochain message (bouton « Joindre
+/// ma fenêtre »). Renvoie de quoi l'afficher ; l'image reste en mémoire.
+#[tauri::command]
+pub async fn screen_capture(state: State<'_, AppState>) -> std::result::Result<serde_json::Value, String> {
+    let capture = state.app.capture_screen().await.map_err(err)?;
+    let preview = capture.image.data_url();
+    let label = capture.image.label.clone();
+    let id = state.app.stash_capture(capture.image);
+    Ok(serde_json::json!({
+        "id": id, "label": label, "app": capture.app,
+        "width": capture.width, "height": capture.height, "preview": preview,
+    }))
+}
+
+/// Retire une capture en attente (croix de la vignette).
+#[tauri::command]
+pub async fn screen_discard(state: State<'_, AppState>, id: String) -> std::result::Result<bool, String> {
+    Ok(state.app.take_capture(&id).is_some())
 }
 
 /// Tâches en cours (bandeau « en arrière-plan » du Chat).

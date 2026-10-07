@@ -2008,3 +2008,44 @@ button.small {
 .bubble.from-background {
   border-left: 3px solid var(--accent);
 }
+
+/* Vision : capture de fenêtre jointe au prochain message. */
+.capture-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  min-width: 0;
+}
+
+/* Piège 68 : `hidden` ne masque pas un élément stylé en `display`. */
+.capture-chip[hidden] {
+  display: none;
+}
+
+.capture-thumb {
+  height: 44px;
+  max-width: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.capture-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.capture-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}

@@ -5,7 +5,7 @@
  * manière de Codex Desktop : Jimmy y travaille, et le panneau « Fichiers »
  * permet d'y naviguer sans quitter le chat.
  */
-import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo, type TaskInfo } from "../api";
+import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo, type ScreenCapture, type TaskInfo } from "../api";
 import { attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { explorerPanel } from "./explorer";
@@ -240,6 +240,53 @@ export function chatView(ctx: AppContext): HTMLElement {
     if (backgroundTask) renderTasks();
   }, 5000);
   ctx.onCleanup(() => window.clearInterval(tasksTimer));
+
+  // ── Vision : « Joindre ma fenêtre » ───────────────────────────────────────
+  // Capture au clic (ce qui est montré est ce qui part), vignette retirable,
+  // jointe au prochain message. Jimmy ne capture jamais de lui-même.
+  let capture: ScreenCapture | null = null;
+  const captureChip = h("div", { class: "capture-chip", hidden: true });
+
+  function renderCapture() {
+    captureChip.hidden = !capture;
+    if (!capture) return void mount(captureChip);
+    const current = capture;
+    mount(
+      captureChip,
+      h("img", { class: "capture-thumb", src: current.preview, alt: `Capture : ${current.label}` }),
+      h("span", { class: "capture-label", title: current.label }, `Fenêtre jointe : « ${current.label} »`),
+      h(
+        "button",
+        {
+          class: "ghost small",
+          title: "Retirer la capture",
+          onclick: () => {
+            capture = null;
+            renderCapture();
+            void attempt(() => api.screenDiscard(current.id), "capture");
+          },
+        },
+        "Retirer",
+      ),
+    );
+  }
+
+  const captureButton = h(
+    "button",
+    {
+      class: "ghost capture-button",
+      title: "Joindre la fenêtre sur laquelle tu travailles (Jimmy ne regarde jamais sans ta demande)",
+      onclick: async () => {
+        const got = await guard(() => api.screenCapture(), "capture");
+        if (!got) return;
+        if (capture) void attempt(() => api.screenDiscard(capture!.id), "capture");
+        capture = got;
+        renderCapture();
+        input.focus();
+      },
+    },
+    "Joindre ma fenêtre",
+  );
 
   const hint = h("span", { class: "composer-hint" }, "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · @ pour citer un fichier");
 
@@ -732,7 +779,12 @@ export function chatView(ctx: AppContext): HTMLElement {
     turnFiles = [];
     input.value = "";
     autosize();
-    append(bubble("user", text));
+    const userBubble = bubble("user", text);
+    const sentCapture = capture;
+    if (sentCapture) userBubble.append(h("div", { class: "capture-note" }, `Fenêtre jointe : « ${sentCapture.label} »`));
+    capture = null;
+    renderCapture();
+    append(userBubble);
     pending = h(
       "div",
       { class: "bubble assistant pending" },
@@ -742,7 +794,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     setBusy(true);
     armSafety();
 
-    const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project), "envoi");
+    const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project, sentCapture?.id ?? null), "envoi");
     if (!id) {
       settle(bubble("error", "Le message n'a pas pu être envoyé."));
       return;
@@ -1060,6 +1112,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       "div",
       { class: "composer" },
       mentionMenu,
+      captureChip,
       input,
       h(
         "div",
@@ -1081,6 +1134,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           },
           "Nouvelle session",
         ),
+        captureButton,
         stopButton,
         sendButton,
       ),

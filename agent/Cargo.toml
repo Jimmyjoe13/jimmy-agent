@@ -24,6 +24,10 @@ uuid.workspace = true
 chrono.workspace = true
 cpal.workspace = true
 hound.workspace = true
+xcap = "0.9.8"
+base64 = "0.23.1"
+# Vision : réduction et JPEG des captures (même version que xcap).
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [dev-dependencies]
 env_logger.workspace = true
