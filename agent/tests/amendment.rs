@@ -85,6 +85,7 @@ async fn l_amendement_ne_degrade_pas_les_reponses() {
             vault_block: vault_block.clone(),
             recent_tools: None,
             amendments,
+            background_task: None,
             voice: false,
         };
         let messages = |system: String| {

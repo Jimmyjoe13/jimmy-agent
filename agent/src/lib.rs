@@ -18,6 +18,7 @@ pub mod permissions;
 pub mod providers;
 pub mod sensitive;
 pub mod skills;
+pub mod tasks;
 pub mod tools;
 pub mod voice;
 
@@ -27,6 +28,7 @@ pub use error::{Error, Result};
 
 use config::{Secrets, Settings};
 use core::history::{History, Shared};
+use core::types::AgentEvent;
 use db::Db;
 use memory::MemoryStore;
 use paths::Paths;
@@ -86,8 +88,11 @@ pub struct App {
     /// Arrêt d'urgence (« STOP », bouton « Arrêter ») : chaque demande
     /// incrémente le compteur, les tâches en cours l'observent.
     stop_signal: tokio::sync::watch::Sender<u64>,
-    /// Tâches de l'agent en cours (Chat et voix).
+    /// Tâches de l'agent en cours (Chat et voix), premier plan et fond.
     running: std::sync::atomic::AtomicUsize,
+    /// Registre des tâches : passage en arrière-plan, arrêt ciblé, bandeau
+    /// du Chat et bloc du prompt (voir `tasks`).
+    pub tasks: Arc<tasks::Tasks>,
 }
 
 /// Compte une tâche en cours le temps de son exécution.
@@ -103,6 +108,109 @@ impl<'a> RunningGuard<'a> {
 impl Drop for RunningGuard<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Issue d'une tâche pour son appelant (voir [`App::start_task`]).
+pub enum TaskOutcome {
+    /// Finie au premier plan : l'appelant traite la réponse comme avant.
+    Done(Result<core::types::AgentAnswer>),
+    /// Passée en arrière-plan : l'appelant rend la main. La fin (réponse,
+    /// arrêt, échec) part en `AgentEvent::Background` et est annoncée.
+    Detached,
+}
+
+/// Poignée d'une tâche lancée par [`App::start_task`].
+pub struct TaskTicket {
+    pub id: String,
+    detached: tokio::sync::oneshot::Receiver<()>,
+    done: tokio::task::JoinHandle<(Result<core::types::AgentAnswer>, bool)>,
+}
+
+impl TaskTicket {
+    /// Attend la fin de la tâche **ou** son passage en arrière-plan.
+    pub async fn wait(self) -> TaskOutcome {
+        let TaskTicket { detached, mut done, .. } = self;
+        tokio::select! {
+            biased;
+            Ok(()) = detached => TaskOutcome::Detached,
+            joined = &mut done => match joined {
+                // Passée en fond puis finie aussitôt : déjà traitée par la tâche.
+                Ok((_, true)) => TaskOutcome::Detached,
+                Ok((outcome, false)) => TaskOutcome::Done(outcome),
+                Err(error) => TaskOutcome::Done(Err(Error::Tool(format!("tâche interrompue : {error}")))),
+            },
+        }
+    }
+}
+
+/// Relais des événements d'une tâche : suit ses étapes, décide de son
+/// passage en arrière-plan, puis enveloppe ses événements.
+async fn relay_task(
+    app: Arc<App>,
+    task_id: String,
+    session_id: String,
+    mut rx: tokio::sync::mpsc::Receiver<AgentEvent>,
+    events: tokio::sync::mpsc::Sender<AgentEvent>,
+    detach_tx: tokio::sync::oneshot::Sender<()>,
+    detached: Arc<std::sync::atomic::AtomicBool>,
+) {
+    let mut first_tool: Option<std::time::Instant> = None;
+    let mut tools = 0usize;
+    // Demandes d'autorisation ouvertes (carte du Chat) : pas de passage en
+    // fond pendant que l'utilisateur y répond.
+    let mut approvals = 0usize;
+    let mut detach_tx = Some(detach_tx);
+    loop {
+        // Après le premier outil, tant que la tâche peut passer en fond, on se
+        // réveille aussi sans événement : un appel au modèle peut durer une minute.
+        let wait = match (first_tool, detach_tx.is_some()) {
+            (Some(at), true) => tasks::DETACH_AFTER.saturating_sub(at.elapsed()).max(std::time::Duration::from_millis(500)),
+            _ => std::time::Duration::from_secs(3600),
+        };
+        let event = match tokio::time::timeout(wait, rx.recv()).await {
+            Ok(Some(event)) => Some(event),
+            Ok(None) => break,
+            Err(_) => None,
+        };
+        match &event {
+            Some(AgentEvent::ToolStart { name, arguments, .. }) => {
+                tools += 1;
+                first_tool.get_or_insert_with(std::time::Instant::now);
+                app.tasks.set_step(&task_id, &tasks::step_label(name, arguments));
+            }
+            Some(AgentEvent::Progress { text }) => app.tasks.set_step(&task_id, text),
+            Some(AgentEvent::Approval { .. }) => approvals += 1,
+            Some(AgentEvent::ApprovalResolved { .. }) => approvals = approvals.saturating_sub(1),
+            _ => {}
+        }
+        let is_final = matches!(event, Some(AgentEvent::Final { .. }) | Some(AgentEvent::Failed { .. }));
+        if detach_tx.is_some()
+            && !is_final
+            && tasks::should_detach(first_tool.map(|at| at.elapsed()), tools, approvals > 0)
+            && app.tasks.try_detach(&task_id)
+        {
+            detached.store(true, std::sync::atomic::Ordering::SeqCst);
+            let title = app.tasks.get(&task_id).map(|t| t.title).unwrap_or_default();
+            log::info!(
+                "[agent] tâche passée en arrière-plan ({tools} outil(s), {} s après le premier) : « {title} »",
+                first_tool.map(|at| at.elapsed().as_secs()).unwrap_or(0)
+            );
+            let _ = events
+                .send(AgentEvent::Detached { task_id: task_id.clone(), session_id: session_id.clone(), title })
+                .await;
+            if let Some(tx) = detach_tx.take() {
+                let _ = tx.send(());
+            }
+        }
+        if let Some(event) = event {
+            let event = if detached.load(std::sync::atomic::Ordering::SeqCst) {
+                AgentEvent::Background { task_id: task_id.clone(), session_id: session_id.clone(), event: Box::new(event) }
+            } else {
+                event
+            };
+            let _ = events.send(event).await;
+        }
     }
 }
 
@@ -244,11 +352,14 @@ impl App {
             voice_session: std::sync::Mutex::new(None),
             stop_signal: tokio::sync::watch::channel(0).0,
             running: std::sync::atomic::AtomicUsize::new(0),
+            tasks: Arc::new(tasks::Tasks::default()),
         }))
     }
 
-    /// Arrêt d'urgence : la tâche en cours (Chat ou voix) est abandonnée — ses
-    /// commandes en cours sont tuées (`kill_on_drop`) — et Jimmy se tait.
+    /// Arrêt d'urgence (« STOP », bouton « Arrêter ») : la tâche **au premier
+    /// plan** est abandonnée — ses commandes en cours sont tuées
+    /// (`kill_on_drop`) — et Jimmy se tait. Une tâche de fond continue : elle
+    /// s'arrête par `stop_task` ou `request_stop_all` (décision du 7 octobre).
     /// Renvoie `true` s'il y avait quelque chose à arrêter.
     pub fn request_stop(&self) -> bool {
         let busy = self.is_busy();
@@ -258,9 +369,25 @@ impl App {
         busy
     }
 
-    /// Une tâche tourne, ou Jimmy parle.
+    /// « Arrête tout » : premier plan, tâche de fond et parole.
+    pub fn request_stop_all(&self) -> bool {
+        let tasks = self.tasks.cancel_all();
+        let foreground = self.request_stop();
+        log::info!("[agent] arrêt de toutes les tâches ({tasks} en cours)");
+        tasks > 0 || foreground
+    }
+
+    /// Arrête une tâche précise (bouton de la tâche de fond dans le Chat).
+    pub fn stop_task(&self, id: &str) -> bool {
+        let found = self.tasks.cancel(id);
+        log::info!("[agent] arrêt de la tâche {id} demandé (trouvée : {found})");
+        found
+    }
+
+    /// Une tâche tourne au premier plan, ou Jimmy parle. Une tâche de fond ne
+    /// compte pas : Jimmy est disponible pendant qu'elle tourne.
     pub fn is_busy(&self) -> bool {
-        self.running.load(std::sync::atomic::Ordering::Relaxed) > 0
+        self.running.load(std::sync::atomic::Ordering::Relaxed) > self.tasks.background_count()
             || self.speaking.load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -270,16 +397,142 @@ impl App {
         *self.stop_signal.borrow()
     }
 
-    /// Exécute une tâche de l'agent qu'un arrêt d'urgence peut interrompre :
-    /// `Error::Cancelled` dès que `request_stop` est appelé.
-    pub async fn cancellable<T>(&self, task: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    /// Exécute `work` en l'exposant aux arrêts : `Error::Cancelled` sur son
+    /// arrêt propre (`own`), ou sur « STOP » tant que la tâche est au premier
+    /// plan. Passée en fond, elle ignore « STOP ».
+    async fn guarded<T>(
+        &self,
+        task_id: &str,
+        mut own: tokio::sync::watch::Receiver<bool>,
+        work: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
         let _running = RunningGuard::new(&self.running);
         let mut stop = self.stop_signal.subscribe();
         stop.borrow_and_update();
-        tokio::select! {
-            biased;
-            _ = stop.changed() => Err(Error::Cancelled),
-            result = task => result,
+        tokio::pin!(work);
+        loop {
+            tokio::select! {
+                biased;
+                _ = async {
+                    // Émetteur disparu (tâche retirée) : ce n'est pas un arrêt.
+                    if own.wait_for(|cancelled| *cancelled).await.is_err() {
+                        std::future::pending::<()>().await;
+                    }
+                } => return Err(Error::Cancelled),
+                changed = stop.changed() => {
+                    if changed.is_err() || !self.tasks.is_background(task_id) {
+                        return Err(Error::Cancelled);
+                    }
+                    log::info!("[agent] « STOP » ignoré par la tâche de fond {task_id}");
+                }
+                result = &mut work => return result,
+            }
+        }
+    }
+
+    /// Lance un tour de l'agent comme **tâche suivie** (Chat et voix).
+    ///
+    /// `work` reçoit l'émetteur d'événements de la tâche (typiquement
+    /// `|tx| core::agent::run(…, tx)`). Ses événements sont relayés vers
+    /// `events` tels quels tant qu'elle est au premier plan. Si elle dure (voir
+    /// `tasks::DETACH_AFTER*`) et que la place de fond est libre, elle passe en
+    /// arrière-plan : `AgentEvent::Detached`, puis tous ses événements
+    /// enveloppés dans `AgentEvent::Background`, et sa fin (réponse, arrêt,
+    /// échec) est traitée ici — annonce à voix haute comprise. L'appelant le
+    /// sait par `TaskTicket::wait` → `TaskOutcome::Detached`.
+    pub fn start_task<F, Fut>(
+        self: &Arc<Self>,
+        session_id: &str,
+        request: &str,
+        events: tokio::sync::mpsc::Sender<AgentEvent>,
+        work: F,
+    ) -> TaskTicket
+    where
+        F: FnOnce(tokio::sync::mpsc::Sender<AgentEvent>) -> Fut,
+        Fut: std::future::Future<Output = Result<core::types::AgentAnswer>> + Send + 'static,
+    {
+        let (id, own) = self.tasks.begin(session_id, request);
+        let (inner_tx, inner_rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
+        let (detach_tx, detach_rx) = tokio::sync::oneshot::channel::<()>();
+        let detached = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let relay = tokio::spawn(relay_task(
+            self.clone(),
+            id.clone(),
+            session_id.to_string(),
+            inner_rx,
+            events.clone(),
+            detach_tx,
+            detached.clone(),
+        ));
+        let work = work(inner_tx);
+
+        let app = self.clone();
+        let task_id = id.clone();
+        let session = session_id.to_string();
+        let done = tokio::spawn(async move {
+            let outcome = app.guarded(&task_id, own, work).await;
+            // L'émetteur de la tâche est fermé : le relais se vide, ce qui
+            // garde l'ordre (la réponse avant l'annonce de fin).
+            let _ = relay.await;
+            let title = app.tasks.get(&task_id).map(|t| t.title).unwrap_or_default();
+            app.tasks.end(&task_id);
+            let was_detached = detached.load(std::sync::atomic::Ordering::SeqCst);
+            if was_detached {
+                app.finish_background(&task_id, &session, &title, &events, &outcome).await;
+            }
+            (outcome, was_detached)
+        });
+        TaskTicket { id, detached: detach_rx, done }
+    }
+
+    /// Fin d'une tâche de fond : l'appelant a déjà rendu la main, c'est donc
+    /// ici que l'arrêt est noté, l'échec signalé et la fin annoncée.
+    async fn finish_background(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        title: &str,
+        events: &tokio::sync::mpsc::Sender<AgentEvent>,
+        outcome: &Result<core::types::AgentAnswer>,
+    ) {
+        let wrap = |event: AgentEvent| AgentEvent::Background {
+            task_id: task_id.to_string(),
+            session_id: session_id.to_string(),
+            event: Box::new(event),
+        };
+        match outcome {
+            Ok(answer) => {
+                log::info!("[agent] tâche de fond terminée : « {title} » ({} ms)", answer.duration_ms);
+                // La réponse est déjà partie (`Final` enveloppé) ; on l'annonce
+                // sans couper la parole : on attend que Jimmy soit libre.
+                self.wait_until_free(tasks::ANNOUNCE_WAIT_MAX).await;
+                self.speak(&format!("Tâche de fond terminée. {}", answer.text)).await;
+            }
+            // « Arrête tout » ou bouton de la tâche : le modèle doit savoir au
+            // tour suivant que ce travail n'est pas fini.
+            Err(Error::Cancelled) => {
+                log::info!("[agent] tâche de fond arrêtée : « {title} »");
+                let _ = self.history.append(
+                    session_id,
+                    &core::types::Message::assistant("(Tâche de fond arrêtée à la demande de l'utilisateur, avant la fin.)"),
+                );
+                let _ = events.send(wrap(AgentEvent::Final { text: tasks::BACKGROUND_STOPPED.into() })).await;
+            }
+            Err(error) => {
+                log::error!("[agent] tâche de fond « {title} » en échec : {error}");
+                let _ = events.send(wrap(AgentEvent::Failed { message: error.to_string() })).await;
+                self.wait_until_free(tasks::ANNOUNCE_WAIT_MAX).await;
+                self.speak("La tâche de fond a échoué. Le détail est dans le Chat.").await;
+            }
+        }
+    }
+
+    /// Attend que Jimmy ne parle plus et que rien ne tourne au premier plan
+    /// (au plus `max`) : une annonce de fin ne coupe pas une conversation.
+    async fn wait_until_free(&self, max: std::time::Duration) {
+        let started = std::time::Instant::now();
+        while self.is_busy() && started.elapsed() < max {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
 
@@ -829,6 +1082,7 @@ impl App {
             registry: self.registry.clone(),
             data_dir: self.paths.data.clone(),
             approvals: self.approvals.clone(),
+            tasks: self.tasks.clone(),
             voice: false,
         })
     }

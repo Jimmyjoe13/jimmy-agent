@@ -20,6 +20,9 @@ export interface AppContext {
    *  gardées ici pour que le Chat les affiche même si elles sont arrivées
    *  pendant que l'utilisateur était sur un autre onglet. */
   approvals: Map<string, AgentEvent>;
+  /** Titre de chaque tâche de fond (connu au `detached`) : ses événements
+   *  enveloppés ne le portent pas, la fin l'annonce par son nom. */
+  taskTitles: Map<string, string>;
   navigate: (route: Route) => void;
   /** Relit l'état (statut général + écoute) et met à jour la barre latérale. */
   refreshStatus: () => Promise<void>;

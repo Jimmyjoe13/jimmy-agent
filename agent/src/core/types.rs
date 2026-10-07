@@ -247,6 +247,13 @@ pub enum AgentEvent {
     Heard { text: String, matched: bool },
     /// Erreur fatale pour cette demande.
     Failed { message: String },
+    /// La tâche passe en arrière-plan (voir `tasks`) : le premier plan est
+    /// libre — le Chat débloque la saisie, la voix se remet à écouter. Tous
+    /// ses événements suivants arrivent enveloppés dans `Background`.
+    Detached { task_id: String, session_id: String, title: String },
+    /// Événement d'une tâche de fond, à ne pas mélanger au tour en cours du
+    /// premier plan (sa réponse finale va dans sa session, avec une annonce).
+    Background { task_id: String, session_id: String, event: Box<AgentEvent> },
 }
 
 /// Réponse complète d'une demande.

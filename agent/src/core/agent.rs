@@ -40,6 +40,9 @@ pub struct AgentDeps {
     /// Demandes d'autorisation en attente : modifier un fichier sensible
     /// (`.env`, clés, secrets) suspend l'outil jusqu'à l'accord du Chat.
     pub approvals: Arc<crate::sensitive::Approvals>,
+    /// Tâches en cours : la tâche de fond est signalée dans le prompt, pour
+    /// que Jimmy réponde en parallèle en sachant qu'elle tourne.
+    pub tasks: Arc<crate::tasks::Tasks>,
     /// Demande dite à voix haute : réponse courte, peu d'étapes, et on fait
     /// répéter une phrase incohérente plutôt que de partir l'explorer.
     pub voice: bool,
@@ -127,6 +130,7 @@ pub async fn run(
         // Amendements (lot « croissance ») : des instructions additionnelles
         // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
         amendments: crate::growth::read_amendments(&deps.data_dir),
+        background_task: deps.tasks.prompt_block(&session_id),
         voice: deps.voice,
     }))];
 

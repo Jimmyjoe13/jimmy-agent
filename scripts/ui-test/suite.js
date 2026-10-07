@@ -319,6 +319,50 @@ let stepPage = null;
     return `arrêté en ${ms} ms`;
   });
 
+  // Tâches de fond (7 octobre) : une tâche outillée qui dure passe en
+  // arrière-plan, le Chat redevient libre, une question posée pendant ce
+  // temps a sa réponse, et la fin de la tâche arrive dans le fil.
+  await step("Chat : une tâche longue passe en arrière-plan, le Chat reste libre", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    // Une tâche d'un parcours précédent peut être passée en fond (le refus du
+    // fichier sensible, si le modèle est lent) : une seule place de fond, on
+    // attend qu'elle se libère pour ne pas lire son bandeau à elle.
+    for (let i = 0; i < 180 && (await invoke("tasks_list")).some((t) => t.background); i++) await p.waitForTimeout(1000);
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".composer-input").fill(
+      "Exécute avec run_command la commande : Start-Sleep -Seconds 25; 'fini-fond'. Puis réponds uniquement par ce qu'elle affiche.",
+    );
+    await p.keyboard.press("Enter");
+    const t0 = Date.now();
+    // Passage en fond : 15 s après le premier outil (`tasks::DETACH_AFTER`),
+    // et c'est bien cette tâche-ci qu'annonce le bandeau.
+    await p.waitForFunction(
+      () => document.querySelector(".tasks-band:not([hidden]) .tasks-band-title")?.textContent?.startsWith("Exécute avec run_command"),
+      null,
+      { timeout: 120_000, polling: 200 },
+    );
+    const detachedAfter = Math.round((Date.now() - t0) / 1000);
+    await attendreReponse(10_000);
+    const free = await p.locator(".composer button.primary").textContent();
+    expect(free === "Envoyer", `bouton pendant la tâche de fond : « ${free} »`);
+    const tasks = await invoke("tasks_list");
+    expect(tasks.some((t) => t.background), "aucune tâche de fond dans le registre");
+    // Question en parallèle : réponse au premier plan pendant la tâche.
+    await p.locator(".composer-input").fill("Réponds uniquement par le mot : cerise");
+    await p.keyboard.press("Enter");
+    await p.waitForSelector(".bubble.pending", { timeout: 5000 });
+    await attendreReponse(120_000);
+    const parallel = (await p.locator(".stream .bubble.assistant:not(.from-background)").last().textContent()) ?? "";
+    expect(/cerise/i.test(parallel), `réponse en parallèle : « ${parallel.trim()} »`);
+    // Fin de la tâche de fond, dans sa conversation, et bandeau retiré.
+    await p.waitForSelector(".bubble.from-background", { timeout: 180_000 });
+    await p.waitForSelector(".tasks-band[hidden]", { state: "attached", timeout: 10_000 });
+    const fin = ((await p.locator(".bubble.from-background").last().textContent()) ?? "").trim();
+    const session = (await invoke("sessions"))[0];
+    if (session?.title?.startsWith("Exécute avec run_command")) await invoke("delete_session", { sessionId: session.id });
+    return `fond après ${detachedAfter} s, « ${parallel.trim()} » en parallèle, fin : « ${fin.slice(0, 40)} »`;
+  });
+
   await step("Voix : activer, état conservé entre vues, couper", async () => {
     await nav("Voix");
     let state = await p.locator(".listen-state").textContent();

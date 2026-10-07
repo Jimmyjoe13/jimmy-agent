@@ -129,23 +129,28 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
                         }
                         relay_avatar.say(text, 0).await;
                     }
+                    AgentEvent::Detached { .. } | AgentEvent::Background { .. } => {
+                        background_avatar(&relay_avatar, &event).await;
+                    }
                     _ => {}
                 }
             }
         });
 
-        // Interruptible : « STOP » à la voix ou bouton « Arrêter » du Chat.
+        // Tâche suivie : interruptible par « STOP » à la voix ou le bouton
+        // « Arrêter » du Chat tant qu'elle est au premier plan ; si elle dure,
+        // elle passe en arrière-plan et sa fin est traitée par l'agent
+        // (`App::start_task`) — ce relais continue de la transmettre.
         let stop_session = answer_session.clone();
-        let outcome = cue_app
-            .cancellable(jimmy_agent::core::agent::run(
-                deps,
-                settings,
-                answer_session,
-                message,
-                tool_context,
-                tx,
-            ))
-            .await;
+        let run_session = answer_session.clone();
+        let request = message.clone();
+        let ticket = cue_app.start_task(&answer_session, &message, tx, move |tx| {
+            jimmy_agent::core::agent::run(deps, settings, run_session, request, tool_context, tx)
+        });
+        let outcome = match ticket.wait().await {
+            jimmy_agent::TaskOutcome::Done(outcome) => outcome,
+            jimmy_agent::TaskOutcome::Detached => return,
+        };
         // Le relais doit être vidé avant de rendre la main, sinon la fenêtre
         // peut fermer avant d'avoir reçu les derniers événements.
         let _ = relay.await;
@@ -489,11 +494,47 @@ pub async fn tts_remove_voice(state: State<'_, AppState>, id: String) -> std::re
     Ok(current)
 }
 
-/// Arrêt d'urgence (bouton « Arrêter » du Chat) : la tâche en cours est
-/// abandonnée et Jimmy se tait. Renvoie `true` s'il y avait quelque chose à arrêter.
+/// Arrêt d'urgence (bouton « Arrêter » du Chat) : la tâche au premier plan
+/// est abandonnée et Jimmy se tait ; une tâche de fond continue (`task_stop`).
+/// Renvoie `true` s'il y avait quelque chose à arrêter.
 #[tauri::command]
 pub async fn agent_stop(state: State<'_, AppState>) -> std::result::Result<bool, String> {
     Ok(state.app.request_stop())
+}
+
+/// Tâches en cours (bandeau « en arrière-plan » du Chat).
+#[tauri::command]
+pub async fn tasks_list(state: State<'_, AppState>) -> std::result::Result<Vec<jimmy_agent::tasks::TaskInfo>, String> {
+    Ok(state.app.tasks.list())
+}
+
+/// Arrête une tâche précise (bouton de la tâche de fond). `false` si elle
+/// est déjà finie.
+#[tauri::command]
+pub async fn task_stop(state: State<'_, AppState>, id: String) -> std::result::Result<bool, String> {
+    Ok(state.app.stop_task(&id))
+}
+
+/// Avatar et tâche de fond : elle ne le prend pas (l'utilisateur fait autre
+/// chose pendant ce temps), seule sa fin se voit. Le passage en fond rend
+/// l'avatar au repos ; la fin réussie joue la joie (une tâche de fond est
+/// toujours outillée), l'échec l'erreur. La phrase est dite par l'annonce.
+async fn background_avatar(avatar: &jimmy_agent::providers::AvatarClient, event: &AgentEvent) {
+    match event {
+        AgentEvent::Detached { .. } => {
+            let _ = avatar.set_state(AvatarState::Idle, "").await;
+        }
+        AgentEvent::Background { event, .. } => match event.as_ref() {
+            AgentEvent::Final { text } if text != jimmy_agent::tasks::BACKGROUND_STOPPED => {
+                let _ = avatar.set_state(AvatarState::Success, "").await;
+            }
+            AgentEvent::Failed { .. } => {
+                let _ = avatar.set_state(AvatarState::Error, "").await;
+            }
+            _ => {}
+        },
+        _ => {}
+    }
 }
 
 /// Serveurs MCP connectés ou configurés, secrets masqués.
@@ -624,6 +665,9 @@ pub async fn start_listening(
                         let _ = avatar.set_state(AvatarState::Success, "").await;
                     }
                     avatar.say(text, 0).await;
+                }
+                AgentEvent::Detached { .. } | AgentEvent::Background { .. } => {
+                    background_avatar(&avatar, &event).await;
                 }
                 _ => {}
             }

@@ -242,6 +242,8 @@ pub fn run() {
                 commands::skill_read,
                 commands::mcp_servers,
                 commands::agent_stop,
+                commands::tasks_list,
+                commands::task_stop,
                 commands::tts_voices,
                 commands::tts_search_voices,
                 commands::tts_set_voice,

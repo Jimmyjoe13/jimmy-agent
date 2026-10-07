@@ -115,6 +115,9 @@ pub struct PromptContext<'a> {
     /// additionnelles actées avec l'utilisateur, lues dans
     /// `data/growth_amendments.md`. Absent ou vide : prompt inchangé.
     pub amendments: Option<String>,
+    /// Tâche de fond en cours (`Tasks::prompt_block`) : Jimmy répond en
+    /// parallèle en le sachant. `None` : prompt inchangé.
+    pub background_task: Option<String>,
     /// Échange vocal (voir [`VOICE_MODE`]).
     pub voice: bool,
 }
@@ -192,6 +195,10 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
     parts.push(tools_summary(&ctx.registry.names()));
 
     if let Some(block) = &ctx.recent_tools {
+        parts.push(block.clone());
+    }
+
+    if let Some(block) = &ctx.background_task {
         parts.push(block.clone());
     }
 
@@ -333,6 +340,7 @@ mod tests {
             vault_block: None,
             recent_tools: None,
             amendments: None,
+            background_task: None,
             voice: false,
         });
         assert!(!system.contains("Atelier"), "{system}");
@@ -366,8 +374,12 @@ mod tests {
             vault_block: None,
             recent_tools: None,
             amendments: Some("Ne jamais reformuler la question avant de répondre.".into()),
+            // La tâche de fond rejoint le prompt (réponse en parallèle).
+            background_task: Some("## Tâche en cours en arrière-plan
+- « écris notify.py »".into()),
             voice: false,
         });
+        assert!(system.contains("« écris notify.py »"), "{system}");
         assert!(system.contains("## Amendements"), "{system}");
         assert!(system.contains("Ne jamais reformuler"), "{system}");
         assert!(system.contains(".bak"), "{system}");
@@ -397,6 +409,7 @@ mod tests {
             vault_block: None,
             recent_tools: None,
             amendments: None,
+            background_task: None,
             voice: false,
         }
     }

@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
 
 use super::vad::{frame_len, rms, voiced_fraction, SpeechTracker};
-use super::{is_stop_command, matches_wake_word, strip_wake_word, window_to_wav, VoiceRuntime};
+use super::{is_stop_all_command, is_stop_command, matches_wake_word, strip_wake_word, window_to_wav, VoiceRuntime};
 use crate::core::types::{AgentEvent, AvatarState};
 use crate::App;
 
@@ -244,7 +244,11 @@ impl App {
                 // arrête une tâche lancée depuis le Chat, ou fait taire Jimmy.
                 if is_stop_command(&utterance) || is_stop_command(&early) {
                     log::info!("[voice] arrêt d'urgence entendu : « {utterance} »");
-                    if self.request_stop() {
+                    // « Arrête tout » vise aussi la tâche de fond ; « STOP »
+                    // seul, le premier plan et la parole.
+                    let all = is_stop_all_command(&utterance) || is_stop_all_command(&early);
+                    let stopped = if all { self.request_stop_all() } else { self.request_stop() };
+                    if stopped {
                         self.speak(STOPPED_REPLY).await;
                     }
                     runtime.drain();
@@ -436,6 +440,9 @@ async fn answer_command(
     let narrator = app.clone();
     let relay = tokio::spawn(async move {
         let mut last_said = Instant::now();
+        // Passée en arrière-plan, la tâche continue sans voix (ni progression,
+        // ni « je travaille toujours ») : Jimmy écoute la suite.
+        let mut detached = false;
         loop {
             // Un seul appel au modèle peut durer plus d'une minute (écriture
             // d'un fichier) sans aucun événement : signe de vie si rien n'a été
@@ -444,7 +451,7 @@ async fn answer_command(
                 Ok(Some(event)) => event,
                 Ok(None) => break,
                 Err(_) => {
-                    if last_said.elapsed() >= STILL_WORKING_AFTER {
+                    if !detached && last_said.elapsed() >= STILL_WORKING_AFTER {
                         log::info!("[voice] progression : « Je travaille toujours dessus. »");
                         narrator.speak("Je travaille toujours dessus.").await;
                         last_said = Instant::now();
@@ -452,38 +459,55 @@ async fn answer_command(
                     continue;
                 }
             };
-            if let AgentEvent::Progress { text } = &event {
-                if last_said.elapsed() >= PROGRESS_EVERY {
+            match &event {
+                AgentEvent::Detached { .. } => detached = true,
+                AgentEvent::Progress { text } if !detached && last_said.elapsed() >= PROGRESS_EVERY => {
                     log::info!("[voice] progression : « {text} »");
                     narrator.speak(text).await;
                     last_said = Instant::now();
                 }
+                _ => {}
             }
             let _ = relay_events.send(event).await;
         }
     });
-    // Interruptible par l'arrêt d'urgence (`App::cancellable`).
-    let run = app.cancellable(crate::core::agent::run(
-        app.deps_voice(),
-        settings,
-        session.clone(),
-        command.to_string(),
-        tool_context,
-        relay_tx,
-    ));
-    tokio::pin!(run);
+    // Tâche suivie : interruptible par « STOP » tant qu'elle est au premier
+    // plan, et passée en arrière-plan si elle dure (`App::start_task`).
+    let deps = app.deps_voice();
+    let request = command.to_string();
+    let run_session = session.clone();
+    let ticket = app.start_task(&session, command, relay_tx, move |tx| {
+        crate::core::agent::run(deps, settings, run_session, request, tool_context, tx)
+    });
+    let wait = ticket.wait();
+    tokio::pin!(wait);
     // Le modèle gratuit répond en 3 s ou en 25 s selon l'heure : si la réponse
     // tarde, Jimmy le dit (« Un instant. ») au lieu de laisser un silence qui
     // ressemble à une panne. L'agent continue pendant ce temps.
-    let answer = tokio::select! {
-        result = &mut run => result,
+    let waited = tokio::select! {
+        result = &mut wait => result,
         _ = tokio::time::sleep(THINKING_CUE_AFTER) => {
             log::info!("[voice] réponse lente : « Un instant. »");
             super::cues::play(app, super::cues::Cue::Thinking).await;
-            (&mut run).await
+            (&mut wait).await
         }
     };
     log::info!("[voice] réponse de l'agent en {} ms", started.elapsed().as_millis());
+    let answer = match waited {
+        crate::TaskOutcome::Done(answer) => answer,
+        // La tâche continue en arrière-plan (son relais aussi) : Jimmy le dit
+        // et se remet à écouter ; la fin sera annoncée (`App::start_task`).
+        crate::TaskOutcome::Detached => {
+            log::info!("[voice] tâche passée en arrière-plan : retour à l'écoute");
+            phase(events, "speaking", Duration::ZERO).await;
+            app.speak(DETACHED_REPLY).await;
+            if let Ok(mut guard) = app.voice_session.lock() {
+                *guard = Some((session, Instant::now()));
+            }
+            watcher.abort();
+            return true;
+        }
+    };
     // L'agent a fini (son émetteur est fermé) : on attend la fin d'une phrase
     // de progression en cours avant de dire la réponse, sans chevauchement.
     let _ = relay.await;
@@ -529,6 +553,9 @@ async fn answer_command(
     outcome
 }
 
+/// Phrase dite quand une tâche vocale passe en arrière-plan.
+pub const DETACHED_REPLY: &str = "Je m'en occupe en arrière-plan, je te préviens quand c'est fini.";
+
 /// Phrase dite après un arrêt d'urgence. Publique : le relais d'événements
 /// (crate desktop) s'en sert pour ne pas jouer la joie (`success`) quand
 /// Jimmy vient en fait d'être arrêté.
@@ -561,7 +588,11 @@ async fn watch_for_stop(app: Arc<App>, runtime: Arc<VoiceRuntime>, rate: u32, th
                 log::debug!("[voice] guetteur d'arrêt : « {text} »");
                 if is_stop_command(&text) {
                     log::info!("[voice] arrêt d'urgence entendu pendant la tâche : « {text} »");
-                    app.request_stop();
+                    if is_stop_all_command(&text) {
+                        app.request_stop_all();
+                    } else {
+                        app.request_stop();
+                    }
                     return;
                 }
             }

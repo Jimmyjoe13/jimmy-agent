@@ -35,7 +35,9 @@ export interface AgentEvent {
     | "spoken"
     | "progress"
     | "listen"
-    | "failed";
+    | "failed"
+    | "detached"
+    | "background";
   state?: AvatarState;
   detail?: string;
   callId?: string;
@@ -59,6 +61,22 @@ export interface AgentEvent {
   id?: string;
   target?: string;
   approved?: boolean;
+  /** `detached` / `background` : la tâche de fond concernée (`sessionId` =
+   *  sa conversation). `title` : début de sa demande. */
+  taskId?: string;
+  title?: string;
+  /** `background` : l'événement de la tâche de fond, enveloppé. */
+  event?: AgentEvent;
+}
+
+/** Tâche de l'agent en cours (`tasks_list`). */
+export interface TaskInfo {
+  id: string;
+  sessionId: string;
+  title: string;
+  step: string;
+  background: boolean;
+  elapsedSecs: number;
 }
 
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
@@ -414,6 +432,8 @@ export const api = {
   mcpServers: () => invoke<McpServerStatus[]>("mcp_servers"),
   /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimmy). */
   agentStop: () => invoke<boolean>("agent_stop"),
+  tasksList: () => invoke<TaskInfo[]>("tasks_list"),
+  taskStop: (id: string) => invoke<boolean>("task_stop", { id }),
   ttsVoices: () => invoke<{ current: string; presets: VoiceInfo[]; library: VoiceInfo[] }>("tts_voices"),
   ttsSearchVoices: (query: string) => invoke<VoiceInfo[]>("tts_search_voices", { query }),
   ttsSetVoice: (voice: VoiceInfo) => invoke<void>("tts_set_voice", { voice }),

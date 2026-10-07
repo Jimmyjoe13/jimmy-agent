@@ -64,6 +64,7 @@ async function main() {
     lastSessionId: null,
     pendingProject: null,
     approvals: new Map(),
+    taskTitles: new Map(),
     navigate: (next) => {
       route = next;
       render();
@@ -154,7 +155,35 @@ async function main() {
       }
     }
     if (event.type === "approvalResolved" && event.id) ctx.approvals.delete(event.id);
-    if (event.type === "final" || event.type === "failed") ctx.approvals.clear();
+    // Fin du tour au premier plan : ses demandes n'ont plus d'objet (celles
+    // d'une tâche de fond, marquées `taskId`, restent).
+    if (event.type === "final" || event.type === "failed") {
+      for (const [id, pending] of ctx.approvals) if (!pending.taskId) ctx.approvals.delete(id);
+    }
+    // Tâche passée en arrière-plan : Jimmy est de nouveau disponible.
+    if (event.type === "detached") {
+      setState("idle");
+      if (event.taskId) ctx.taskTitles.set(event.taskId, event.title ?? "");
+    }
+    if (event.type === "background" && event.event) {
+      const inner = event.event;
+      if (inner.type === "approval" && inner.id) {
+        ctx.approvals.set(inner.id, { ...inner, taskId: event.taskId });
+        if (route !== "chat") {
+          toast("La tâche de fond attend ton autorisation dans le Chat (fichier sensible).", "info");
+          void api.showMain().catch(() => undefined);
+        }
+      }
+      if (inner.type === "approvalResolved" && inner.id) ctx.approvals.delete(inner.id);
+      if (inner.type === "final" || inner.type === "failed") {
+        for (const [id, pending] of ctx.approvals) if (pending.taskId === event.taskId) ctx.approvals.delete(id);
+        // Dans le Chat, la vue s'en charge (bulle ou toast selon la session).
+        if (route !== "chat") {
+          if (inner.type === "final") toast(`Tâche de fond terminée : ${ctx.taskTitles.get(event.taskId ?? "") ?? ""}`, "info");
+          else toast(`Tâche de fond en échec : ${inner.message ?? ""}`, "error");
+        }
+      }
+    }
     for (const handler of handlers) handler(event);
   });
 

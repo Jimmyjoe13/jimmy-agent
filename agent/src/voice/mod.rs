@@ -577,6 +577,9 @@ pub fn interrupt_playback() {
 const STOP_WORDS: &[&str] = &["stop", "stoppe", "stopper", "arrête", "arrete", "arrêtez", "arretez", "arrêter"];
 /// Mots tolérés autour (« arrête-toi », « arrête tout », « stop stop »).
 const STOP_FILLERS: &[&str] = &["toi", "tout", "ça", "ca", "maintenant", "stp"];
+/// Mots de « arrête toutes les tâches » : un arrêt qui vise aussi la tâche
+/// de fond (voir `is_stop_all_command`).
+const STOP_ALL_FILLERS: &[&str] = &["toutes", "les", "tâches", "taches", "tache", "tâche"];
 
 /// La transcription est-elle un ordre d'arrêt d'urgence ?
 ///
@@ -596,7 +599,20 @@ pub fn is_stop_command(text: &str) -> bool {
     !words.is_empty()
         && words.len() <= 4
         && words.iter().any(|w| STOP_WORDS.contains(&w.as_str()))
-        && words.iter().all(|w| STOP_WORDS.contains(&w.as_str()) || STOP_FILLERS.contains(&w.as_str()))
+        && words.iter().all(|w| {
+            STOP_WORDS.contains(&w.as_str()) || STOP_FILLERS.contains(&w.as_str()) || STOP_ALL_FILLERS.contains(&w.as_str())
+        })
+}
+
+/// « Arrête tout » / « arrête toutes les tâches » : un ordre d'arrêt qui
+/// vise aussi la tâche de fond. « STOP » seul n'arrête que le premier plan
+/// (décision du 7 octobre).
+pub fn is_stop_all_command(text: &str) -> bool {
+    is_stop_command(text)
+        && text
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|w| w == "tout" || w == "toutes")
 }
 
 pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
@@ -788,6 +804,18 @@ mod tests {
         for text in ["STOP", "Stop !", "stop.", "Stoppe.", "Jimmy, stop !", "Arrête !", "arrête-toi", "Stop stop.", "Jimmy arrête tout"] {
             assert!(is_stop_command(text), "« {text} » doit arrêter");
         }
+    }
+
+    #[test]
+    fn arrete_tout_vise_aussi_la_tache_de_fond() {
+        for text in ["Arrête tout.", "Jimmy, arrête tout !", "Stop tout", "Arrête toutes les tâches."] {
+            assert!(is_stop_command(text), "« {text} » doit arrêter");
+            assert!(is_stop_all_command(text), "« {text} » doit tout arrêter");
+        }
+        for text in ["Stop !", "Arrête-toi", "Jimmy, stop"] {
+            assert!(!is_stop_all_command(text), "« {text} » n'arrête que le premier plan");
+        }
+        assert!(!is_stop_all_command("Arrête tout le serveur de dev"));
     }
 
     #[test]

@@ -1957,3 +1957,54 @@ button.small {
 .stop-button[hidden] {
   display: none;
 }
+
+/* Tâche de fond : bandeau au-dessus de la saisie (le Chat reste libre). */
+.tasks-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+}
+
+/* Piège 68 : `hidden` ne masque pas un élément stylé en `display`. */
+.tasks-band[hidden] {
+  display: none;
+}
+
+.tasks-band-kind {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tasks-band-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-band-step {
+  color: var(--text-dim);
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-band-time {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Réponse d'une tâche de fond arrivée dans le fil. */
+.bubble.from-background {
+  border-left: 3px solid var(--accent);
+}

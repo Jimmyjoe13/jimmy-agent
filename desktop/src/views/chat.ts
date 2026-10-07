@@ -5,7 +5,7 @@
  * manière de Codex Desktop : Jimmy y travaille, et le panneau « Fichiers »
  * permet d'y naviguer sans quitter le chat.
  */
-import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo } from "../api";
+import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo, type TaskInfo } from "../api";
 import { attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { explorerPanel } from "./explorer";
@@ -47,6 +47,8 @@ export function chatView(ctx: AppContext): HTMLElement {
   // Fichiers écrits par Jimmy dans le tour courant (`write_file`) : la
   // matière du bloc « travaux » ajouté sous la réponse finale.
   let turnFiles: string[] = [];
+  // Fichiers écrits par chaque tâche de fond : son bloc « travaux » à la fin.
+  const backgroundFiles = new Map<string, string[]>();
   // Projet de la conversation (null = dossier par défaut des Paramètres).
   // Une nouvelle conversation garde le projet en cours, comme un nouveau fil
   // dans le même projet chez Codex.
@@ -189,6 +191,56 @@ export function chatView(ctx: AppContext): HTMLElement {
     },
     "Arrêter",
   );
+  // ── Tâche de fond ────────────────────────────────────────────────────────
+  // Bandeau au-dessus de la saisie : ce qui tourne en arrière-plan pendant
+  // que la conversation continue, avec son étape et son propre arrêt
+  // (« Arrêter » du composer et « STOP » n'arrêtent que le premier plan).
+  const tasksBand = h("div", { class: "tasks-band", hidden: true, "aria-label": "Tâche en arrière-plan" });
+  let backgroundTask: TaskInfo | null = null;
+  // Instant de lecture de `elapsedSecs` : la durée avance sans relire.
+  let taskReadAt = 0;
+
+  function renderTasks() {
+    if (!backgroundTask) {
+      tasksBand.hidden = true;
+      mount(tasksBand);
+      return;
+    }
+    const task = backgroundTask;
+    const seconds = task.elapsedSecs + Math.floor((Date.now() - taskReadAt) / 1000);
+    const duration = seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`;
+    tasksBand.hidden = false;
+    mount(
+      tasksBand,
+      h("span", { class: "tasks-band-kind" }, "En arrière-plan"),
+      h("span", { class: "tasks-band-title", title: task.title }, task.title),
+      h("span", { class: "tasks-band-step" }, task.step || "démarrage"),
+      h("em", { class: "tasks-band-time" }, duration),
+      h(
+        "button",
+        {
+          class: "danger small tasks-band-stop",
+          title: "Arrêter cette tâche de fond",
+          onclick: () => void attempt(() => api.taskStop(task.id), "arrêt de la tâche"),
+        },
+        "Arrêter",
+      ),
+    );
+  }
+
+  async function refreshTasks() {
+    const list = await guard(() => api.tasksList(), "tâches");
+    backgroundTask = list?.find((task) => task.background) ?? null;
+    taskReadAt = Date.now();
+    renderTasks();
+  }
+
+  // La durée du bandeau avance toute seule ; minuterie détruite avec la vue.
+  const tasksTimer = window.setInterval(() => {
+    if (backgroundTask) renderTasks();
+  }, 5000);
+  ctx.onCleanup(() => window.clearInterval(tasksTimer));
+
   const hint = h("span", { class: "composer-hint" }, "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · @ pour citer un fichier");
 
   // ── Mentions « @ » (façon Codex) ───────────────────────────────────────────
@@ -606,12 +658,22 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   // Cartes d'autorisation ouvertes, par identifiant de demande.
   const approvalCards = new Map<string, HTMLElement>();
+  // Celles d'une tâche de fond : identifiant de demande → tâche.
+  const approvalTasks = new Map<string, string>();
+
+  /** Clôt les cartes d'un tour : premier plan (`null`) ou tâche de fond. */
+  function closeApprovalsOf(taskId: string | null) {
+    for (const id of [...approvalCards.keys()]) {
+      if ((approvalTasks.get(id) ?? null) === taskId) closeApproval(id, null);
+    }
+  }
 
   /** Carte « Autoriser / Refuser » : Jimmy veut modifier un fichier sensible
    *  (`.env`, clés, secrets) et son outil est suspendu jusqu'à la réponse. */
   function showApproval(event: AgentEvent) {
     const id = event.id ?? "";
     if (!id || approvalCards.has(id)) return;
+    if (event.taskId) approvalTasks.set(id, event.taskId);
     const status = h("span", { class: "approval-status" }, "Jimmy attend ta réponse");
     const allow = h("button", { class: "primary small" }, "Autoriser") as HTMLButtonElement;
     const deny = h("button", { class: "danger small" }, "Refuser") as HTMLButtonElement;
@@ -627,7 +689,13 @@ export function chatView(ctx: AppContext): HTMLElement {
     const card = h(
       "div",
       { class: "bubble approval" },
-      h("p", { class: "approval-title" }, "Autorisation demandée : modifier un fichier sensible"),
+      h(
+        "p",
+        { class: "approval-title" },
+        event.taskId
+          ? "Autorisation demandée par la tâche de fond : modifier un fichier sensible"
+          : "Autorisation demandée : modifier un fichier sensible",
+      ),
       h("code", { class: "approval-target" }, event.target ?? ""),
       h("pre", { class: "approval-detail" }, event.detail ?? ""),
       h("div", { class: "approval-actions" }, status, deny, allow),
@@ -638,8 +706,11 @@ export function chatView(ctx: AppContext): HTMLElement {
     if (pending?.isConnected) pending.before(card);
     else append(card);
     stream.scrollTop = stream.scrollHeight;
-    window.clearTimeout(safety);
-    safetyOn = false;
+    // Le filet ne concerne que le tour au premier plan.
+    if (!event.taskId) {
+      window.clearTimeout(safety);
+      safetyOn = false;
+    }
   }
 
   /** Clôt une carte : accord, refus, ou `null` = expirée / sans objet. */
@@ -647,6 +718,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     const card = approvalCards.get(id);
     if (!card) return;
     approvalCards.delete(id);
+    approvalTasks.delete(id);
     card.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
     card.classList.add(approved ? "approved" : "denied");
     const status = card.querySelector(".approval-status");
@@ -724,6 +796,70 @@ export function chatView(ctx: AppContext): HTMLElement {
     while (activity.childElementCount > 40) activity.lastElementChild?.remove();
   }
 
+  /** Événement d'une tâche de fond : il ne touche ni à la bulle d'attente ni
+   *  au filet du tour au premier plan. Sa fin va dans sa conversation si elle
+   *  est affichée, sinon un toast l'annonce. */
+  function onBackground(wrapper: AgentEvent, event: AgentEvent) {
+    const taskId = wrapper.taskId ?? "";
+    switch (event.type) {
+      case "toolStart": {
+        if (event.name === "write_file") {
+          const args = typeof event.arguments === "string" ? safeParse(event.arguments) : event.arguments;
+          const path = typeof (args as { path?: unknown } | null)?.path === "string" ? String((args as { path: string }).path) : null;
+          const files = backgroundFiles.get(taskId) ?? [];
+          if (path && !files.includes(path)) files.push(path);
+          backgroundFiles.set(taskId, files);
+        }
+        logActivity(activityLine("fond", "tool", h("code", {}, event.name ?? "?")));
+        if (backgroundTask?.id === taskId) {
+          backgroundTask.step = event.name ?? backgroundTask.step;
+          renderTasks();
+        }
+        break;
+      }
+      case "progress":
+        if (backgroundTask?.id === taskId && event.text) {
+          backgroundTask.step = event.text;
+          renderTasks();
+        }
+        break;
+      case "approval":
+        showApproval({ ...event, taskId });
+        break;
+      case "approvalResolved":
+        closeApproval(event.id ?? "", event.approved ?? false);
+        break;
+      case "final":
+      case "failed": {
+        closeApprovalsOf(taskId);
+        const title = ctx.taskTitles.get(taskId) ?? "";
+        const files = backgroundFiles.get(taskId) ?? [];
+        backgroundFiles.delete(taskId);
+        if (wrapper.sessionId && wrapper.sessionId === sessionId) {
+          const node =
+            event.type === "final"
+              ? bubble("assistant", event.text ?? "")
+              : bubble("error", `Tâche de fond en échec : ${event.message ?? ""}`);
+          node.classList.add("from-background");
+          if (event.type === "final" && files.length > 0) node.append(workBlock(files));
+          // Au-dessus d'un tour en cours : sa bulle d'attente reste la dernière.
+          const live = pending ?? streaming;
+          if (live?.isConnected) live.before(node);
+          else append(node);
+          stream.scrollTop = stream.scrollHeight;
+        } else if (event.type === "final") {
+          toast(`Tâche de fond terminée : ${title}. Réponse dans sa conversation.`, "info");
+        } else {
+          toast(`Tâche de fond en échec : ${event.message ?? ""}`, "error");
+        }
+        void refreshTasks();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
   ctx.onEvent((event: AgentEvent) => {
     switch (event.type) {
       case "toolStart":
@@ -799,15 +935,28 @@ export function chatView(ctx: AppContext): HTMLElement {
         break;
       case "final": {
         // Fin du tour (STOP compris) : une carte encore ouverte n'a plus d'objet.
-        for (const id of [...approvalCards.keys()]) closeApproval(id, null);
+        closeApprovalsOf(null);
         const node = bubble("assistant", event.text ?? "");
         if (turnFiles.length > 0) node.append(workBlock(turnFiles));
         settle(node);
         break;
       }
       case "failed":
-        for (const id of [...approvalCards.keys()]) closeApproval(id, null);
+        closeApprovalsOf(null);
         settle(bubble("error", event.message ?? "La demande a échoué."));
+        break;
+      case "detached": {
+        // Le tour devient une tâche de fond : le Chat est de nouveau libre.
+        // Ce qui s'écrivait en flux n'était qu'une annonce d'étape.
+        resolveStreamingAsAnnouncement();
+        if (event.taskId) backgroundFiles.set(event.taskId, turnFiles);
+        turnFiles = [];
+        settle(bubble("assistant", "Je m'en occupe en arrière-plan. Tu peux continuer, je te préviens à la fin."));
+        void refreshTasks();
+        break;
+      }
+      case "background":
+        if (event.event) onBackground(event, event.event);
         break;
       default:
         break;
@@ -874,6 +1023,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   // affichées après l'historique (qui remplace le contenu du fil).
   void loadHistory().then(() => ctx.approvals.forEach((event) => showApproval(event)));
   void loadProject();
+  void refreshTasks();
   window.setTimeout(() => input.focus(), 0);
 
   const chatHeader = h(
@@ -905,6 +1055,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         { class: "chat-main" },
     stream,
     activity,
+    tasksBand,
     h(
       "div",
       { class: "composer" },
