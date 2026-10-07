@@ -68,7 +68,7 @@ async fn fin_de_fond(rx: &mut Receiver<AgentEvent>) -> (String, String) {
 async fn une_tache_outillee_passe_en_fond_et_libere_le_premier_plan() {
     let (app, racine) = app_isolee();
     let (events, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let ticket = app.start_task("s1", "écris notify.py", events, |tx| travail(tx, Duration::from_secs(30), "fini"));
+    let ticket = app.start_task("s1", "écris notify.py", events, |tx, _| travail(tx, Duration::from_secs(30), "fini"));
 
     let outcome = tokio::time::timeout(Duration::from_secs(3), ticket.wait()).await.expect("passage en fond rapide");
     assert!(matches!(outcome, TaskOutcome::Detached));
@@ -99,7 +99,7 @@ async fn une_tache_outillee_passe_en_fond_et_libere_le_premier_plan() {
 async fn stop_epargne_la_tache_de_fond_arrete_tout_non() {
     let (app, racine) = app_isolee();
     let (events, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let ticket = app.start_task("s1", "longue", events, |tx| travail(tx, Duration::from_secs(30), "jamais"));
+    let ticket = app.start_task("s1", "longue", events, |tx, _| travail(tx, Duration::from_secs(30), "jamais"));
     assert!(matches!(ticket.wait().await, TaskOutcome::Detached));
 
     // « STOP » : rien au premier plan, la tâche de fond continue.
@@ -120,7 +120,7 @@ async fn stop_epargne_la_tache_de_fond_arrete_tout_non() {
 async fn le_bouton_d_une_tache_l_arrete_seule() {
     let (app, racine) = app_isolee();
     let (events, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let ticket = app.start_task("s1", "longue", events, |tx| travail(tx, Duration::from_secs(30), "jamais"));
+    let ticket = app.start_task("s1", "longue", events, |tx, _| travail(tx, Duration::from_secs(30), "jamais"));
     let id = ticket.id.clone();
     assert!(matches!(ticket.wait().await, TaskOutcome::Detached));
     assert!(app.stop_task(&id));
@@ -133,12 +133,12 @@ async fn le_bouton_d_une_tache_l_arrete_seule() {
 async fn une_seule_tache_de_fond_la_seconde_reste_au_premier_plan() {
     let (app, racine) = app_isolee();
     let (events, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let first = app.start_task("s1", "première", events.clone(), |tx| travail(tx, Duration::from_secs(30), "jamais"));
+    let first = app.start_task("s1", "première", events.clone(), |tx, _| travail(tx, Duration::from_secs(30), "jamais"));
     assert!(matches!(first.wait().await, TaskOutcome::Detached));
     while !matches!(suivant(&mut rx).await, AgentEvent::Background { .. }) {}
 
     // Même seuil atteint, mais la place est prise : premier plan, comme avant.
-    let second = app.start_task("s2", "seconde", events, |tx| travail(tx, Duration::from_millis(300), "seconde finie"));
+    let second = app.start_task("s2", "seconde", events, |tx, _| travail(tx, Duration::from_millis(300), "seconde finie"));
     match second.wait().await {
         TaskOutcome::Done(Ok(answer)) => assert_eq!(answer.text, "seconde finie"),
         _ => panic!("la seconde tâche doit finir au premier plan"),
@@ -164,7 +164,7 @@ async fn une_seule_tache_de_fond_la_seconde_reste_au_premier_plan() {
 async fn la_fin_d_une_tache_de_fond_arrive_dans_sa_session() {
     let (app, racine) = app_isolee();
     let (events, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let ticket = app.start_task("s1", "courte", events, |tx| travail(tx, Duration::from_millis(300), "c'est écrit"));
+    let ticket = app.start_task("s1", "courte", events, |tx, _| travail(tx, Duration::from_millis(300), "c'est écrit"));
     assert!(matches!(ticket.wait().await, TaskOutcome::Detached));
     assert_eq!(fin_de_fond(&mut rx).await, ("s1".to_string(), "c'est écrit".to_string()));
     // Le registre se vide une fois la fin traitée.
@@ -177,7 +177,7 @@ async fn la_fin_d_une_tache_de_fond_arrive_dans_sa_session() {
 async fn pas_de_passage_en_fond_pendant_une_autorisation() {
     let (app, racine) = app_isolee();
     let (events, _rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
-    let ticket = app.start_task("s1", "écris le .env", events, |tx| async move {
+    let ticket = app.start_task("s1", "écris le .env", events, |tx, _| async move {
         let _ = tx.send(AgentEvent::Approval { id: "a1".into(), target: ".env".into(), detail: String::new() }).await;
         for n in 1..=3 {
             let _ = tx.send(outil(n)).await;
@@ -192,6 +192,29 @@ async fn pas_de_passage_en_fond_pendant_une_autorisation() {
     let started = std::time::Instant::now();
     assert!(matches!(ticket.wait().await, TaskOutcome::Detached));
     assert!(started.elapsed() >= Duration::from_millis(500), "passée en fond avant la réponse à la carte");
+    app.request_stop_all();
+    let _ = std::fs::remove_dir_all(&racine);
+}
+
+/// Le budget élargi (60 étapes, 20 min) se lit sur ce drapeau, à chaque
+/// étape de la boucle d'agent : il doit passer à vrai au passage en fond.
+#[tokio::test]
+async fn la_tache_sait_qu_elle_est_passee_en_fond() {
+    let (app, racine) = app_isolee();
+    let (events, _rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
+    let (seen_tx, seen_rx) = tokio::sync::oneshot::channel::<(bool, bool)>();
+    let ticket = app.start_task("s1", "longue", events, |tx, background| async move {
+        let before = background.load(std::sync::atomic::Ordering::SeqCst);
+        for n in 1..=3 {
+            let _ = tx.send(outil(n)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = seen_tx.send((before, background.load(std::sync::atomic::Ordering::SeqCst)));
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        Ok(AgentAnswer { session_id: "s1".into(), text: "jamais".into(), tools_used: vec![], duration_ms: 0 })
+    });
+    assert!(matches!(ticket.wait().await, TaskOutcome::Detached));
+    assert_eq!(seen_rx.await.unwrap(), (false, true), "premier plan puis fond");
     app.request_stop_all();
     let _ = std::fs::remove_dir_all(&racine);
 }

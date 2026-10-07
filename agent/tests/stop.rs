@@ -35,7 +35,7 @@ async fn une_tache_en_cours_s_arrete_tout_de_suite() {
         assert!(stopper.request_stop(), "il y avait quelque chose à arrêter");
     });
     let started = Instant::now();
-    let ticket = app.start_task("s", "longue", events.clone(), |_tx| async {
+    let ticket = app.start_task("s", "longue", events.clone(), |_tx, _| async {
         tokio::time::sleep(Duration::from_secs(30)).await;
         Ok(reponse("jamais"))
     });
@@ -46,7 +46,7 @@ async fn une_tache_en_cours_s_arrete_tout_de_suite() {
     assert!(app.tasks.list().is_empty(), "la tâche arrêtée quitte le registre");
 
     // Un arrêt demandé AVANT une tâche ne l'empêche pas de démarrer.
-    let next = app.start_task("s", "courte", events, |_tx| async { Ok(reponse("7")) }).wait().await;
+    let next = app.start_task("s", "courte", events, |_tx, _| async { Ok(reponse("7")) }).wait().await;
     match next {
         TaskOutcome::Done(Ok(answer)) => assert_eq!(answer.text, "7"),
         _ => panic!("la tâche suivante doit aboutir"),

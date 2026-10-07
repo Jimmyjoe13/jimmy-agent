@@ -33,6 +33,11 @@ pub const DETACH_AFTER_TOOLS: usize = 3;
 /// L'annonce de fin d'une tâche de fond attend que Jimmy soit libre (ne
 /// parle pas, rien au premier plan), au plus ce délai.
 pub const ANNOUNCE_WAIT_MAX: Duration = Duration::from_secs(120);
+/// Budget d'une tâche passée en fond (choix de l'utilisateur, 7 octobre) :
+/// elle ne bloque plus personne et s'arrête d'un clic ; 25 étapes / 10 min
+/// coupaient deux fois de suite une vraie tâche avant qu'elle n'agisse.
+pub const BACKGROUND_MAX_ITERATIONS: u32 = 60;
+pub const BACKGROUND_DEADLINE: Duration = Duration::from_secs(20 * 60);
 /// Réponse affichée quand une tâche de fond est arrêtée.
 pub const BACKGROUND_STOPPED: &str = "Tâche de fond arrêtée à ta demande.";
 

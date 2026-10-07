@@ -476,8 +476,8 @@ async fn answer_command(
     let deps = app.deps_voice();
     let request = command.to_string();
     let run_session = session.clone();
-    let ticket = app.start_task(&session, command, relay_tx, move |tx| {
-        crate::core::agent::run(deps, settings, run_session, request, tool_context, tx)
+    let ticket = app.start_task(&session, command, relay_tx, move |tx, background| {
+        crate::core::agent::run(deps.in_task(background), settings, run_session, request, tool_context, tx)
     });
     let wait = ticket.wait();
     tokio::pin!(wait);

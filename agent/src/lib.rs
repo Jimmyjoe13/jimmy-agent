@@ -432,8 +432,9 @@ impl App {
 
     /// Lance un tour de l'agent comme **tâche suivie** (Chat et voix).
     ///
-    /// `work` reçoit l'émetteur d'événements de la tâche (typiquement
-    /// `|tx| core::agent::run(…, tx)`). Ses événements sont relayés vers
+    /// `work` reçoit l'émetteur d'événements de la tâche et son drapeau « en
+    /// fond » (typiquement `|tx, bg| core::agent::run(deps.in_task(bg), …, tx)` :
+    /// le budget s'élargit au passage en fond). Ses événements sont relayés vers
     /// `events` tels quels tant qu'elle est au premier plan. Si elle dure (voir
     /// `tasks::DETACH_AFTER*`) et que la place de fond est libre, elle passe en
     /// arrière-plan : `AgentEvent::Detached`, puis tous ses événements
@@ -448,7 +449,7 @@ impl App {
         work: F,
     ) -> TaskTicket
     where
-        F: FnOnce(tokio::sync::mpsc::Sender<AgentEvent>) -> Fut,
+        F: FnOnce(tokio::sync::mpsc::Sender<AgentEvent>, Arc<std::sync::atomic::AtomicBool>) -> Fut,
         Fut: std::future::Future<Output = Result<core::types::AgentAnswer>> + Send + 'static,
     {
         let (id, own) = self.tasks.begin(session_id, request);
@@ -464,7 +465,7 @@ impl App {
             detach_tx,
             detached.clone(),
         ));
-        let work = work(inner_tx);
+        let work = work(inner_tx, detached.clone());
 
         let app = self.clone();
         let task_id = id.clone();
@@ -1083,6 +1084,7 @@ impl App {
             data_dir: self.paths.data.clone(),
             approvals: self.approvals.clone(),
             tasks: self.tasks.clone(),
+            background: None,
             voice: false,
         })
     }

@@ -272,6 +272,119 @@ fn words_modify(words: &[&str]) -> Option<String> {
     }
 }
 
+/// Commandes qui ne font que lire ou afficher (liste blanche : un verbe
+/// inconnu n'est **pas** une lecture). `find` et `curl` sont vérifiés à part.
+const READ_VERBS: &[&str] = &[
+    "get-childitem", "gci", "ls", "dir", "get-content", "gc", "cat", "type", "head", "tail", "less", "more",
+    "test-path", "select-string", "sls", "findstr", "grep", "egrep", "rg", "get-item", "gi", "get-itemproperty",
+    "gp", "resolve-path", "get-location", "pwd", "get-process", "ps", "tasklist", "get-service", "get-command",
+    "where", "where.exe", "which", "test-netconnection", "tnc", "get-nettcpconnection", "netstat", "ss",
+    "nslookup", "ping", "ipconfig", "ip", "hostname", "whoami", "uname", "uptime", "df", "du", "free", "id",
+    "write-output", "echo", "write-host", "format-table", "ft", "format-list", "fl", "select-object", "select",
+    "where-object", "sort-object", "sort", "measure-object", "measure", "out-string", "wc", "uniq", "cut", "jq",
+    "get-date", "date", "stat", "file", "realpath", "readlink", "systemctl", "journalctl", "get-filehash",
+    "sha256sum", "md5sum", "env", "printenv", "true", "start-sleep", "sleep", "get-scheduledtask",
+    "get-scheduledtaskinfo", "export-scheduledtask", "get-ciminstance", "gcim", "get-wmiobject", "gwmi",
+    "get-acl", "get-netipaddress", "get-netadapter", "out-string", "out-null", "get-member", "gm",
+    "get-variable", "get-host", "get-psdrive", "get-hotfix", "get-computerinfo",
+    // Mots de contrôle PowerShell : leur bloc `{ … }` est un segment analysé à part.
+    "foreach", "for", "try", "catch", "finally", "foreach-object",
+    // Changer de dossier n'écrit rien.
+    "cd", "set-location", "sl", "pushd", "popd",
+];
+
+/// Méthodes .NET qui modifient : `$k.Delete()`, `(…).Kill()` restent des actions.
+const MUTATING_MEMBERS: &[&str] = &[
+    "delete", "remove", "kill", "stop", "terminate", "set", "write", "move", "copy", "create", "start", "save", "append",
+];
+
+/// Sous-commandes de lecture de `git` et `docker`.
+const GIT_READS: &[&str] = &["status", "log", "diff", "show", "branch", "remote", "rev-parse", "ls-files", "blame"];
+const DOCKER_READS: &[&str] = &["ps", "logs", "inspect", "images", "version", "info", "stats"];
+
+/// Options de `ssh` suivies d'une valeur (`-i clé`, `-o Option=…`).
+const SSH_VALUE_OPTIONS: &[&str] = &[
+    "-i", "-o", "-p", "-l", "-F", "-J", "-L", "-R", "-D", "-E", "-c", "-b", "-S", "-W", "-O", "-Q", "-w", "-m", "-e",
+];
+
+/// Un segment de commande qui ne fait que lire ?
+fn words_read_only(words: &[&str]) -> bool {
+    let Some(start) = words
+        .iter()
+        .position(|w| !PREFIXES.contains(&w.to_lowercase().as_str()) && !(w.contains('=') && !w.starts_with('-')))
+    else {
+        return true; // seulement des préfixes ou affectations `A=b`
+    };
+    let (verb, rest) = match words[start..].split_first() {
+        Some(split) => split,
+        None => return true,
+    };
+    let verb = verb.to_lowercase();
+    let verb = verb.rsplit(['/', '\\']).next().unwrap_or(&verb).trim_end_matches(".exe");
+    match verb {
+        "find" => !rest.iter().any(|w| ["-delete", "-exec", "-execdir", "-ok", "-fprint"].contains(w)),
+        // `systemctl status`, pas `systemctl restart`.
+        "systemctl" => rest.first().is_some_and(|w| ["status", "is-active", "list-units", "show"].contains(w)),
+        // `curl` en GET, sans envoi ni fichier écrit.
+        "curl" => !rest.iter().any(|w| {
+            let w = w.to_lowercase();
+            ["-d", "--data", "-f", "--form", "-t", "--upload-file", "-o", "--output", "-x", "--request", "-O"]
+                .iter()
+                .any(|flag| w == *flag || (w.starts_with("--data") && flag.starts_with("--data")))
+        }),
+        // Requête web PowerShell en GET, sans corps ni fichier.
+        "invoke-webrequest" | "iwr" | "invoke-restmethod" | "irm" => {
+            let method_get = match rest.iter().position(|w| w.eq_ignore_ascii_case("-method")) {
+                Some(i) => rest.get(i + 1).is_some_and(|m| m.eq_ignore_ascii_case("get")),
+                None => true,
+            };
+            method_get
+                && !rest.iter().any(|w| ["-body", "-outfile", "-infile", "-form"].contains(&w.to_lowercase().as_str()))
+        }
+        "schtasks" => rest.iter().any(|w| w.eq_ignore_ascii_case("/query")),
+        // Variable, affectation ou propriété (`$k in …`, `$keys = …`,
+        // `$_.Trim()`, `(…).StatusCode`) : la valeur est un autre segment,
+        // analysé à part. Pas un appel qui modifie (`$k.Delete()`).
+        v if (v.starts_with('$') || v.starts_with('.'))
+            && v[1..].chars().all(|c| c.is_alphanumeric() || "_:,.".contains(c))
+            && !MUTATING_MEMBERS.iter().any(|m| v.contains(m)) =>
+        {
+            true
+        }
+        v if READ_VERBS.contains(&v) => true,
+        "git" => rest.iter().find(|w| !w.starts_with('-')).is_some_and(|w| GIT_READS.contains(w)),
+        "docker" => rest.first().is_some_and(|w| DOCKER_READS.contains(w)),
+        // Commande distante : options, hôte, puis la commande portée.
+        "ssh" => {
+            let mut i = 0;
+            while i < rest.len() && rest[i].starts_with('-') {
+                i += if SSH_VALUE_OPTIONS.contains(&rest[i]) { 2 } else { 1 };
+            }
+            let remote = rest.get(i + 1..).unwrap_or(&[]).join(" ");
+            !remote.trim().is_empty() && command_is_read_only(&remote)
+        }
+        _ => false,
+    }
+}
+
+/// La commande ne fait **que regarder** (lister, lire, tester, interroger un
+/// état, y compris à distance par `ssh`) ? Liste blanche : dans le doute, ce
+/// n'est pas une lecture. Sert au rappel « agis ou conclus » de la boucle
+/// d'agent, pas à la sécurité (qui reste `command_modifies_sensitive`).
+pub fn command_is_read_only(command: &str) -> bool {
+    let lower = command.to_lowercase();
+    if lower.contains("<<") || ["::write", "::append", "::delete", "::copy", "::move"].iter().any(|m| lower.contains(m)) {
+        return false;
+    }
+    let segs = segments(command);
+    !segs.is_empty()
+        && segs.iter().all(|seg| {
+            // Redirection : seule la poubelle (`2>$null`, `> /dev/null`) ne compte pas.
+            seg.targets.iter().all(|t| ["$null", "nul", "/dev/null"].contains(&t.to_lowercase().as_str()))
+                && words_read_only(&seg.words.iter().map(String::as_str).collect::<Vec<_>>())
+        })
+}
+
 /// Une ligne de commande (PowerShell ou shell distant) qui **écrit** dans un
 /// fichier sensible. Renvoie le fichier en cause ; `None` pour une lecture.
 pub fn command_modifies_sensitive(command: &str) -> Option<String> {
@@ -465,6 +578,47 @@ pub async fn authorize(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Commandes réelles du 7 octobre (inspection SSH), et leurs contraires.
+    #[test]
+    fn les_commandes_d_inspection_sont_des_lectures() {
+        for command in [
+            "Get-ChildItem $env:USERPROFILE\\.ssh | Format-Table Name,Length,LastWriteTime",
+            "Test-Path \"C:\\Users\\user\\Serveur\\vps.key\"; dir \"C:\\Users\\user\\Serveur\" | Format-Table Name,Length",
+            "ssh -i 'C:\\Users\\user\\vps.key' -o BatchMode=yes -o ConnectTimeout=10 ubuntu@203.0.113.10 'docker ps --format x; curl -s localhost:8000/health'",
+            "Get-Process ssh -ErrorAction SilentlyContinue 2>$null | Select Id,Path; netstat -ano | Select-String '127.0.0.1:8000'",
+            "git status --short; git log --oneline -3",
+            "cd /opt/app && git status",
+            "Get-Content a.txt | ForEach-Object { $_.Trim() } | Select-Object -First 5",
+            "find . -name '*.py' | head",
+            "foreach($k in @($a, $b)) { Test-Path $k }",
+            "schtasks /query /tn \"Services\" /xml",
+            "(Invoke-WebRequest -Uri http://203.0.113.10:8000/v1/health -TimeoutSec 5).StatusCode",
+            "Get-CimInstance Win32_Process -Filter \"ProcessId=42\" | Format-List CommandLine",
+        ] {
+            assert!(command_is_read_only(command), "« {command} » doit être une lecture");
+        }
+        for command in [
+            "Remove-Item build -Recurse",
+            "echo x > notes.txt",
+            "ssh ubuntu@203.0.113.10 'docker restart api'",
+            "ssh ubuntu@203.0.113.10",
+            "docker compose up -d",
+            "git commit -m x",
+            "curl -X POST localhost:8000/v1/memories -d '{}'",
+            "find . -name '*.tmp' -delete",
+            "systemctl restart nginx",
+            "schtasks /delete /tn Services /f",
+            "Invoke-WebRequest -Uri http://203.0.113.10/x -Method Post -Body '{}'",
+            "$k.Delete()",
+            "(Get-Item x.log).Delete()",
+            "npm install",
+            "python -c \"print(1)\"",
+            "",
+        ] {
+            assert!(!command_is_read_only(command), "« {command} » ne doit pas être une lecture");
+        }
+    }
 
     /// La commande réelle du 5 octobre (21:00) : sauvegarde puis réécriture
     /// d'un `.env` de production par un script Python.

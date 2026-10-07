@@ -43,6 +43,9 @@ pub struct AgentDeps {
     /// Tâches en cours : la tâche de fond est signalée dans le prompt, pour
     /// que Jimmy réponde en parallèle en sachant qu'elle tourne.
     pub tasks: Arc<crate::tasks::Tasks>,
+    /// La tâche est passée en arrière-plan (`App::start_task`) : son budget
+    /// d'étapes et de temps s'élargit. `None` hors tâche suivie (tests).
+    pub background: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// Demande dite à voix haute : réponse courte, peu d'étapes, et on fait
     /// répéter une phrase incohérente plutôt que de partir l'explorer.
     pub voice: bool,
@@ -58,6 +61,17 @@ pub struct AgentDeps {
 const VOICE_MAX_ITERATIONS: u32 = 25;
 
 impl AgentDeps {
+    /// Mêmes dépendances, reliées à l'état « en fond » d'une tâche.
+    pub fn in_task(self: Arc<Self>, background: Arc<std::sync::atomic::AtomicBool>) -> Arc<Self> {
+        let mut deps = (*self).clone();
+        deps.background = Some(background);
+        Arc::new(deps)
+    }
+
+    fn in_background(&self) -> bool {
+        self.background.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
     pub fn tool_context(&self, settings: &Settings) -> ToolContext {
         ToolContext {
             workspace: std::path::PathBuf::from(&settings.workspace),
@@ -156,17 +170,11 @@ pub async fn run(
         specs
             .retain(|spec| !matches!(spec.name.as_str(), "search_memory" | "vault_search"));
     }
-    let max_iterations = if deps.voice {
+    let foreground_iterations = if deps.voice {
         settings.llm.max_iterations.clamp(1, VOICE_MAX_ITERATIONS)
     } else {
         settings.llm.max_iterations.max(1)
     };
-    // À voix haute, une longue exploration est une panne silencieuse : 90 s au
-    // plus, puis réponse avec ce qu'on a (mesuré : 139 s d'attente sur « analyse
-    // ce dossier »).
-    // Même durée qu'à l'écrit : mesuré, MiMo met 3 à 4 minutes pour une tâche
-    // de code ; 180 s coupaient chaque fois avant l'écriture des fichiers.
-    let deadline = started + Duration::from_secs(600);
     // Modèle vocal facultatif : un modèle plus rapide pour la conversation.
     let model = if deps.voice && !settings.llm.voice_model.trim().is_empty() {
         settings.llm.voice_model.trim().to_string()
@@ -188,8 +196,14 @@ pub async fn run(
     let mut repairs = 0u32;
     let mut final_text = String::new();
 
-    for iteration in 0..max_iterations {
-        if Instant::now() > deadline {
+    for iteration in 0u32.. {
+        // Budget relu à chaque étape : une tâche passée en fond en cours de
+        // route gagne aussitôt le sien (`step_budget`).
+        let (max_iterations, time_budget) = step_budget(foreground_iterations, deps.in_background());
+        if iteration >= max_iterations {
+            break;
+        }
+        if started.elapsed() > time_budget {
             emit(
                 &mut events,
                 AgentEvent::Notice {
@@ -366,7 +380,7 @@ pub async fn run(
         }
 
         for call in &reply.tool_calls {
-            if is_read_tool(&call.name) {
+            if is_read_call(&call.name, &call.arguments) {
                 reads += 1;
             } else {
                 acts += 1;
@@ -783,6 +797,35 @@ fn progress_phrase(content: &str, calls: &[crate::core::types::ToolCall]) -> Opt
 }
 
 /// Outils qui ne font que lire : ils ne comptent pas comme une action.
+/// Budget d'une demande : étapes et durée totale. Au premier plan, celui des
+/// réglages (25 en vocal) et 10 min — même durée qu'à l'écrit : MiMo met 3 à
+/// 4 minutes pour une tâche de code, 180 s coupaient avant l'écriture. En
+/// fond, au moins `tasks::BACKGROUND_MAX_ITERATIONS` étapes et 20 min.
+fn step_budget(foreground_iterations: u32, background: bool) -> (u32, Duration) {
+    if background {
+        (
+            foreground_iterations.max(crate::tasks::BACKGROUND_MAX_ITERATIONS),
+            crate::tasks::BACKGROUND_DEADLINE,
+        )
+    } else {
+        (foreground_iterations, Duration::from_secs(600))
+    }
+}
+
+/// Un appel qui ne fait que regarder : outil de lecture, ou commande
+/// d'inspection (`Get-ChildItem`, `Test-Path`, `ssh … docker ps`). Sert au
+/// rappel « agis ou conclus » : avant, toute commande comptait comme une
+/// action et le rappel ne partait jamais (cas réel du 7 octobre : 25 étapes
+/// d'inspection SSH, rien de fait, deux demandes de suite).
+fn is_read_call(name: &str, arguments: &serde_json::Value) -> bool {
+    is_read_tool(name)
+        || (name == "run_command"
+            && arguments
+                .get("command")
+                .and_then(|c| c.as_str())
+                .is_some_and(crate::sensitive::command_is_read_only))
+}
+
 fn is_read_tool(name: &str) -> bool {
     matches!(
         name,
@@ -924,6 +967,23 @@ impl Catch for Result<String> {
 #[cfg(test)]
 mod degenerate_tests {
     use super::*;
+
+    #[test]
+    fn une_tache_de_fond_a_un_budget_elargi() {
+        assert_eq!(step_budget(25, false), (25, Duration::from_secs(600)));
+        assert_eq!(step_budget(25, true), (60, Duration::from_secs(1200)));
+        // Un réglage plus généreux que le fond n'est jamais réduit.
+        assert_eq!(step_budget(80, true).0, 80);
+    }
+
+    #[test]
+    fn une_commande_d_inspection_compte_comme_une_lecture() {
+        let run = |command: &str| serde_json::json!({ "command": command });
+        assert!(is_read_call("run_command", &run("Get-ChildItem $env:USERPROFILE | Format-Table Name")));
+        assert!(!is_read_call("run_command", &run("Remove-Item build -Recurse")));
+        assert!(is_read_call("read_file", &serde_json::json!({ "path": "a.txt" })));
+        assert!(!is_read_call("write_file", &serde_json::json!({ "path": "a.txt" })));
+    }
 
     #[test]
     fn la_progression_se_dit_simplement() {

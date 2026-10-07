@@ -144,8 +144,8 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         let stop_session = answer_session.clone();
         let run_session = answer_session.clone();
         let request = message.clone();
-        let ticket = cue_app.start_task(&answer_session, &message, tx, move |tx| {
-            jimmy_agent::core::agent::run(deps, settings, run_session, request, tool_context, tx)
+        let ticket = cue_app.start_task(&answer_session, &message, tx, move |tx, background| {
+            jimmy_agent::core::agent::run(deps.in_task(background), settings, run_session, request, tool_context, tx)
         });
         let outcome = match ticket.wait().await {
             jimmy_agent::TaskOutcome::Done(outcome) => outcome,
