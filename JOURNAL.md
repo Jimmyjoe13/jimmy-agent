@@ -7,7 +7,7 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 78 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 82 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
@@ -1036,6 +1036,31 @@ success 2,20 → 1,90 (les bras touchaient les oreilles), cheer ±0,55 pour
 ne pas croiser les mains. Vérifié par snapshots : V ouvert à deux bras,
 profil à deux bras. L'avatar a été rechargé deux fois par le chien de garde
 (tuer son Godot), Jimmy n'a jamais été arrêté.
+
+## 3octies. Session 9 — 7 octobre : les tâches de fond
+
+Demande : que Jimmy garde le chat disponible en lançant les tâches en
+arrière-plan. Lecture d'abord : le backend du Chat tournait déjà en tâche de
+fond, le blocage venait de l'interface (envoi refusé pendant un tour),
+d'événements sans identifiant de tâche, d'un « STOP » global, et surtout de
+la voix, dont la boucle d'écoute attendait la fin de chaque tâche. Plan
+proposé puis validé avec quatre choix : passage automatique, réponse en
+parallèle, « STOP » = premier plan (« arrête tout » = tout), une seule tâche
+de fond.
+
+Livré : registre `tasks.rs`, `App::start_task` commun au Chat et à la voix
+(relais qui décide du passage en fond et enveloppe les événements), bloc du
+prompt, commandes `tasks_list`/`task_stop`, bandeau du Chat, annonce de fin
+à voix haute. Testé d'abord sans modèle (tâches simulées, `--test
+background`), puis en vrai : `test-ui` a montré le passage en fond 15 s après
+l'outil, une question « cerise » répondue pendant ce temps, et la fin
+« fini-fond » arrivée dans le fil.
+
+Le test réel a aussi corrigé la règle (piège 82) : comptées depuis la
+demande, les 15 s faisaient partir en fond une tâche dont le premier appel au
+modèle avait pris 26 s, au moment même où elle demandait une autorisation.
+Le délai part maintenant du premier outil, et jamais pendant une carte
+d'autorisation.
 
 ## 8. Reste à faire et questions ouvertes
 

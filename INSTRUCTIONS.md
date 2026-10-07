@@ -3,7 +3,7 @@
 À lire **en premier**, par tout agent (Claude Code, OpenCode, Codex…) ou toute
 personne qui touche au projet. Ce document résume les règles **non
 négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérifications),
-`HANDOFF.md` (état technique et **78 pièges numérotés**) et `JOURNAL.md`
+`HANDOFF.md` (état technique et **82 pièges numérotés**) et `JOURNAL.md`
 (historique). Chaque règle ci-dessous a déjà coûté une régression réelle.
 
 ---
@@ -84,11 +84,12 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Outils | Chaque outil borne son temps et sa sortie ; un gros fichier se lit par morceaux (`start_line`) | 55, 70 |
 | MCP | Outils MCP **à la demande** (`mcp_list_tools`, `mcp_call`) : ne jamais renvoyer leurs ~80 définitions à chaque appel | 70 |
 | Voix | Ce qui doit survivre à la boucle d'écoute va sur `App`, pas dans la boucle | 54 |
-| Voix | Toute tâche passe par `App::cancellable` (arrêt « STOP ») ; ne pas contourner | 71 |
+| Voix | Toute tâche passe par `App::start_task` (arrêt « STOP », passage en fond) ; ne pas contourner | 71, 82 |
 | Vault | Partagé avec d'autres agents : Jimmy n'écrit que dans `0_Inbox/Jimmy` et distingue ses notes | 66 |
 | Modèle | Chaque modèle a **un** format d'API (Chat, Responses, Messages), lu dans le catalogue ; un appel passe par `LlmClient::send`, jamais par une URL `/chat/completions` en dur | 78 |
 | Sécurité | Une écriture dans un fichier sensible passe par `sensitive::authorize` (carte dans le Chat) ; la lecture reste libre | 77 |
 | Chat | Le premier appel au modèle est en flux (`chat_stream`) ; les chemins de secours rejouent `chat` sans flux | 74 |
+| Tâches | Un tour de l'agent passe par `App::start_task` (jamais `agent::run` nu) ; le délai de passage en fond part du premier outil | 82 |
 
 ## 6. Tests d'interface : ils touchent aux données réelles
 
@@ -163,4 +164,6 @@ Bloqué : <ce qui empêche d'avancer, ou "rien">
 - Ouvrir un fichier = **application par défaut de Windows**.
 - Prochains chantiers validés : lot 2 du Chat livré (5 octobre : @-mentions,
   chemins cliquables, bloc travaux + diff, historique groupé) ; **tâches
-  longues en arrière-plan** (à proposer avant de coder).
+  longues en arrière-plan livrées le 7 octobre** (une seule à la fois,
+  « STOP » = premier plan, « arrête tout » = tout ; HANDOFF, décisions du
+  7 octobre et piège 82).

@@ -63,6 +63,7 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | **Fichiers sensibles (5-6 octobre)** | tests `sensitive` (dont les 11 lectures réelles du 6 octobre, libres, et 8 écritures déguisées, bloquées) ; parcours UI : carte « garde-N.env », refus respecté (piège 77) |
 | **Trois formats d'API (6 octobre)** | `--test protocols -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) — outil appelé, résultat relu, réponse en flux ; test de bibliothèque vert pour les trois (piège 78) |
 | **État au 6 octobre** | 151 tests unitaires, 0 avertissement ; `test-ui.ps1` : **26/26**, 0 erreur JS |
+| **Tâches de fond (7 octobre)** | `--test background` (6 tests, tâches simulées : passage en fond, STOP épargne le fond, « arrête tout », bouton de la tâche, une seule à la fois, pas pendant une autorisation) ; 165 tests unitaires, 0 avertissement ; `test-ui.ps1` : **27/27**, 0 erreur JS — parcours réel : passage en fond 15 s après l'outil, question en parallèle répondue, fin dans le fil |
 
 ---
 
@@ -1219,6 +1220,52 @@ déclenché (0/31) : croissance strictement additive.
  deux côtés (miroir partout) ; aucun membre ne doit viser le centre du
  torse dans le plan z = 0 — une main-au-menton exigerait un décalage en z.
  Au passage : 2,20 rad collait les bras aux oreilles, 1,90 fait un vrai V.
+
+ **82. Un délai de passage en fond compté depuis la demande fait partir
+ une tâche presque finie.** Première version des tâches de fond (7 octobre) :
+ « outillée et plus de 15 s depuis la demande ». En test réel, le premier
+ appel à MiMo a pris 26 s : au tout premier outil (`write_file`), la tâche
+ avait déjà « 26 s » et partait en fond — Jimmy aurait dit « je m'en occupe »
+ puis annoncé la fin deux secondes après. Elle partait même pendant que la
+ carte d'autorisation (fichier sensible) attendait l'utilisateur. Règle : le
+ délai se compte **depuis le premier outil** (`tasks::should_detach`), et
+ jamais de passage en fond tant qu'une autorisation est ouverte. Côté suite
+ d'interface : une tâche passée en fond **survit à son parcours** (une seule
+ place de fond) — le parcours suivant attend qu'elle se libère et vérifie
+ que le bandeau porte **son** titre, sinon il lit celui du précédent.
+
+### Décisions prises (7 octobre 2026 — tâches de fond)
+
+Demande de l'utilisateur : « laisser le chat le plus disponible possible en
+lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
+- **Passage automatique** : toute demande commence au premier plan ; une
+  tâche **outillée** passe en fond à son 3e outil, ou 15 s après son premier
+  outil (`tasks::DETACH_AFTER*`). Une réponse lente sans outil reste au
+  premier plan. Chat : bulle « Je m'en occupe en arrière-plan », saisie
+  libre, bandeau au-dessus de la saisie (étape, durée, « Arrêter »). Voix :
+  « Je m'en occupe en arrière-plan, je te préviens quand c'est fini », puis
+  retour à l'écoute. Fin : réponse dans sa conversation (toast si une autre
+  est affichée) et annonce à voix haute « Tâche de fond terminée. … » dès que
+  Jimmy est libre (2 min d'attente au plus).
+- **Réponse en parallèle** : pendant une tâche de fond, Jimmy répond aux
+  nouvelles demandes en le sachant (bloc « Tâche en cours en arrière-plan »
+  du prompt : titre, étape, durée ; consigne de ne pas refaire son travail).
+- **Arrêts** : « STOP » et le bouton « Arrêter » du composer n'arrêtent que
+  le premier plan et la parole ; la tâche de fond s'arrête par son bouton
+  (`task_stop`) ou par « arrête tout » / « arrête toutes les tâches » à la
+  voix (`is_stop_all_command`, `App::request_stop_all`).
+- **Une seule tâche de fond** à la fois : une seconde tâche longue reste au
+  premier plan, comme avant.
+- **Pas de persistance** : le registre (`agent/src/tasks.rs`) vit en
+  mémoire ; un redémarrage de Jimmy perd la tâche en cours.
+- Mécanique : `App::start_task` (Chat et voix) remplace `cancellable` ; ses
+  événements passent tels quels au premier plan, puis `Detached` et tout
+  enveloppé dans `Background` (avatar non sollicité, sauf succès/erreur à la
+  fin). Limite connue : un tour en parallèle dans la **même** session
+  s'intercale dans l'historique entre les étapes de la tâche de fond
+  (`History::conversation` ne garde que les messages texte, le format
+  Messages fusionne les rôles consécutifs : pas d'erreur, mais le résumé des
+  outils peut attribuer un outil de la tâche au tour parallèle).
 
 ### Ensuite
 
