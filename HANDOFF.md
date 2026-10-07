@@ -1265,6 +1265,19 @@ déclenché (0/31) : croissance strictement additive.
  sonde hors de Jimmy envoie ces deux en-têtes, sinon on conclut à tort
  qu'un format ou une fonction est refusé.
 
+ **85. Sous Windows, la zone cliquable de l'avatar découpe aussi son
+ affichage.** `main.gd` réduit la zone de la fenêtre qui capte la souris
+ (`DisplayServer.window_set_mouse_passthrough`) pour que les clics
+ traversent le vide autour du renard. Sous Windows, ce qui sort de cette
+ zone **n'est pas dessiné**. Elle ne couvrait que le corps (±0,32) : mains du
+ renard bras en V coupées, et le lapin des tâches de fond (x 0,68)
+ invisible chez l'utilisateur — alors que `/snapshot`, qui lit l'image
+ **avant** la découpe, les montrait entiers. Corrigé : zone = renard bras
+ compris (±0,58, 1,80 de haut) fusionnée avec celle du lapin quand il est là
+ (`Geometry2D.merge_polygons`). Règle : tout ce qui est ajouté à la scène
+ doit entrer dans cette zone, et se vérifie sur l'écran réel
+ (`scripts\photo-avatar.ps1`), pas seulement par `/snapshot`.
+
 ### Décisions prises (7 octobre 2026 — vision de la fenêtre active)
 
 Demande : que Jimmy ait le contexte de ce que fait l'utilisateur, **seulement
@@ -1310,6 +1323,22 @@ lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
   voix (`is_stop_all_command`, `App::request_stop_all`).
 - **Une seule tâche de fond** à la fois : une seconde tâche longue reste au
   premier plan, comme avant.
+- **Seuil revu le soir même** (« il lance toutes ses tâches en fond, même
+  les légères ») : mesuré, 17 passages sur 19 venaient de la règle « 3e
+  outil », 0 à 5 s après le premier (Muse Spark appelle 3-4 outils d'un
+  coup), pour des tâches de 30 à 50 s. Règle supprimée ; passage en fond
+  **45 s après le premier outil** (`tasks::DETACH_AFTER`, réglable par
+  `Tasks::set_detach_after` pour les tests). ~8 tâches sur 19 seraient
+  restées au premier plan.
+- **Le lapin** (`godot/scripts/helper_rabbit.gd`, route `/helper`) : pendant
+  une tâche de fond, un lapin blanc travaille à droite du renard
+  (mini-ordinateur au logo qui scintille, pattes qui tapent, engrenage qui
+  tourne) ; fin réussie = sauts bras en V, échec ou arrêt = oreilles
+  tombantes, puis il disparaît (2,6 s). Primitives et contour comme le
+  renard, aucun asset ; chargé par `preload` (un nouveau `class_name`
+  n'entre au cache global qu'avec l'éditeur). Déclenché par les relais Chat
+  et voix (`background_avatar`). Limite : si Godot redémarre pendant une
+  tâche de fond, le lapin ne revient qu'à la tâche suivante.
 - **Pas de persistance** : le registre (`agent/src/tasks.rs`) vit en
   mémoire ; un redémarrage de Jimmy perd la tâche en cours.
 - **Budget élargi en fond** (choix de l'utilisateur après usage réel) :

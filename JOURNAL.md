@@ -7,7 +7,7 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 84 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 85 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
@@ -1082,6 +1082,24 @@ quatre fois sur quatre. Choix de l'utilisateur : déclenchement par lui seul
 Livré en trois lots : image dans les messages (trois formats), capture
 `xcap` qui écarte Jimmy et son avatar, déclencheurs Chat et voix avec
 vérification du modèle. L'image ne touche jamais le disque.
+
+### Le juste milieu et le lapin (7 octobre, soir)
+
+« Il lance toutes ses tâches en fond, même les légères. » Le journal l'a
+confirmé et expliqué : la règle du 3e outil se déclenchait 0 à 5 s après le
+premier, Muse Spark appelant plusieurs outils d'un coup. Seul le temps
+compte désormais : 45 s après le premier outil. Et une envie de
+l'utilisateur : un lapin qui apparaît à côté du renard et travaille pendant
+la tâche de fond. Construit en primitives, ajusté sur snapshots (cadre,
+engrenage de face, logo visible, bras en V et oreilles tombantes lisibles :
+les premières versions des poses ne se voyaient pas, comme celles du renard
+au début).
+
+Puis : « je n'ai pas vu le lapin ». L'utilisateur avait la bonne intuition
+(les mains du renard en V étaient coupées par le bord) : la zone cliquable
+de la fenêtre découpe aussi l'affichage sous Windows, et ne couvrait que le
+corps du renard. Les snapshots, pris avant la découpe, montraient tout —
+d'où la nouvelle règle de vérifier sur l'écran réel (piège 85).
 
 ## 8. Reste à faire et questions ouvertes
 

@@ -3,7 +3,7 @@
 À lire **en premier**, par tout agent (Claude Code, OpenCode, Codex…) ou toute
 personne qui touche au projet. Ce document résume les règles **non
 négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérifications),
-`HANDOFF.md` (état technique et **84 pièges numérotés**) et `JOURNAL.md`
+`HANDOFF.md` (état technique et **85 pièges numérotés**) et `JOURNAL.md`
 (historique). Chaque règle ci-dessous a déjà coûté une régression réelle.
 
 ---
@@ -89,6 +89,7 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Modèle | Chaque modèle a **un** format d'API (Chat, Responses, Messages), lu dans le catalogue ; un appel passe par `LlmClient::send`, jamais par une URL `/chat/completions` en dur | 78 |
 | Sécurité | Une écriture dans un fichier sensible passe par `sensitive::authorize` (carte dans le Chat) ; la lecture reste libre | 77 |
 | Chat | Le premier appel au modèle est en flux (`chat_stream`) ; les chemins de secours rejouent `chat` sans flux | 74 |
+| Avatar | Tout ajout à la scène entre dans la zone de `_update_click_region` (hors zone = non dessiné sous Windows) ; vérifier avec `scripts\photo-avatar.ps1`, pas seulement `/snapshot` | 85 |
 | Vision | Jamais d'outil de capture pour le modèle ; une image ne va ni sur disque ni dans l'historique (`Message::images` hors sérialisation) | 84 |
 | Tâches | Un tour de l'agent passe par `App::start_task` (jamais `agent::run` nu) ; le délai de passage en fond part du premier outil | 82 |
 
