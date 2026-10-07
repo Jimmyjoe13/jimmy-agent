@@ -549,21 +549,29 @@ pub async fn task_stop(state: State<'_, AppState>, id: String) -> std::result::R
     Ok(state.app.stop_task(&id))
 }
 
-/// Avatar et tâche de fond : elle ne le prend pas (l'utilisateur fait autre
-/// chose pendant ce temps), seule sa fin se voit. Le passage en fond rend
-/// l'avatar au repos ; la fin réussie joue la joie (une tâche de fond est
-/// toujours outillée), l'échec l'erreur. La phrase est dite par l'annonce.
+/// Avatar et tâche de fond : elle ne prend pas le renard (l'utilisateur fait
+/// autre chose pendant ce temps) ; c'est le **lapin** qui travaille à côté de
+/// lui (`/helper`). Le passage en fond rend le renard au repos et fait
+/// apparaître le lapin ; la fin réussie fait sauter le lapin et joue la joie
+/// du renard (une tâche de fond est toujours outillée) ; l'échec ou l'arrêt
+/// baisse les oreilles du lapin. La phrase est dite par l'annonce.
 async fn background_avatar(avatar: &jimmy_agent::providers::AvatarClient, event: &AgentEvent) {
     match event {
         AgentEvent::Detached { .. } => {
             let _ = avatar.set_state(AvatarState::Idle, "").await;
+            let _ = avatar.helper("working").await;
         }
         AgentEvent::Background { event, .. } => match event.as_ref() {
-            AgentEvent::Final { text } if text != jimmy_agent::tasks::BACKGROUND_STOPPED => {
+            AgentEvent::Final { text } if text == jimmy_agent::tasks::BACKGROUND_STOPPED => {
+                let _ = avatar.helper("error").await;
+            }
+            AgentEvent::Final { .. } => {
                 let _ = avatar.set_state(AvatarState::Success, "").await;
+                let _ = avatar.helper("success").await;
             }
             AgentEvent::Failed { .. } => {
                 let _ = avatar.set_state(AvatarState::Error, "").await;
+                let _ = avatar.helper("error").await;
             }
             _ => {}
         },

@@ -1,8 +1,8 @@
 //! Tâches de l'agent et passage en arrière-plan.
 //!
 //! Chaque tour de l'agent (Chat ou voix) est une **tâche** suivie ici. Une
-//! tâche qui dure (plus de `DETACH_AFTER`, ou dès son `DETACH_AFTER_TOOLS`-ième
-//! outil) passe **en arrière-plan** : Jimmy se rend disponible pour la suite
+//! tâche qui travaille encore `DETACH_AFTER` après son premier outil passe
+//! **en arrière-plan** : Jimmy se rend disponible pour la suite
 //! de la conversation et annonce la fin quand elle arrive.
 //!
 //! Règles (décidées avec l'utilisateur le 7 octobre) :
@@ -26,10 +26,11 @@ use tokio::sync::watch;
 /// en arrière-plan. Compté depuis le premier outil, pas depuis la demande :
 /// MiMo met 4 à 40 s par appel, un premier appel lent faisait passer en fond
 /// une tâche presque finie (cas mesuré le 7 octobre : 26 s avant l'outil).
-pub const DETACH_AFTER: Duration = Duration::from_secs(15);
-/// Une tâche qui appelle son 3e outil est une vraie tâche de travail : elle
-/// passe en arrière-plan sans attendre `DETACH_AFTER`.
-pub const DETACH_AFTER_TOOLS: usize = 3;
+/// 45 s et plus de règle « 3e outil » (choix de l'utilisateur, 7 octobre au
+/// soir) : Muse Spark appelle 3 ou 4 outils d'un coup, et 17 tâches sur 19
+/// partaient en fond 0 à 5 s après leur premier outil, même les légères
+/// (30 à 50 s au total).
+pub const DETACH_AFTER: Duration = Duration::from_secs(45);
 /// L'annonce de fin d'une tâche de fond attend que Jimmy soit libre (ne
 /// parle pas, rien au premier plan), au plus ce délai.
 pub const ANNOUNCE_WAIT_MAX: Duration = Duration::from_secs(120);
@@ -44,14 +45,12 @@ pub const BACKGROUND_STOPPED: &str = "Tâche de fond arrêtée à ta demande.";
 /// La tâche doit-elle passer en arrière-plan ? Seule une tâche **outillée**
 /// y va : une simple réponse lente (MiMo met parfois 20 s) reste au premier
 /// plan, sinon Jimmy dirait « je m'en occupe » puis répondrait aussitôt.
-/// `since_first_tool` : temps écoulé depuis son premier outil (`None` : aucun).
+/// `since_first_tool` : temps écoulé depuis son premier outil (`None` : aucun),
+/// comparé au seuil (`Tasks::detach_after`, `DETACH_AFTER` par défaut).
 /// Jamais pendant une demande d'autorisation : l'utilisateur est en train
 /// de répondre à la carte, la tâche n'est pas « partie ».
-pub fn should_detach(since_first_tool: Option<Duration>, tools: usize, awaiting_approval: bool) -> bool {
-    if awaiting_approval {
-        return false;
-    }
-    tools >= DETACH_AFTER_TOOLS || since_first_tool.is_some_and(|elapsed| elapsed >= DETACH_AFTER)
+pub fn should_detach(since_first_tool: Option<Duration>, threshold: Duration, awaiting_approval: bool) -> bool {
+    !awaiting_approval && since_first_tool.is_some_and(|elapsed| elapsed >= threshold)
 }
 
 /// Étape lisible d'un appel d'outil : son nom et son argument principal
@@ -108,12 +107,30 @@ impl Entry {
 }
 
 /// Registre des tâches en cours.
-#[derive(Default)]
 pub struct Tasks {
     entries: Mutex<Vec<Entry>>,
+    /// Seuil de passage en fond (`DETACH_AFTER`) ; abaissé par les tests
+    /// pour ne pas attendre 45 s.
+    detach_after: Mutex<Duration>,
+}
+
+impl Default for Tasks {
+    fn default() -> Self {
+        Tasks { entries: Mutex::new(Vec::new()), detach_after: Mutex::new(DETACH_AFTER) }
+    }
 }
 
 impl Tasks {
+    /// Seuil de passage en fond, lu par le relais de chaque tâche.
+    pub fn detach_after(&self) -> Duration {
+        *self.detach_after.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Change le seuil (tests de passage en fond, qui n'attendent pas 45 s).
+    pub fn set_detach_after(&self, threshold: Duration) {
+        *self.detach_after.lock().unwrap_or_else(|e| e.into_inner()) = threshold;
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
         self.entries.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -265,13 +282,14 @@ mod tests {
     #[test]
     fn seule_une_tache_outillee_passe_en_fond() {
         let long = DETACH_AFTER + Duration::from_secs(1);
-        assert!(!should_detach(None, 0, false), "réponse lente sans outil : premier plan");
-        assert!(!should_detach(Some(Duration::from_secs(2)), 2, false));
-        assert!(should_detach(Some(Duration::from_secs(2)), DETACH_AFTER_TOOLS, false));
-        assert!(should_detach(Some(long), 1, false));
+        assert!(!should_detach(None, DETACH_AFTER, false), "réponse lente sans outil : premier plan");
+        // Plusieurs outils d'un coup ne suffisent plus : seul le temps compte.
+        assert!(!should_detach(Some(Duration::from_secs(5)), DETACH_AFTER, false), "tâche légère : premier plan");
+        assert!(should_detach(Some(long), DETACH_AFTER, false));
         // Cas réel : premier appel au modèle de 26 s, outil juste parti.
-        assert!(!should_detach(Some(Duration::ZERO), 1, false), "le délai part du premier outil");
-        assert!(!should_detach(Some(long), DETACH_AFTER_TOOLS, true), "carte d'autorisation en attente");
+        assert!(!should_detach(Some(Duration::ZERO), DETACH_AFTER, false), "le délai part du premier outil");
+        assert!(!should_detach(Some(long), DETACH_AFTER, true), "carte d'autorisation en attente");
+        assert_eq!(DETACH_AFTER, Duration::from_secs(45));
     }
 
     #[test]

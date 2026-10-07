@@ -79,6 +79,12 @@ impl AvatarClient {
         .await
     }
 
+    /// Lapin assistant des tâches de fond : `working` (une tâche tourne en
+    /// arrière-plan), `success` / `error` (sa fin), `hidden`.
+    pub async fn helper(&self, state: &str) -> bool {
+        self.post("/helper", serde_json::json!({ "state": state })).await
+    }
+
     pub async fn set_quality(&self, level: &str) -> bool {
         self.post("/quality", serde_json::json!({ "level": level })).await
     }

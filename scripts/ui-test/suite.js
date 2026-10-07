@@ -330,11 +330,11 @@ let stepPage = null;
     for (let i = 0; i < 180 && (await invoke("tasks_list")).some((t) => t.background); i++) await p.waitForTimeout(1000);
     await p.locator("button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill(
-      "Exécute avec run_command la commande : Start-Sleep -Seconds 25; 'fini-fond'. Puis réponds uniquement par ce qu'elle affiche.",
+      "Exécute avec run_command la commande : Start-Sleep -Seconds 70; 'fini-fond'. Puis réponds uniquement par ce qu'elle affiche.",
     );
     await p.keyboard.press("Enter");
     const t0 = Date.now();
-    // Passage en fond : 15 s après le premier outil (`tasks::DETACH_AFTER`),
+    // Passage en fond : 45 s après le premier outil (`tasks::DETACH_AFTER`),
     // et c'est bien cette tâche-ci qu'annonce le bandeau.
     await p.waitForFunction(
       () => document.querySelector(".tasks-band:not([hidden]) .tasks-band-title")?.textContent?.startsWith("Exécute avec run_command"),

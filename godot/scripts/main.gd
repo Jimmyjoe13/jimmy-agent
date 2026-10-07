@@ -34,6 +34,8 @@ var bridge_host: String = "127.0.0.1"
 var bridge_port: int = 8790
 
 var _jimmy: Jimmy
+## Lapin assistant des tâches de fond (`helper_rabbit.gd`, route `/helper`).
+var _helper: Node3D
 var _camera: Camera3D
 var _http: JimmyHttpServer
 var _bubble: PanelContainer
@@ -59,6 +61,7 @@ var _away_time := 0.0
 ## Dernière région cliquable envoyée au système (évite les appels inutiles).
 var _last_region := Rect2()
 var _last_bubble := false
+var _last_helper := false
 var _drag_offset := Vector2i.ZERO
 var _moved := false
 var _quality := "medium"
@@ -195,6 +198,17 @@ func _build_scene() -> void:
 	add_child(_jimmy)
 	# Jimmy regarde l'utilisateur, c'est-à-dire la caméra (voir jimmy.gd).
 	_jimmy.set_viewer(_camera)
+
+	# Lapin des tâches de fond : à droite du renard, un peu en avant, tourné
+	# de trois quarts vers lui. Invisible tant qu'aucune tâche ne tourne.
+	# `preload` plutôt que le `class_name` : une classe nouvelle n'est connue
+	# du cache global qu'après un passage dans l'éditeur.
+	_helper = preload("res://scripts/helper_rabbit.gd").new()
+	_helper.name = "Helper"
+	# x 0,68 / z 0,05 : à 0,82 / 0,25, l'ordinateur sortait du cadre en bas.
+	_helper.position = Vector3(0.68, 0.0, 0.05)
+	_helper.rotation.y = deg_to_rad(-28.0)
+	add_child(_helper)
 
 	_build_ground()
 
@@ -379,6 +393,11 @@ func _on_http_request(method: String, path: String, body: Dictionary) -> void:
 			print("[godot/main] esquive : %s" % ("active" if dodge_enabled else "désactivée"))
 		"/hide":
 			_hide_bubble()
+		"/helper":
+			# Tâche de fond : working (elle tourne), success / error (sa fin).
+			var helper_state := str(body.get("state", "hidden"))
+			if not _helper.set_helper_state(helper_state):
+				print("[godot/main] état de lapin inconnu : %s" % helper_state)
 		"/snapshot":
 			# Outil de diagnostic : enregistre le rendu (alpha compris) en PNG.
 			# Sert aux comparaisons avant/après sans passer par le premier plan.
@@ -459,37 +478,94 @@ func _avatar_rect() -> Rect2:
 	return rect
 
 
-## La fenêtre fait 560×620 mais seuls Jimmy (et sa bulle) doivent capter la
-## souris : ailleurs, les clics traversent vers le bureau. Avant, toute la
-## surface transparente bloquait ce qu'il y avait derrière.
+## Silhouette **affichée** du renard, bras compris : en V (succès, `cheer`),
+## ses mains vont bien au-delà du corps (±0,32) et étaient coupées.
+const FIGURE_HALF_WIDTH := 0.58
+const FIGURE_TOP := 1.80
+
+
+## Rectangle projeté (pixels de fenêtre) des points donnés, en coordonnées
+## du monde.
+func _projected_rect(points: Array) -> Rect2:
+	var scale := _window_scale()
+	var rect := Rect2(_camera.unproject_position(points[0]) * scale, Vector2.ZERO)
+	for point in points:
+		rect = rect.expand(_camera.unproject_position(point) * scale)
+	return rect
+
+
+## Renard bras levés compris (voir `FIGURE_HALF_WIDTH`).
+func _figure_rect() -> Rect2:
+	return _projected_rect([
+		Vector3(-FIGURE_HALF_WIDTH, -0.06, 0.0), Vector3(FIGURE_HALF_WIDTH, -0.06, 0.0),
+		Vector3(-FIGURE_HALF_WIDTH, FIGURE_TOP, 0.0), Vector3(FIGURE_HALF_WIDTH, FIGURE_TOP, 0.0),
+	])
+
+
+## Le lapin des tâches de fond : sa boîte (ordinateur, sauts et engrenage
+## compris) projetée depuis sa position réelle.
+func _helper_rect() -> Rect2:
+	var corners := []
+	for x in [-0.32, 0.32]:
+		for y in [-0.02, 0.88]:
+			for z in [-0.25, 0.45]:
+				corners.append(_helper.global_transform * Vector3(x, y, z))
+	return _projected_rect(corners)
+
+
+func _rect_polygon(rect: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([
+		rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y),
+	])
+
+
+## La fenêtre fait 560×620 mais seuls Jimmy (sa bulle, son lapin) doivent
+## capter la souris : ailleurs, les clics traversent vers le bureau. Sous
+## Windows, cette zone découpe **aussi l'affichage** : ce qui en sort n'est
+## pas dessiné (`/snapshot` lit l'image avant la découpe et ne le montre
+## pas). Avant le 7 octobre, elle ne couvrait que le corps : mains du V
+## coupées, lapin invisible chez l'utilisateur alors que les snapshots le
+## montraient.
 func _update_click_region() -> void:
-	var rect := _avatar_rect().grow(CLICK_PADDING)
+	var rect := _figure_rect().grow(CLICK_PADDING)
 	var bubble := _bubble.visible
+	var helper := _helper.visible
 	if _dragging:
 		return
 	if rect.position.distance_to(_last_region.position) < 2.0 \
-			and rect.size.distance_to(_last_region.size) < 2.0 and bubble == _last_bubble:
+			and rect.size.distance_to(_last_region.size) < 2.0 \
+			and bubble == _last_bubble and helper == _last_helper:
 		return
 	_last_region = rect
 	_last_bubble = bubble
-	var region := PackedVector2Array()
+	_last_helper = helper
+	var shapes: Array[Rect2] = []
 	if bubble:
-		# Forme en T : la bulle (en haut, large) puis le personnage.
+		# Forme en T : la bulle (en haut, large), et le personnage prolongé
+		# jusqu'à elle pour que les deux ne fassent qu'une forme.
 		var bubble_rect := _bubble.get_global_rect()
 		var scale := _window_scale()
 		var b := Rect2(bubble_rect.position * scale, bubble_rect.size * scale).grow(4.0)
-		region = PackedVector2Array([
-			b.position, Vector2(b.end.x, b.position.y), Vector2(b.end.x, b.end.y),
-			Vector2(rect.end.x, b.end.y), Vector2(rect.end.x, rect.end.y),
-			Vector2(rect.position.x, rect.end.y), Vector2(rect.position.x, b.end.y),
-			Vector2(b.position.x, b.end.y),
-		])
-	else:
-		region = PackedVector2Array([
-			rect.position, Vector2(rect.end.x, rect.position.y), rect.end,
-			Vector2(rect.position.x, rect.end.y),
-		])
-	DisplayServer.window_set_mouse_passthrough(region)
+		shapes.append(b)
+		rect = rect.expand(Vector2(rect.position.x, b.end.y))
+	shapes.append(rect)
+	if helper:
+		shapes.append(_helper_rect().grow(CLICK_PADDING))
+	DisplayServer.window_set_mouse_passthrough(_merge_shapes(shapes))
+
+
+## Fusionne les rectangles en une seule forme. S'ils ne se touchent pas, on
+## prend leur enveloppe : une zone en trop vaut mieux qu'un morceau caché.
+func _merge_shapes(shapes: Array[Rect2]) -> PackedVector2Array:
+	var region := _rect_polygon(shapes[0])
+	var bounds := shapes[0]
+	for i in range(1, shapes.size()):
+		bounds = bounds.merge(shapes[i])
+		var merged := Geometry2D.merge_polygons(region, _rect_polygon(shapes[i]))
+		if merged.size() != 1:
+			return _rect_polygon(bounds)
+		region = merged[0]
+	return region
 
 
 ## Esquive du curseur : quand la souris entre dans la zone du personnage,

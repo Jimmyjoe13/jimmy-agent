@@ -170,7 +170,7 @@ async fn relay_task(
         // Après le premier outil, tant que la tâche peut passer en fond, on se
         // réveille aussi sans événement : un appel au modèle peut durer une minute.
         let wait = match (first_tool, detach_tx.is_some()) {
-            (Some(at), true) => tasks::DETACH_AFTER.saturating_sub(at.elapsed()).max(std::time::Duration::from_millis(500)),
+            (Some(at), true) => app.tasks.detach_after().saturating_sub(at.elapsed()).max(std::time::Duration::from_millis(50)),
             _ => std::time::Duration::from_secs(3600),
         };
         let event = match tokio::time::timeout(wait, rx.recv()).await {
@@ -192,7 +192,7 @@ async fn relay_task(
         let is_final = matches!(event, Some(AgentEvent::Final { .. }) | Some(AgentEvent::Failed { .. }));
         if detach_tx.is_some()
             && !is_final
-            && tasks::should_detach(first_tool.map(|at| at.elapsed()), tools, approvals > 0)
+            && tasks::should_detach(first_tool.map(|at| at.elapsed()), app.tasks.detach_after(), approvals > 0)
             && app.tasks.try_detach(&task_id)
         {
             detached.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -442,7 +442,7 @@ impl App {
     /// fond » (typiquement `|tx, bg| core::agent::run(deps.in_task(bg), …, tx)` :
     /// le budget s'élargit au passage en fond). Ses événements sont relayés vers
     /// `events` tels quels tant qu'elle est au premier plan. Si elle dure (voir
-    /// `tasks::DETACH_AFTER*`) et que la place de fond est libre, elle passe en
+    /// `tasks::DETACH_AFTER`) et que la place de fond est libre, elle passe en
     /// arrière-plan : `AgentEvent::Detached`, puis tous ses événements
     /// enveloppés dans `AgentEvent::Background`, et sa fin (réponse, arrêt,
     /// échec) est traitée ici — annonce à voix haute comprise. L'appelant le

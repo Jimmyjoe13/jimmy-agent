@@ -23,6 +23,8 @@ fn app_isolee() -> (Arc<App>, std::path::PathBuf) {
     let mut settings = app.settings();
     settings.tts.enabled = false;
     app.save_settings(settings).expect("réglages");
+    // Seuil de passage en fond abaissé : 200 ms après le premier outil.
+    app.tasks.set_detach_after(Duration::from_millis(200));
     (app, racine)
 }
 
@@ -34,12 +36,14 @@ fn outil(n: usize) -> AgentEvent {
     }
 }
 
-/// Tâche outillée : trois outils (seuil de passage en fond), puis `duree`
-/// de travail, puis une réponse finale.
+/// Tâche outillée : trois outils d'un coup, puis du travail au-delà du seuil
+/// de passage en fond (200 ms ici), puis `duree`, puis une réponse finale.
 async fn travail(tx: Sender<AgentEvent>, duree: Duration, texte: &str) -> jimmy_agent::Result<AgentAnswer> {
     for n in 1..=3 {
         let _ = tx.send(outil(n)).await;
     }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let _ = tx.send(outil(4)).await;
     tokio::time::sleep(duree).await;
     let _ = tx.send(AgentEvent::Final { text: texte.into() }).await;
     Ok(AgentAnswer { session_id: "s".into(), text: texte.into(), tools_used: vec![], duration_ms: 0 })
@@ -72,9 +76,11 @@ async fn une_tache_outillee_passe_en_fond_et_libere_le_premier_plan() {
 
     let outcome = tokio::time::timeout(Duration::from_secs(3), ticket.wait()).await.expect("passage en fond rapide");
     assert!(matches!(outcome, TaskOutcome::Detached));
-    // Deux outils au premier plan, puis le passage, puis le 3e enveloppé.
-    assert!(matches!(suivant(&mut rx).await, AgentEvent::ToolStart { .. }));
-    assert!(matches!(suivant(&mut rx).await, AgentEvent::ToolStart { .. }));
+    // Trois outils d'un coup restent au premier plan (plus de règle « 3e
+    // outil »), puis le passage au seuil, puis le 4e enveloppé.
+    for _ in 0..3 {
+        assert!(matches!(suivant(&mut rx).await, AgentEvent::ToolStart { .. }));
+    }
     match suivant(&mut rx).await {
         AgentEvent::Detached { session_id, title, .. } => {
             assert_eq!(session_id, "s1");
@@ -88,7 +94,7 @@ async fn une_tache_outillee_passe_en_fond_et_libere_le_premier_plan() {
     let tasks = app.tasks.list();
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].background);
-    assert_eq!(tasks[0].step, "run_command étape 3");
+    assert_eq!(tasks[0].step, "run_command étape 4");
     assert!(app.tasks.prompt_block("s1").is_some(), "Jimmy sait qu'elle tourne");
 
     assert!(app.request_stop_all());
