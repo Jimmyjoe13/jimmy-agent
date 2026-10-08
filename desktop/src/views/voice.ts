@@ -9,7 +9,8 @@ import { api } from "../api";
 import { Recorder } from "../audio";
 import { QUALITY_LABEL, attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
-import { card } from "./settings";
+import { card, field, toggle, FOLLOW_UP_CHOICES, LANGUAGES } from "./settings";
+import { modelsPanel } from "./models";
 import { voicesPanel } from "./voices";
 
 export function voiceView(ctx: AppContext): HTMLElement {
@@ -223,6 +224,92 @@ export function voiceView(ctx: AppContext): HTMLElement {
   // était enterrée dans les Paramètres, sous la liste des modèles).
   const voices = voicesPanel({ onApplied: () => void ctx.refreshStatus() });
 
+  // ── Réglages voix et écoute (rapatriés des Paramètres) ───────────────────
+  // Tout ce qui touche à la voix de Jimmy vit dans cet onglet : modèle vocal
+  // LLM, synthèse, STT, mot d'activation. Enregistrement dédié : on repart de
+  // la copie fraîche de Rust pour ne rien écraser des autres onglets.
+  const voiceModelInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const sttSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const commandSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const wakeWordInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
+  const cuesEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const followSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  const pauseInput = h("input", { class: "field", type: "number", min: "400", max: "1500", step: "50" }) as HTMLInputElement;
+  const debugAudio = h("input", { type: "checkbox" }) as HTMLInputElement;
+
+  async function loadVoiceSettings() {
+    const loaded = await guard(() => api.getSettings(), "réglages voix");
+    if (!loaded) return;
+    voiceModelInput.value = loaded.llm.voice_model ?? "";
+    mount(sttSelect);
+    for (const model of ctx.status.stt.models) {
+      sttSelect.append(h("option", { value: model.id }, `${model.label} — ${model.note}`));
+    }
+    sttSelect.value = loaded.stt.model;
+    mount(commandSelect);
+    commandSelect.append(h("option", { value: "" }, "Identique au wake word (un seul serveur)"));
+    for (const model of ctx.status.stt.models) {
+      commandSelect.append(h("option", { value: model.id }, `${model.label} — ${model.note}`));
+    }
+    commandSelect.value = loaded.stt.command_model;
+    mount(languageSelect);
+    for (const [code, label] of LANGUAGES) {
+      languageSelect.append(h("option", { value: code }, label));
+    }
+    languageSelect.value = loaded.stt.language;
+    wakeWordInput.value = loaded.stt.wake_word;
+    cuesEnabled.checked = loaded.tts.cues;
+    mount(followSelect);
+    for (const [seconds, label] of FOLLOW_UP_CHOICES) {
+      followSelect.append(h("option", { value: String(seconds) }, label));
+    }
+    // Une valeur personnalisée (fichier de config édité) reste sélectionnable.
+    const current = Math.round(loaded.voice.follow_up_ms / 1000);
+    if (![...FOLLOW_UP_CHOICES].some(([s]) => s === current)) {
+      followSelect.append(h("option", { value: String(current) }, `${current} s`));
+    }
+    followSelect.value = String(current);
+    pauseInput.value = String(loaded.voice.end_of_speech_ms);
+    debugAudio.checked = loaded.voice.debug_audio;
+  }
+
+  async function persistVoice() {
+    const fresh = await guard(() => api.getSettings(), "réglages voix");
+    if (!fresh) return;
+    fresh.llm.voice_model = voiceModelInput.value.trim();
+    fresh.stt.model = sttSelect.value;
+    fresh.stt.command_model = commandSelect.value;
+    fresh.stt.language = languageSelect.value;
+    fresh.stt.wake_word = wakeWordInput.value.trim() || "jimmy";
+    fresh.tts.cues = cuesEnabled.checked;
+    fresh.voice.follow_up_ms = Number(followSelect.value) * 1000;
+    fresh.voice.end_of_speech_ms = Math.min(1500, Math.max(400, Number(pauseInput.value) || 700));
+    fresh.voice.debug_audio = debugAudio.checked;
+    const before = ctx.status.stt;
+    if (!(await attempt(() => api.saveSettings(fresh), "enregistrement"))) return;
+    await ctx.refreshStatus();
+    const sttChanged =
+      before.model !== fresh.stt.model ||
+      before.command_model !== fresh.stt.command_model ||
+      before.language !== fresh.stt.language;
+    toast(
+      sttChanged && ctx.voice?.running
+        ? "Réglages voix enregistrés — coupe et relance l'écoute pour appliquer les modèles."
+        : "Réglages voix enregistrés",
+    );
+  }
+
+  // Bibliothèque du modèle vocal : choix immédiat côté Rust ; le champ
+  // identifiant suit pour rester cohérent.
+  const voiceModels = modelsPanel(ctx, {
+    onApplied: (role, model) => {
+      if (role === "voice") voiceModelInput.value = model;
+    },
+  }, "voice");
+
+  void loadVoiceSettings();
+
   return h(
     "section",
     { class: "view" },
@@ -241,6 +328,49 @@ export function voiceView(ctx: AppContext): HTMLElement {
       servers,
       h("h4", {}, "Ce que Jimmy entend"),
       heard,
+    ),
+    card(
+      "Modèle vocal",
+      h(
+        "p",
+        { class: "note" },
+        "Le modèle qui te répond à voix haute. Il peut venir d'un autre fournisseur que le principal — choisis-le dans la bibliothèque (appliqué tout de suite), ou tape l'identifiant puis « Enregistrer ».",
+      ),
+      field("Modèle vocal (vide = le même que le principal)", voiceModelInput, "un modèle plus rapide pour les échanges à voix haute"),
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "ghost", onclick: () => void loadVoiceSettings() }, "Annuler"),
+        h("button", { class: "primary", onclick: () => void persistVoice() }, "Enregistrer"),
+      ),
+      voiceModels,
+    ),
+    card(
+      "Écoute et sons",
+      h(
+        "p",
+        { class: "note" },
+        "whisper.cpp tourne en local : l'audio n'est jamais envoyé dans le cloud. La synthèse, elle, passe par Fish Audio via OpenRouter.",
+      ),
+      field("Modèle du wake word (rapide)", sttSelect),
+      field("Modèle de la commande (précis)", commandSelect),
+      field("Langue", languageSelect),
+      field("Mot d'activation", wakeWordInput, "jimmy"),
+      field("Conversation continue (écoute sans redire le nom)", followSelect),
+      field("Pause qui termine ta phrase (ms)", pauseInput),
+      h(
+        "p",
+        { class: "note" },
+        "Après chaque réponse, Jimmy t'écoute encore quelques secondes sans que tu aies à redire son nom. Une pause plus courte rend les réponses plus vives, mais Jimmy peut te couper si tu hésites.",
+      ),
+      toggle("Sons d'état (« Oui ? » quand tu dis son nom, « Oups… » en cas d'échec)", cuesEnabled),
+      toggle("Garder les 40 derniers extraits audio pour le diagnostic (sur cette machine seulement)", debugAudio),
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "ghost", onclick: () => void loadVoiceSettings() }, "Annuler"),
+        h("button", { class: "primary", onclick: () => void persistVoice() }, "Enregistrer"),
+      ),
     ),
     card(
       "Voix de Jimmy",

@@ -466,8 +466,10 @@ let stepPage = null;
   await step("Paramètres : enregistrement confirmé", async () => {
     await nav("Paramètres");
     await p.waitForTimeout(800);
-    const lang = await p.locator(".field-row", { hasText: "Langue" }).locator("select").inputValue();
-    expect(lang === "fr", `langue : ${lang}`);
+    // La langue et l'écoute ont déménagé dans l'onglet Voix : on vérifie un
+    // champ resté ici avant d'enregistrer.
+    const workspace = await p.locator(".field-row", { hasText: "Dossier de travail" }).locator("input").inputValue();
+    expect(workspace.length > 0, "dossier de travail vide");
     await p.locator(".view-header button", { hasText: "Enregistrer" }).click();
     // Attendre le bon message : un toast précédent (skin) peut encore être affiché.
     await p.waitForFunction(
@@ -478,42 +480,42 @@ let stepPage = null;
     return "toast affiché";
   });
 
-  await step("Paramètres : conversation continue et pause de fin de phrase", async () => {
-    await nav("Paramètres");
+  await step("Voix : conversation continue et pause de fin de phrase", async () => {
+    await nav("Voix");
     await p.waitForTimeout(800);
     const follow = await p.locator(".field-row", { hasText: "Conversation continue" }).locator("select").inputValue();
     expect(follow === "8", `conversation continue : ${follow} s (attendu 8)`);
     const pause = await p.locator(".field-row", { hasText: "Pause qui termine" }).locator("input").inputValue();
     expect(Number(pause) === 700, `pause de fin de phrase : ${pause} ms (attendu 700)`);
-    return `${follow} s, ${pause} ms`;
+    const lang = await p.locator(".field-row", { hasText: "Langue" }).locator("select").inputValue();
+    expect(lang === "fr", `langue : ${lang}`);
+    return `${follow} s, ${pause} ms, langue ${lang}`;
   });
 
-  await step("Paramètres : bibliothèque de modèles (liste, test, refus, choix vocal)", async () => {
-    // Le modèle vocal de l'utilisateur et SON fournisseur, restaurés à la fin
-    // quoi qu'il arrive : avant, la suite le remettait à vide (piège 61) et
-    // oublier le fournisseur aurait rebranché le vocal sur le principal.
+  await step("Paramètres : bibliothèque de modèles (liste, test, refus)", async () => {
+    // Le modèle vocal se choisit désormais dans l'onglet Voix (parcours
+    // dédié plus bas) : ici, seuls la liste, le test et le refus.
     const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm);
-    const savedVoice = saved.voice_model ?? "";
-    const savedVoiceProvider = saved.voice_provider || saved.provider || "opencode";
     await nav("Paramètres");
     await p.locator(".subtab", { hasText: "LLM" }).click();
     await p.waitForSelector(".model-row", { timeout: 40000 });
     const total = await p.locator(".model-row").count();
-    // Le fournisseur principal de l'utilisateur peut être Anthropic (abonnement,
-    // ~14 modèles) ou OpenCode Go (~37) : la borne dépend du provider en place.
-    const minModeles = (saved.provider || "opencode") === "anthropic" ? 10 : 20;
+    // La borne dépend du fournisseur en place : OpenCode Go (~37) et
+    // Anthropic en abonnement (~14) listent large, DeepSeek n'expose que
+    // « chat » et « reasoner » (2).
+    const providerNow = saved.provider || "opencode";
+    const minModeles = providerNow === "anthropic" ? 10 : providerNow === "deepseek" ? 2 : 20;
     expect(total >= minModeles, `${total} modèles listés (attendu ≥ ${minModeles})`);
     expect((await p.locator(".model-row.is-main").count()) === 1, "le modèle principal n'est pas repéré dans la liste");
     const ids = await p.$$eval(".model-row code", (els) => els.map((e) => e.textContent ?? ""));
     expect(!ids.some((id) => id.startsWith("opencode-go/")), `identifiants avec fournisseur : ${ids.filter((i) => i.startsWith("opencode-go/")).slice(0, 2).join(", ")}`);
     const main = (await p.locator(".model-current code").first().textContent()) ?? "";
 
-    try {
-      // Test réel du modèle principal : il doit fonctionner, outils compris.
-      const row = p.locator(".model-row.is-main");
-      await row.locator("button", { hasText: "Tester" }).click();
-      await row.locator(".model-test.good, .model-test.warn, .model-test.bad").waitFor({ timeout: 90000 });
-      expect((await row.locator(".model-test.good").count()) === 1, `le modèle principal « ${main} » devrait fonctionner`);
+    // Test réel du modèle principal : il doit fonctionner, outils compris.
+    const row = p.locator(".model-row.is-main");
+    await row.locator("button", { hasText: "Tester" }).click();
+    await row.locator(".model-test.good, .model-test.warn, .model-test.bad").waitFor({ timeout: 90000 });
+    expect((await row.locator(".model-test.good").count()) === 1, `le modèle principal « ${main} » devrait fonctionner`);
 
       // Recherche.
       const search = p.locator(".model-toolbar input[type=search]");
@@ -557,32 +559,51 @@ let stepPage = null;
       }
       const after = (await p.locator(".model-current code").first().textContent()) ?? "";
       expect(after === main, `le modèle principal a changé : ${after}`);
+    return `${total} modèles, principal « ${main} » testé`;
+  });
 
+  await step("Voix : modèle vocal (bibliothèque, choix, retrait)", async () => {
+    // Le modèle vocal de l'utilisateur et SON fournisseur, restaurés à la fin
+    // quoi qu'il arrive : avant, la suite le remettait à vide (piège 61) et
+    // oublier le fournisseur aurait rebranché le vocal sur le principal.
+    const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm);
+    const savedVoice = saved.voice_model ?? "";
+    const savedVoiceProvider = saved.voice_provider || saved.provider || "opencode";
+    await nav("Voix");
+    await p.waitForSelector(".models-panel .model-row", { timeout: 40000 });
+    const total = await p.locator(".models-panel .model-row").count();
+    expect(total >= 1, "aucun modèle listé dans l'onglet Voix");
+    let choixTeste = false;
+    try {
       // Choix d'un modèle vocal fonctionnel, puis retrait.
-      const flash = p.locator(".model-row", { hasText: "glm-5.3-flash" });
+      const flash = p.locator(".models-panel .model-row", { hasText: "glm-5.3-flash" });
       if ((await flash.count()) > 0) {
         // Déjà le modèle vocal de l'utilisateur : son bouton « Vocal » est
         // grisé et le clic attendait 30 s. On le retire d'abord (le `finally`
         // le remet).
         if ((await flash.getAttribute("class"))?.includes("is-voice")) {
-          await p.locator(".model-current button", { hasText: "Retirer" }).click();
-          await p.waitForSelector(".model-row.is-voice", { state: "detached", timeout: 15000 });
+          await p.locator(".models-panel .model-current button", { hasText: "Retirer" }).click();
+          await p.waitForSelector(".models-panel .model-row.is-voice", { state: "detached", timeout: 15000 });
         }
         await flash.locator("button", { hasText: "Vocal" }).click();
         // Attendre que CE modèle devienne vocal : un modèle vocal déjà choisi
         // satisfaisait « .model-row.is-voice » tout de suite (échec intermittent).
         await p.waitForFunction(
-          () => [...document.querySelectorAll(".model-row.is-voice")].some((r) => r.textContent.includes("glm-5.3-flash")),
+          () => [...document.querySelectorAll(".models-panel .model-row.is-voice")].some((r) => r.textContent.includes("glm-5.3-flash")),
           null,
           { timeout: 90000 },
         );
-        const current = (await p.locator(".model-current").textContent()) ?? "";
+        const current = (await p.locator(".models-panel .model-current").textContent()) ?? "";
         expect(current.includes("glm-5.3-flash"), `modèle vocal non affiché : ${current}`);
         // La valeur réellement enregistrée doit être l'identifiant court, jamais « fournisseur/modèle ».
-        const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm.voice_model);
-        expect(saved === "glm-5.3-flash", `modèle vocal enregistré : « ${saved} »`);
-        await p.locator(".model-current button", { hasText: "Retirer" }).click();
-        await p.waitForSelector(".model-row.is-voice", { state: "detached", timeout: 15000 });
+        const chosen = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm.voice_model);
+        expect(chosen === "glm-5.3-flash", `modèle vocal enregistré : « ${chosen} »`);
+        // Le champ identifiant de la carte suit le choix de la bibliothèque.
+        const field = await p.locator(".field-row", { hasText: "Modèle vocal" }).locator("input").inputValue();
+        expect(field === "glm-5.3-flash", `champ modèle vocal : « ${field} »`);
+        await p.locator(".models-panel .model-current button", { hasText: "Retirer" }).click();
+        await p.waitForSelector(".models-panel .model-row.is-voice", { state: "detached", timeout: 15000 });
+        choixTeste = true;
       }
     } finally {
       // La suite ne doit jamais laisser un modèle vocal modifié dans ta
@@ -595,7 +616,7 @@ let stepPage = null;
         throw new Error(`fournisseur vocal non restauré : « ${restored.voice_provider} » au lieu de « ${savedVoiceProvider} »`);
       }
     }
-    return `${total} modèles, principal « ${main} » testé`;
+    return `${total} modèles listés${choixTeste ? ", choix vocal vérifié" : " (fournisseur sans glm-5.3-flash : choix non testé)"}`;
   });
 
   await step("Paramètres : fournisseurs (liste, clé masquée, ajout et retrait d'un personnalisé)", async () => {

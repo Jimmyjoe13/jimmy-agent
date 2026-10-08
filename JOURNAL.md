@@ -1211,6 +1211,34 @@ n'a plus besoin d'« extra usage » : la signature Claude Code le remplace,
 configurée en commande Tauri (pièges 91-92). Les nouveaux fournisseurs
 DeepSeek/Alibaba n'ont toujours pas été essayés avec de vraies clés.
 
+## 3decies. Session 11 — 8 octobre, soir : tout le vocal dans l'onglet Voix
+
+Demande de l'utilisateur (suite logique du sous-onglet LLM) : regrouper
+**toute** la configuration de la voix dans l'onglet Voix — y compris le modèle
+LLM vocal. Reformulée et validée avant le code (option « tout le vocal »
+retenue).
+
+**Ce qui a déménagé.** Cartes « Voix de sortie » (sons d'état) et « Écoute »
+(modèles STT, langue, mot d'activation, suivi, pause, debug) + champ « modèle
+vocal » : de Paramètres → Général/LLM vers Voix (cartes « Modèle vocal » et
+« Écoute et sons », chacune avec son Enregistrer). Paramètres garde
+fournisseurs + modèle principal + budget, avec une carte de renvoi vers Voix.
+`modelsPanel` prend `onlyRole` (« main » en Paramètres, « voice » en Voix :
+boutons et ligne courante filtrés). Les deux vues persistent via copie fraîche
+de Rust : pas d'écrasement entre onglets ouverts.
+
+**Payé en route.** `wakeInput` déclaré deux fois dans `voiceView` (phrase de
+test + nouveau champ) — renommé `wakeWordInput` avant même le build ; le
+`tsc` strict l'aurait attrapé. Échec suite « bibliothèque » : 2 modèles
+listés au lieu de ≥ 20 — pas un bug, le fournisseur actif est **DeepSeek**
+(2 modèles au catalogue) ; borne adaptée par fournisseur. Le choix vocal
+glm-5.3-flash étant injoignable chez DeepSeek, nouveau script ciblé
+`scripts/ui-test/voice-vocal-check.js` : `deepseek-v4-pro` choisi (vrai test),
+champ synchronisé, retiré, config restaurée — vert, 0 erreur JS.
+
+Vérifié : 194 unitaires (0 avertissement), `tsc` strict, release code 0,
+**suite 30/30**, 0 erreur JS. Jimmy relancé proprement, une instance, sans debug.
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 9 octobre (soir)** : l'abonnement Claude sert Jimmy comme moteur

@@ -231,7 +231,7 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
         h(
           "p",
           { class: "note" },
-          "Clé et URL par fournisseur. Le modèle principal et le modèle vocal peuvent venir de fournisseurs différents : choisis-les dans la bibliothèque, sous cette carte. « Tester » liste les modèles accessibles (une requête, comme les tiennes).",
+          "Clé et URL par fournisseur. Le modèle principal se choisit dans la bibliothèque, sous cette carte ; le modèle vocal dans l'onglet Voix. « Tester » liste les modèles accessibles (une requête, comme les tiennes).",
         ),
         h(
           "p",

@@ -73,7 +73,7 @@ export interface ModelsPanelHooks {
   onApplied: (role: Role, model: string, provider?: string) => void;
 }
 
-export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLElement {
+export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?: Role): HTMLElement {
   let models: ModelInfo[] = [];
   const tests = loadTests();
   const testing = new Set<string>();
@@ -271,25 +271,32 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     const main = ctx.status.llm.model;
     const voice = ctx.status.llm.voice_model ?? "";
     const name = (id: string) => models.find((m) => m.id === id)?.name;
+    // Panneau restreint à un rôle (onglet Voix) : on ne montre que sa ligne.
+    const showMain = onlyRole !== "voice";
+    const showVoice = onlyRole !== "main";
     mount(
       current,
-      h(
-        "div",
-        {},
-        h("span", { class: "model-role" }, "Principal"),
-        h("code", {}, main),
-        name(main) ? ` · ${name(main)}` : "",
-        ` — ${providerLabel(ctx.status.llm.provider)}`,
-      ),
-      h(
-        "div",
-        {},
-        h("span", { class: "model-role" }, "Vocal"),
-        voice ? h("code", {}, voice) : h("em", {}, "même modèle que le principal"),
-        voice && name(voice) ? ` · ${name(voice)}` : "",
-        voice ? ` — ${providerLabel(ctx.status.llm.voice_provider || ctx.status.llm.provider)}` : "",
-        voice ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, "Retirer") : null,
-      ),
+      showMain
+        ? h(
+            "div",
+            {},
+            h("span", { class: "model-role" }, "Principal"),
+            h("code", {}, main),
+            name(main) ? ` · ${name(main)}` : "",
+            ` — ${providerLabel(ctx.status.llm.provider)}`,
+          )
+        : null,
+      showVoice
+        ? h(
+            "div",
+            {},
+            h("span", { class: "model-role" }, "Vocal"),
+            voice ? h("code", {}, voice) : h("em", {}, "même modèle que le principal"),
+            voice && name(voice) ? ` · ${name(voice)}` : "",
+            voice ? ` — ${providerLabel(ctx.status.llm.voice_provider || ctx.status.llm.provider)}` : "",
+            voice ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, "Retirer") : null,
+          )
+        : null,
     );
   }
 
@@ -365,26 +372,30 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
           { class: "ghost small", disabled: busy, onclick: () => void runTest(model.id), title: "Envoie une petite requête de test" },
           "Tester",
         ),
-        h(
-          "button",
-          {
-            class: isMain ? "primary small" : "ghost small",
-            disabled: busy || isMain || broken,
-            title: broken ? "Ce modèle a échoué au test" : "Utiliser pour le chat et les tâches",
-            onclick: () => void choose("main", model.id),
-          },
-          "Principal",
-        ),
-        h(
-          "button",
-          {
-            class: isVoice ? "primary small" : "ghost small",
-            disabled: busy || isVoice || broken,
-            title: broken ? "Ce modèle a échoué au test" : "Utiliser pour les échanges à voix haute",
-            onclick: () => void choose("voice", model.id),
-          },
-          "Vocal",
-        ),
+        onlyRole === "voice"
+          ? null
+          : h(
+              "button",
+              {
+                class: isMain ? "primary small" : "ghost small",
+                disabled: busy || isMain || broken,
+                title: broken ? "Ce modèle a échoué au test" : "Utiliser pour le chat et les tâches",
+                onclick: () => void choose("main", model.id),
+              },
+              "Principal",
+            ),
+        onlyRole === "main"
+          ? null
+          : h(
+              "button",
+              {
+                class: isVoice ? "primary small" : "ghost small",
+                disabled: busy || isVoice || broken,
+                title: broken ? "Ce modèle a échoué au test" : "Utiliser pour les échanges à voix haute",
+                onclick: () => void choose("voice", model.id),
+              },
+              "Vocal",
+            ),
       ),
     );
   }
@@ -502,11 +513,13 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
   return h(
     "section",
     { class: "card models-panel" },
-    h("h3", {}, "Modèles de langage — bibliothèque"),
+    h("h3", {}, onlyRole === "voice" ? "Modèle vocal — bibliothèque" : "Modèles de langage — bibliothèque"),
     h(
       "p",
       { class: "note" },
-      "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
+      onlyRole === "voice"
+        ? "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi comme modèle vocal que s'il répond. Le choix s'applique tout de suite."
+        : "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
     ),
     current,
     h(
