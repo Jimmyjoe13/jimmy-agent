@@ -96,7 +96,7 @@ pub async fn capture(
                         return None;
                     }
                     log::warn!("[skills] capture illisible (tentative {attempt}) : {}",
-                        raw.chars().take(200).collect::<String>());
+                        crate::sensitive::mask_text(&raw.chars().take(200).collect::<String>()));
                 }
             },
             Err(error) => {

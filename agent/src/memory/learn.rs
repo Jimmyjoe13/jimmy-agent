@@ -106,7 +106,7 @@ pub async fn learn(
                 }
                 log::warn!(
                     "[memory] extraction illisible (tentative {attempt}) : {}",
-                    raw.chars().take(200).collect::<String>()
+                    crate::sensitive::mask_text(&raw.chars().take(200).collect::<String>())
                 );
             }
             Err(error) => {

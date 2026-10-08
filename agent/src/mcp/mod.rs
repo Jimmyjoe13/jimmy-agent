@@ -424,7 +424,7 @@ fn mask_value(arg: &str, always: bool) -> String {
     }
 }
 
-fn is_secret_name(name: &str) -> bool {
+pub(crate) fn is_secret_name(name: &str) -> bool {
     let lower = name.to_lowercase();
     SECRET_HINTS.iter().any(|hint| lower.contains(hint))
 }

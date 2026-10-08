@@ -546,8 +546,8 @@ pub fn describe(tool: &str, args: &serde_json::Value) -> String {
     };
     let body = ["command", "cmd", "script"]
         .iter()
-        .find_map(|k| inner.get(*k).and_then(|v| v.as_str()).map(str::to_string))
-        .unwrap_or_else(|| serde_json::to_string_pretty(&inner).unwrap_or_default());
+        .find_map(|k| inner.get(*k).and_then(|v| v.as_str()).map(mask_text))
+        .unwrap_or_else(|| serde_json::to_string_pretty(&mask_json(&inner)).unwrap_or_default());
     let body: String = body.chars().take(2000).collect();
     format!("{label}\n{body}")
 }
@@ -638,6 +638,146 @@ pub async fn authorize(
              et pourquoi, et laisse-le décider."
         ))
     }
+}
+
+// ── Masquage des secrets avant journalisation ou affichage ───────────────────
+// (HANDOFF « Ensuite » 3 : les arguments d'outils partaient en clair dans
+// `jimmy.log`, clés `aggregate` et SynaptiQ comprises. Même règle que
+// `mcp::mask_command` : le nom reste visible, seule la valeur est cachée.)
+
+/// Masque les secrets d'une valeur JSON : objet dont la clé parle d'un
+/// secret → valeur cachée ; chaînes → motifs textuels (`mask_text`) ;
+/// le reste est parcouru tel quel.
+pub fn mask_json(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(text) => Value::String(mask_text(text)),
+        Value::Array(items) => Value::Array(items.iter().map(mask_json).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, val)| {
+                    if crate::mcp::is_secret_name(key) {
+                        (key.clone(), Value::String("••••".to_string()))
+                    } else {
+                        (key.clone(), mask_json(val))
+                    }
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+/// Masque les secrets d'un texte libre : `NOM=valeur` / `NOM: valeur` dont
+/// le nom parle d'un secret, jetons `sk-…`, `Bearer …`, identifiants d'URL.
+/// Mot à mot (sans dépendance) : la ponctuation autour est conservée pour
+/// garder le diagnostic lisible.
+pub fn mask_text(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut mask_next = false;
+    let mut after_key = false;
+    for word in text.split_whitespace() {
+        let (lead, core, trail) = split_punct(word);
+        let masked = if (mask_next || after_key) && !core.is_empty() {
+            format!("{lead}••••{trail}")
+        } else {
+            mask_word(lead, core, trail)
+        };
+        mask_next = core.eq_ignore_ascii_case("bearer");
+        after_key = is_bare_secret_key(core);
+        out.push(masked);
+    }
+    out.join(" ")
+}
+
+/// `NOM:` (nom de secret, sans valeur dans le même mot) : la valeur suit
+/// dans le mot suivant (`X-API-Key: <clé>`, `PASSWORD: xxx`).
+fn is_bare_secret_key(core: &str) -> bool {
+    let Some(name) = core.strip_suffix(':') else {
+        return false;
+    };
+    if name.contains("://") || name.len() <= 1 {
+        return false;
+    }
+    crate::mcp::is_secret_name(name.trim_matches(['"', '\'']))
+}
+
+/// Découpe un mot en ponctuation d'entourage + cœur. `:` et `=` ne sont
+/// jamais rognés : ce sont des séparateurs d'assignation.
+fn split_punct(word: &str) -> (&str, &str, &str) {
+    let lead_len = word
+        .char_indices()
+        .take_while(|(_, c)| matches!(c, '"' | '\'' | '(' | '[' | '{' | '<'))
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    let trail_len = word
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| matches!(c, '"' | '\'' | ',' | ';' | ')' | ']' | '}' | '>' | '.' | '!' | '?'))
+        .count();
+    let core_end = word.len().saturating_sub(trail_len);
+    if lead_len >= core_end {
+        return (word, "", "");
+    }
+    (&word[..lead_len], &word[lead_len..core_end], &word[core_end..])
+}
+
+fn mask_word(lead: &str, core: &str, trail: &str) -> String {
+    if core.is_empty() {
+        return format!("{lead}{trail}");
+    }
+    // Jeton `sk-…` (OpenRouter, SynaptiQ…) : préfixe gardé, valeur cachée.
+    if core.len() > 8
+        && core.starts_with("sk-")
+        && core.chars().skip(3).all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return format!("{lead}sk-••••{trail}");
+    }
+    // Identifiants dans une URL (`user:motdepasse@hôte`, `?api_key=…`).
+    if let Some(masked) = mask_userinfo(core) {
+        return format!("{lead}{masked}{trail}");
+    }
+    // `X-API-Key: valeur`, `--token=valeur`, `PASSWORD=…`.
+    for sep in ['=', ':'] {
+        if let Some((name, _)) = core.split_once(sep) {
+            // `C:\…`, `https://…` : un `:` qui n'introduit pas de valeur.
+            let is_path_or_url =
+                sep == ':' && (name.len() == 1 || core[name.len()..].starts_with("://"));
+            if !is_path_or_url && crate::mcp::is_secret_name(name.trim_matches(['"', '\''])) {
+                return format!("{lead}{name}{sep}••••{trail}");
+            }
+        }
+    }
+    format!("{lead}{core}{trail}")
+}
+
+fn mask_userinfo(word: &str) -> Option<String> {
+    let (_, rest) = word.split_once("://")?;
+    let (credentials, host) = rest.split_once('@')?;
+    if credentials.contains('/') {
+        return None;
+    }
+    let scheme = word.split("://").next().unwrap_or("");
+    let user = credentials.split(':').next().unwrap_or("");
+    let (base, query) = match host.split_once('?') {
+        Some((base, query)) => (base, Some(query)),
+        None => (host, None),
+    };
+    let mut masked = format!("{scheme}://{user}:••••@{base}");
+    if let Some(query) = query {
+        let params: Vec<String> = query
+            .split('&')
+            .map(|param| match param.split_once('=') {
+                Some((key, _)) if crate::mcp::is_secret_name(key) => format!("{key}=••••"),
+                _ => param.to_string(),
+            })
+            .collect();
+        masked.push('?');
+        masked.push_str(&params.join("&"));
+    }
+    Some(masked)
 }
 
 #[cfg(test)]
@@ -735,6 +875,60 @@ mod tests {
             python3 <<'PY'\nopen('/home/user/app/secure/.env.api','w').write(x)\nPY";
         let args = json!({"server": "vps", "tool": "vps_exec", "arguments": {"command": command}});
         assert!(needs_approval("mcp_call", &args).is_some());
+    }
+
+    /// Cas réel (HANDOFF « Ensuite » 3) : la clé du serveur MCP `aggregate`
+    /// et une clé SynaptiQ figuraient en clair dans `jimmy.log`, car les
+    /// arguments d'outils y sont journalisés tels quels. Le masquage doit
+    /// les faire disparaître tout en gardant le reste lisible.
+    #[test]
+    fn les_arguments_journalises_ne_fuitent_pas_les_cles() {
+        let arguments = json!({
+            "name": "aggregate",
+            "command": "npx mcp-remote https://api.example.com/mcp --header \"X-API-Key: cle-agregate-12345\"",
+            "url": "https://user:motdepasse-67890@api.example.com/mcp?api_key=cle-requete-abcde",
+            "env": { "SYNAPTIQ_API_KEY": "cle-synaptiq-xyz" },
+            "model": "sk-or-v1-abcdef123456",
+            "note": "Authorization: Bearer jeton-porte-999",
+        });
+        let logged = mask_json(&arguments).to_string();
+        for secret in [
+            "cle-agregate-12345",
+            "motdepasse-67890",
+            "cle-requete-abcde",
+            "cle-synaptiq-xyz",
+            "sk-or-v1-abcdef123456",
+            "jeton-porte-999",
+        ] {
+            assert!(!logged.contains(secret), "fuite au journal : {secret}");
+        }
+        // Le diagnostic reste utile : noms visibles, valeurs cachées.
+        assert!(logged.contains("aggregate"));
+        assert!(logged.contains("api_key"));
+    }
+
+    /// Ponctuation double en fin de mot (`",` du JSON) : le cœur ne doit pas
+    /// être rogné, sinon un bout de secret reste dans la traîne.
+    #[test]
+    fn la_ponctuation_double_ne_coupe_pas_le_masque() {
+        assert_eq!(mask_text("TOKEN=abc123\","), "TOKEN=••••\",");
+        assert_eq!(mask_text("(secret: xyz789);"), "(secret:•••• ••••);");
+    }
+
+    /// La carte « Autoriser / Refuser » montre la commande exacte : la clé
+    /// n'a pas à y figurer en clair (même règle que le journal).
+    #[test]
+    fn la_carte_d_autorisation_masque_les_cles() {
+        let detail = describe(
+            "mcp_call",
+            &json!({
+                "server": "aggregate",
+                "tool": "add",
+                "arguments": {"command": "mcp-remote https://api.example.com --header \"X-API-Key: cle-carte-456\""}
+            }),
+        );
+        assert!(!detail.contains("cle-carte-456"), "fuite sur la carte : {detail}");
+        assert!(detail.contains("aggregate"));
     }
 
     /// Les lectures réelles du même soir restent libres, masquage compris.

@@ -425,7 +425,13 @@ pub async fn run_with_images(
                 "[agent] outil « {} » appelé {}",
                 call.name,
                 {
-                    let args: String = call.arguments.to_string().chars().take(200).collect();
+                    // Arguments masqués (HANDOFF « Ensuite » 3) : une clé
+                    // MCP ou un jeton ne doit jamais partir en clair.
+                    let args: String = crate::sensitive::mask_json(&call.arguments)
+                        .to_string()
+                        .chars()
+                        .take(200)
+                        .collect();
                     if args.is_empty() { "(sans argument)".to_string() } else { args }
                 }
             );
