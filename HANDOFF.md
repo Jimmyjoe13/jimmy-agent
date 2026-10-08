@@ -1278,6 +1278,21 @@ déclenché (0/31) : croissance strictement additive.
  doit entrer dans cette zone, et se vérifie sur l'écran réel
  (`scripts\photo-avatar.ps1`), pas seulement par `/snapshot`.
 
+  **86. Sur une installation fraîche, l'avatar reste muet : le cache de
+  l'éditeur manque.** `main.gd` utilisait les `class_name` globaux (`Jimmy`,
+  `JimmyHttpServer`), qui n'existent que dans le cache de l'éditeur
+  (`.godot/`, non versionné) : sur un clone frais, la scène meurt à
+  l'analyse (`SCRIPT ERROR … not declared in the current scope`), aucun
+  serveur HTTP (8787), avatar invisible et fenêtre morte qui mange les clics
+  (l'accueil paraît « gelé » ; cas réel du 8 octobre 2026 sur une seconde
+  machine). Le `--check-only --script` hors `--path` ne l'attrape pas
+  (chemins `res://` faux). Corrigé par `preload` (`JimmyFox`, `JimmyHttp`,
+  comme le lapin) et types explicites (`Node3D`, `Node`, `int`, `float` —
+  l'inférence `:=` passait par les classes globales). Règle : dans les
+  scripts Godot, `preload` plutôt que le `class_name` d'un autre script ;
+  régression couverte par `--test avatar_scripts -- --ignored` (démarrage
+  `headless` sans cache, serveur attendu).
+
 ### Décisions prises (7 octobre 2026 — vision de la fenêtre active)
 
 Demande : que Jimmy ait le contexte de ce que fait l'utilisateur, **seulement

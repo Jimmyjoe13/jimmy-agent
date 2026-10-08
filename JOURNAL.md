@@ -1158,3 +1158,31 @@ d'où la nouvelle règle de vérifier sur l'écran réel (piège 85).
 
 **Commandes** : voir la section « Commandes » du `HANDOFF.md`
 (`build.ps1 -Release`, `test-ui.ps1`, `test-happy.ps1`, `with-msvc.ps1 cargo test`).
+
+---
+
+## 6. Seconde machine : l'avatar muet du clone frais (8 octobre 2026)
+
+Première installation sur un second PC Windows (Node et WebView2 présents ;
+Rust, Build Tools C++, Godot, whisper et clés à installer). Tout s'installe
+par `install.ps1`, compilation release OK, raccourci Bureau OK.
+
+Premier lancement : accueil affiché, mais l'étape du prénom paraît gelée
+(saisie et clics sans effet), une zone de l'écran semble bloquée, et
+l'avatar ne s'affiche jamais. Le journal ne montre aucune erreur du moteur :
+la question n'arrive jamais au backend.
+
+Cause unique, prouvée en lançant Godot à la main : `main.gd` utilisait les
+`class_name` globaux (`Jimmy`, `JimmyHttpServer`), qui n'existent que dans
+le cache de l'éditeur (`.godot/`, non versionné, absent d'un clone frais).
+La scène meurt à l'analyse, aucun serveur HTTP, avatar invisible — et sa
+fenêtre morte mange les clics. Le GPU et Vulkan étaient hors de cause.
+
+Correction (proposée en PR au développeur) : `preload` dans `main.gd`
+(`JimmyFox`, `JimmyHttp`, comme le lapin) + types explicites (`Node3D`,
+`Node`, `int`, `float`). Régression couverte par
+`agent/tests/avatar_scripts.rs` (démarrage `headless` sans cache, test
+rouge avant, vert après). Vérifié : 175 tests unitaires, `npm run build`
+strict, `build.ps1 -Release`, suite d'interface 23/28 sans erreur JS
+(5 échecs : 1 connu côté modèle sur "fichier sensible", 4 en cascade
+pendant une activité sur le PC — à relancer au calme). Piège 86.
