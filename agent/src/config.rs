@@ -18,11 +18,134 @@ fn default_true() -> bool {
     true
 }
 
+fn default_opencode_id() -> String {
+    PROVIDER_OPENCODE.into()
+}
+
+/// Méthodes d'accès d'un fournisseur.
+pub const AUTH_API_KEY: &str = "api-key";
+/// Abonnement Claude (Pro/Max) : jetons OAuth relus depuis la session de
+/// Claude Code, rafraîchis et réécrits par Jimmy (`providers::claude_plan`).
+pub const AUTH_CLAUDE_PLAN: &str = "claude-plan";
+
+fn default_auth_api_key() -> String {
+    AUTH_API_KEY.into()
+}
+
+/// Un fournisseur de modèles de langage : URL de base, clé, format d'API.
+///
+/// Les clés sont saisies dans l'interface (Paramètres → LLM) et stockées dans
+/// `data/config.json` — jamais commité, jamais journalisé. La clé de
+/// l'environnement (`OPENCODE_API_KEY`…) ne sert que de **valeur de repli**
+/// quand aucune clé n'est saisie : un choix de l'utilisateur ne doit jamais
+/// être écrasé (piège 62).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderConfig {
+    /// Identifiant stable : `opencode`, `openrouter`, `deepseek`, `alibaba`,
+    /// `anthropic`, ou `custom-N` pour ceux ajoutés par l'utilisateur.
+    pub id: String,
+    pub label: String,
+    pub base_url: String,
+    /// Clé d'API saisie dans l'interface. Vide = repli sur l'environnement.
+    #[serde(default)]
+    pub api_key: String,
+    /// Format d'API : `"chat"`, `"responses"` ou `"messages"`. `None` =
+    /// automatique (catalogue OpenCode Go, puis essai des trois formats).
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// La clé voyage dans l'en-tête `x-api-key` (Anthropic) au lieu de
+    /// `Authorization: Bearer`.
+    #[serde(default)]
+    pub x_api_key: bool,
+    /// Méthode d'accès : `"api-key"` (défaut) ou `"claude-plan"` — abonnement
+    /// Claude réutilisé depuis la session de Claude Code (jetons OAuth, voir
+    /// `providers::claude_plan`). Réservé au fournisseur Anthropic.
+    #[serde(default = "default_auth_api_key")]
+    pub auth: String,
+    /// Ce fournisseur exige l'en-tête `x-opencode-session` (OpenCode Go,
+    /// `400 MissingSessionID` sans lui).
+    #[serde(default)]
+    pub session_header: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Fournisseur intégré : non supprimable, sa clé peut venir de
+    /// l'environnement.
+    #[serde(default)]
+    pub builtin: bool,
+}
+
+/// Identifiants des fournisseurs intégrés (stables : ils vivent dans
+/// `config.json` et dans les choix de l'utilisateur).
+pub const PROVIDER_OPENCODE: &str = "opencode";
+pub const PROVIDER_OPENROUTER: &str = "openrouter";
+pub const PROVIDER_DEEPSEEK: &str = "deepseek";
+pub const PROVIDER_ALIBABA: &str = "alibaba";
+pub const PROVIDER_ANTHROPIC: &str = "anthropic";
+
+impl ProviderConfig {
+    /// Vrai si ce fournisseur est en mode abonnement Claude.
+    pub fn is_claude_plan(&self) -> bool {
+        self.auth == AUTH_CLAUDE_PLAN
+    }
+
+    /// Les cinq fournisseurs proposés d'office. OpenCode Go est le seul au
+    /// format « automatique » : c'est le catalogue qui dit quel modèle parle
+    /// quel dialecte (piège 78). Les autres ont un format fixe, vérifié par
+    /// leur documentation (API compatible OpenAI pour les trois du milieu,
+    /// Messages pour Claude).
+    pub fn presets() -> Vec<ProviderConfig> {
+        let preset = |id: &str, label: &str, base_url: &str, protocol: Option<&str>, x_api_key: bool, session_header: bool| ProviderConfig {
+            id: id.into(),
+            label: label.into(),
+            base_url: base_url.into(),
+            api_key: String::new(),
+            protocol: protocol.map(String::from),
+            x_api_key,
+            auth: AUTH_API_KEY.into(),
+            session_header,
+            enabled: true,
+            builtin: true,
+        };
+        vec![
+            preset(PROVIDER_OPENCODE, "OpenCode Go", "https://opencode.ai/zen/go/v1", None, false, true),
+            preset(PROVIDER_OPENROUTER, "OpenRouter", "https://openrouter.ai/api/v1", Some("chat"), false, false),
+            preset(PROVIDER_DEEPSEEK, "DeepSeek", "https://api.deepseek.com/v1", Some("chat"), false, false),
+            preset(PROVIDER_ALIBABA, "Alibaba (Qwen)", "https://dashscope.aliyuncs.com/compatible-mode/v1", Some("chat"), false, false),
+            preset(PROVIDER_ANTHROPIC, "Anthropic (Claude)", "https://api.anthropic.com/v1", Some("messages"), true, false),
+        ]
+    }
+}
+
+/// Message du serveur : « Third-party apps now draw from extra usage, not
+/// plan limits. Ask your workspace admin to add more and keep going. » Mesuré
+/// le 9 octobre (`--test claude_plan`, bissection des tailles) : le plan
+/// accepte les petites requêtes (les 21 621 jetons d'un gros prompt passent),
+/// mais refuse dès que la déclaration d'outils devient substantielle (~3 000
+/// jetons d'outils réels = 400, 12 outils minuscules = OK). C'est la grille
+/// de facturation d'Anthropic, pas une erreur de Jimmy : à traduire en conseil
+/// actionnable. (piège 90) — résolu depuis par la signature Claude Code
+/// (`claude_plan::inject_billing_block`), ce message ne revient qu'en cas de
+/// durcissement serveur.
+pub const CLAUDE_PLAN_EXTRA_USAGE_MSG: &str =
+    "HTTP 400 — Anthropic ne facture plus les requêtes d'agent (avec outils) d'une app tierce sur l'abonnement : elles puisent dans le solde « extra usage », non activé sur ce compte. Trois issues : activer « extra usage » dans les réglages de Claude (facturation à l'usage), saisir une clé API chez Anthropic, ou laisser Jimmy sur OpenCode Go.";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmSettings {
     /// Identifiant complet du modèle chez OpenCode Go, ex. `space-bunny-free`.
     pub model: String,
+    /// @deprecated : source de vérité = `providers[].base_url`. Conservé pour
+    /// lire les anciennes configurations (la migration le recopie dans le
+    /// fournisseur OpenCode Go).
     pub base_url: String,
+    /// Fournisseur du modèle principal (identifiant dans `providers`).
+    #[serde(default = "default_opencode_id")]
+    pub provider: String,
+    /// Fournisseur du modèle vocal. Vide = celui du modèle principal.
+    #[serde(default)]
+    pub voice_provider: String,
+    /// Fournisseurs configurés (les cinq intégrés + ceux ajoutés).
+    #[serde(default)]
+    pub providers: Vec<ProviderConfig>,
     /// Température ; `None` = réglage par défaut du fournisseur.
     pub temperature: Option<f32>,
     pub max_tokens: u32,
@@ -41,6 +164,9 @@ impl Default for LlmSettings {
         LlmSettings {
             model: "space-bunny-free".into(),
             base_url: "https://opencode.ai/zen/go/v1".into(),
+            provider: PROVIDER_OPENCODE.into(),
+            voice_provider: String::new(),
+            providers: ProviderConfig::presets(),
             temperature: None,
             // 4096 coupait l'écriture d'un fichier : les jetons de raisonnement
             // d'un modèle comme MiMo comptent dans ce budget (mesuré le 4
@@ -53,6 +179,80 @@ impl Default for LlmSettings {
             max_iterations: DEFAULT_MAX_ITERATIONS,
             session_prefix: "jimmy".into(),
         }
+    }
+}
+
+impl LlmSettings {
+    /// Migration et normalisation, à chaque chargement de configuration.
+    ///
+    /// Une configuration d'avant le multi-fournisseur n'a pas de liste
+    /// `providers` : on enregistre les cinq intégrés, et l'ancien `base_url`
+    /// devient l'URL du fournisseur OpenCode Go (l'utilisateur avait peut-être
+    /// pointé vers un proxy). La liste devient la source de vérité ; `base_url`
+    /// n'est plus lu ailleurs.
+    pub fn migrate_providers(&mut self) {
+        if self.provider.trim().is_empty() {
+            self.provider = PROVIDER_OPENCODE.into();
+        }
+        if self.providers.is_empty() {
+            self.providers = ProviderConfig::presets();
+            if !self.base_url.trim().is_empty() {
+                if let Some(opencode) = self.providers.iter_mut().find(|p| p.id == PROVIDER_OPENCODE) {
+                    opencode.base_url = self.base_url.clone();
+                }
+            }
+            return;
+        }
+        // Liste déjà présente : on ajoute les intégrés qui manqueraient (un
+        // preset introduit dans une version future, par exemple).
+        for preset in ProviderConfig::presets() {
+            if !self.providers.iter().any(|p| p.id == preset.id) {
+                self.providers.push(preset);
+            }
+        }
+    }
+
+    pub fn provider(&self, id: &str) -> Option<&ProviderConfig> {
+        self.providers.iter().find(|p| p.id == id)
+    }
+
+    /// Le fournisseur actif du modèle principal. Un identifiant inconnu ou
+    /// désactivé (config éditée à la main) retombe sur le premier fournisseur
+    /// activé, jamais sur une panne.
+    pub fn active_provider(&self) -> Option<&ProviderConfig> {
+        self.provider(&self.provider)
+            .filter(|p| p.enabled)
+            .or_else(|| self.providers.iter().find(|p| p.enabled))
+    }
+
+    /// Le fournisseur actif du modèle vocal : `voice_provider` s'il est
+    /// renseigné et valide, sinon celui du principal.
+    pub fn voice_active_provider(&self) -> Option<&ProviderConfig> {
+        if self.voice_provider.trim().is_empty() {
+            return self.active_provider();
+        }
+        self.provider(&self.voice_provider)
+            .filter(|p| p.enabled)
+            .or_else(|| self.active_provider())
+    }
+
+    /// Clé effective d'un fournisseur : celle saisie dans l'interface, sinon
+    /// repli sur la variable d'environnement du même service (jamais l'inverse :
+    /// le choix de l'utilisateur gagne, piège 62).
+    pub fn resolve_key(&self, provider: &ProviderConfig, secrets: &Secrets) -> String {
+        if !provider.api_key.trim().is_empty() {
+            return provider.api_key.clone();
+        }
+        match provider.id.as_str() {
+            PROVIDER_OPENCODE => secrets.opencode_api_key.clone(),
+            PROVIDER_OPENROUTER => secrets.openrouter_api_key.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// Vrai si la clé effective vient de l'environnement et non de la saisie.
+    pub fn key_from_env(&self, provider: &ProviderConfig, secrets: &Secrets) -> bool {
+        provider.api_key.trim().is_empty() && !self.resolve_key(provider, secrets).is_empty()
     }
 }
 
@@ -477,6 +677,7 @@ impl Settings {
             // Premier lancement : l'environnement donne les valeurs de départ.
             let mut s = Settings::default();
             s.apply_env_with(env, true);
+            s.llm.migrate_providers();
             return s;
         }
         match std::fs::read_to_string(&path) {
@@ -484,6 +685,7 @@ impl Settings {
                 Ok(mut s) => {
                     // Config existante : les choix de l'utilisateur gagnent.
                     s.apply_env_with(env, false);
+                    s.llm.migrate_providers();
                     // 900 ms était l'ancien défaut de fin de phrase : mesuré
                     // trop long (Jimmy semblait ne rien faire après qu'on a
                     // fini de parler). Migré vers 700 ms.
@@ -660,5 +862,128 @@ mod env_tests {
         let mut s = Settings::default();
         s.apply_env_with(env(&[("JIMMY_LLM_MODEL", "modele-de-depart")]), true);
         assert_eq!(s.llm.model, "modele-de-depart");
+    }
+
+    // ── Multi-fournisseurs (chantier d'octobre 2026) ─────────────────────────
+
+    /// Une config d'avant le multi-fournisseur n'a pas de liste `providers` :
+    /// le chargement doit la créer avec les cinq intégrés et reprendre l'ancien
+    /// `base_url` (le pointeur d'un proxy ne doit pas se perdre).
+    #[test]
+    fn une_ancienne_config_recoit_les_cinq_fournisseurs_integres() {
+        let dir = std::env::temp_dir().join(format!("jimmy-cfg-prov-{}", std::process::id()));
+        let paths = Paths { data: dir.clone(), app: dir.clone(), dev: false };
+        std::fs::create_dir_all(&dir).unwrap();
+        // Une config « d'avant » : pas de liste providers, un base_url hérité.
+        let mut avant = Settings::default();
+        avant.llm.providers.clear();
+        avant.llm.base_url = "https://proxy.perso/v1".into();
+        avant.llm.provider = String::new();
+        avant.save(&paths).unwrap();
+        let s = Settings::load(&paths);
+        assert_eq!(s.llm.providers.len(), 5);
+        assert_eq!(s.llm.provider, PROVIDER_OPENCODE);
+        let opencode = s.llm.provider(PROVIDER_OPENCODE).unwrap();
+        assert_eq!(opencode.base_url, "https://proxy.perso/v1");
+        assert!(opencode.session_header);
+        let anthropic = s.llm.provider(PROVIDER_ANTHROPIC).unwrap();
+        assert_eq!(anthropic.protocol.as_deref(), Some("messages"));
+        assert!(anthropic.x_api_key);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// La liste `providers` est la source de vérité : un enregistrement puis
+    /// rechargement doit garder les fournisseurs ajoutés à la main.
+    #[test]
+    fn un_fournisseur_personnalise_survit_a_l_enregistrement() {
+        let dir = std::env::temp_dir().join(format!("jimmy-cfg-prov2-{}", std::process::id()));
+        let paths = Paths { data: dir.clone(), app: dir.clone(), dev: false };
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Settings::default();
+        s.llm.providers.push(ProviderConfig {
+            id: "custom-1".into(),
+            label: "LM Studio".into(),
+            base_url: "http://127.0.0.1:1234/v1".into(),
+            api_key: "cle-test".into(),
+            protocol: Some("chat".into()),
+            x_api_key: false,
+            auth: AUTH_API_KEY.into(),
+            session_header: false,
+            enabled: true,
+            builtin: false,
+        });
+        s.llm.provider = "custom-1".into();
+        s.save(&paths).unwrap();
+        let reloaded = Settings::load(&paths);
+        assert_eq!(reloaded.llm.provider, "custom-1");
+        assert_eq!(reloaded.llm.providers.len(), 6);
+        assert_eq!(reloaded.llm.provider("custom-1").unwrap().api_key, "cle-test");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// La clé de l'environnement ne sert que de repli : une clé saisie dans
+    /// l'interface gagne, et l'environnement ne doit jamais l'écraser (piège 62).
+    #[test]
+    fn la_cle_saisie_gagne_sur_la_cle_d_environnement() {
+        let s = Settings::default();
+        let secrets = Secrets {
+            opencode_api_key: "cle-du-env".into(),
+            openrouter_api_key: String::new(),
+        };
+        let opencode = s.llm.provider(PROVIDER_OPENCODE).unwrap().clone();
+        // Rien saisi : repli sur l'environnement.
+        assert_eq!(s.llm.resolve_key(&opencode, &secrets), "cle-du-env");
+        assert!(s.llm.key_from_env(&opencode, &secrets));
+        // Saisie dans l'interface : elle gagne.
+        let mut avec_saisie = opencode.clone();
+        avec_saisie.api_key = "cle-saisie".into();
+        assert_eq!(s.llm.resolve_key(&avec_saisie, &secrets), "cle-saisie");
+        assert!(!s.llm.key_from_env(&avec_saisie, &secrets));
+        // Un fournisseur sans variable d'environnement (DeepSeek) n'a que sa clé saisie.
+        let deepseek = s.llm.provider(PROVIDER_DEEPSEEK).unwrap().clone();
+        assert!(s.llm.resolve_key(&deepseek, &secrets).is_empty());
+    }
+
+    /// Un fournisseur en mode abonnement garde sa méthode d'accès à travers
+    /// l'enregistrement : le choix « plan Claude » est un réglage durable.
+    #[test]
+    fn le_mode_abonnement_survit_a_l_enregistrement() {
+        let dir = std::env::temp_dir().join(format!("jimmy-cfg-auth-{}", std::process::id()));
+        let paths = Paths { data: dir.clone(), app: dir.clone(), dev: false };
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Settings::default();
+        if let Some(p) = s.llm.providers.iter_mut().find(|p| p.id == PROVIDER_ANTHROPIC) {
+            p.auth = AUTH_CLAUDE_PLAN.into();
+        }
+        s.save(&paths).unwrap();
+        let reloaded = Settings::load(&paths);
+        let anthropic = reloaded.llm.provider(PROVIDER_ANTHROPIC).unwrap();
+        assert_eq!(anthropic.auth, AUTH_CLAUDE_PLAN);
+        // Les autres fournisseurs restent en clé API.
+        assert_eq!(reloaded.llm.provider(PROVIDER_OPENCODE).unwrap().auth, AUTH_API_KEY);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Un identifiant de fournisseur inconnu (config éditée à la main, ou
+    /// fournisseur désactivé pendant que le modèle vocal s'en servait) ne doit
+    /// jamais laisser Jimmy sans fournisseur : repli sur le premier activé.
+    #[test]
+    fn un_identifiant_de_fournisseur_inconnu_ne_laisse_jamais_sans_fournisseur() {
+        let mut s = Settings::default();
+        s.llm.provider = "n-existe-pas".into();
+        assert_eq!(s.llm.active_provider().unwrap().id, PROVIDER_OPENCODE);
+        // Désactivé : on retombe aussi.
+        s.llm.provider = PROVIDER_ANTHROPIC.into();
+        for p in &mut s.llm.providers {
+            if p.id == PROVIDER_ANTHROPIC {
+                p.enabled = false;
+            }
+        }
+        assert_eq!(s.llm.active_provider().unwrap().id, PROVIDER_OPENCODE);
+        // Le vocal suit son propre fournisseur, sinon celui du principal.
+        s.llm.voice_provider = PROVIDER_DEEPSEEK.into();
+        assert_eq!(s.llm.voice_active_provider().unwrap().id, PROVIDER_DEEPSEEK);
+        s.llm.voice_provider = String::new();
+        assert_eq!(s.llm.voice_active_provider().unwrap().id, PROVIDER_OPENCODE);
     }
 }

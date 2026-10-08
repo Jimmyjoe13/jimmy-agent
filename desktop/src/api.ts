@@ -109,7 +109,15 @@ export interface Status {
   dev: boolean;
   data_dir: string;
   workspace: string;
-  llm: { model: string; voice_model?: string; base_url: string; has_key: boolean };
+  llm: {
+    model: string;
+    voice_model?: string;
+    provider: string;
+    voice_provider: string;
+    base_url: string;
+    has_key: boolean;
+    providers: ProviderStatus[];
+  };
   tts: {
     enabled: boolean;
     model: string;
@@ -197,11 +205,13 @@ export interface ChatMessage {
 }
 
 export interface ModelInfo {
-  /** Identifiant complet `fournisseur/modèle` (compatibilité onboarding). */
+  /** Identifiant court — celui qu'on enregistre et qu'on envoie au fournisseur. */
   id: string;
-  /** Identifiant à stocker et à envoyer au fournisseur. */
+  /** Alias de `id` pour l'onboarding. */
   model: string;
   full_id: string;
+  /** Fournisseur qui sert ce modèle. */
+  provider: string;
   name: string;
   description: string;
   family: string;
@@ -244,11 +254,52 @@ export interface DoctorReport {
   checks: DoctorCheck[];
 }
 
+/** Un fournisseur de modèles configuré (intégré ou ajouté par l'utilisateur). */
+export interface ProviderConfig {
+  id: string;
+  label: string;
+  base_url: string;
+  /** Toujours vide dans `get_settings` : la clé ne quitte jamais Rust. */
+  api_key: string;
+  /** `"chat" | "responses" | "messages"`, ou vide = automatique. */
+  protocol: string | null;
+  /** `"api-key"` ou `"claude-plan"` (abonnement Claude via Claude Code). */
+  auth: string;
+  x_api_key: boolean;
+  session_header: boolean;
+  enabled: boolean;
+  builtin: boolean;
+}
+
+/** Un fournisseur tel que `status` le décrit (clé masquée). */
+export interface ProviderStatus {
+  id: string;
+  label: string;
+  base_url: string;
+  protocol: string | null;
+  enabled: boolean;
+  builtin: boolean;
+  auth: string;
+  has_key: boolean;
+  /** "interface" | "environnement" | "abonnement" | "aucune". */
+  key_from: string;
+  /** 4 derniers caractères de la clé saisie (null si aucune). */
+  key_hint: string | null;
+  /** Type d'abonnement Claude (« max », « pro »), null sinon. */
+  subscription: string | null;
+}
+
 export interface LlmSettings {
   model: string;
   /** Modèle des échanges vocaux (vide = le modèle principal). */
   voice_model: string;
+  /** @deprecated source de vérité : `providers[].base_url`. */
   base_url: string;
+  /** Fournisseur du modèle principal. */
+  provider: string;
+  /** Fournisseur du modèle vocal (vide = celui du principal). */
+  voice_provider: string;
+  providers: ProviderConfig[];
   temperature: number | null;
   max_tokens: number;
   max_iterations: number;
@@ -424,9 +475,32 @@ export const api = {
   deleteSession: (sessionId: string) => invoke<void>("delete_session", { sessionId }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
-  listModels: (refresh = false) => invoke<ModelInfo[]>("list_models", { refresh }),
-  llmTestModel: (model: string) => invoke<ModelTest>("llm_test_model", { model }),
-  setLlmModel: (role: "main" | "voice", model: string) => invoke<void>("set_llm_model", { role, model }),
+  listModels: (refresh = false, provider?: string) =>
+    invoke<ModelInfo[]>("list_models", { refresh, provider: provider ?? null }),
+  llmTestModel: (model: string, provider?: string) =>
+    invoke<ModelTest>("llm_test_model", { model, provider: provider ?? null }),
+  setLlmModel: (role: "main" | "voice", model: string, provider?: string) =>
+    invoke<void>("set_llm_model", { role, model, provider: provider ?? null }),
+  llmSetProviderKey: (provider: string, key: string) =>
+    invoke<void>("llm_set_provider_key", { provider, key }),
+  llmUpdateProvider: (payload: {
+    provider: string;
+    label: string;
+    /** Argument Tauri de premier niveau : le nom se passe en camelCase. */
+    baseUrl: string;
+    protocol: string | null;
+    /** "api-key" | "claude-plan" | null = inchangé. */
+    auth: string | null;
+    enabled: boolean;
+  }) => invoke<void>("llm_update_provider", payload),
+  llmAddProvider: (payload: {
+    label: string;
+    baseUrl: string;
+    protocol: string | null;
+    apiKey?: string;
+  }) => invoke<string>("llm_add_provider", payload),
+  llmRemoveProvider: (provider: string) => invoke<void>("llm_remove_provider", { provider }),
+  llmCheckProvider: (provider: string) => invoke<number>("llm_check_provider", { provider }),
   completeOnboarding: (payload: {
     userName: string;
     model: string;

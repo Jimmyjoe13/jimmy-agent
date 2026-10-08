@@ -79,7 +79,7 @@ async fn chaque_format_fait_un_tour_avec_outil() {
 async fn le_test_de_modele_passe_dans_chaque_format() {
     let llm = client();
     for model in MODELES {
-        let test = llm.test_model(model).await;
+        let test = llm.test_model(None, model).await;
         assert!(test.ok && test.tools, "{model} : {test:?}");
     }
 }

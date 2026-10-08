@@ -847,7 +847,7 @@ async fn bibliotheque_de_modeles_reelle() {
     let Some(app) = app_reel() else {
         panic!("environnement de test indisponible");
     };
-    let modeles = app.llm.list_models(true).await.expect("liste des modèles");
+    let modeles = app.llm.list_models(None, true).await.expect("liste des modèles");
     let enrichis = modeles.iter().filter(|m| m.in_catalog).count();
     println!("{} modèles, {enrichis} enrichis par le catalogue", modeles.len());
     assert!(modeles.len() >= 20, "la liste est vide ou tronquée : {}", modeles.len());
@@ -858,18 +858,18 @@ async fn bibliotheque_de_modeles_reelle() {
     assert!(courant.context > 0 && !courant.name.is_empty());
 
     // Le modèle courant doit être fonctionnel ; un modèle inexistant doit échouer proprement.
-    let bon = app.llm.test_model(&actuel).await;
+    let bon = app.llm.test_model(None, &actuel).await;
     println!("test {} : ok={} outils={} {} ms / {} ms — {:?}", bon.model, bon.ok, bon.tools, bon.latency_ms, bon.tools_latency_ms, bon.reply);
     assert!(bon.ok && bon.tools && bon.error.is_empty(), "le modèle courant doit fonctionner : {}", bon.error);
 
-    let faux = app.llm.test_model("modele-qui-n-existe-pas").await;
+    let faux = app.llm.test_model(None, "modele-qui-n-existe-pas").await;
     println!("test inexistant : ok={} erreur={}", faux.ok, faux.error);
     assert!(!faux.ok && !faux.error.is_empty());
 
     // Quelques autres modèles : on affiche le verdict, sans l'exiger (le fournisseur varie).
     for id in ["grok-4.6", "muse-spark-1.3-contributor", "glm-5.3-flash", "qwen3.8-flash"] {
         if modeles.iter().any(|m| m.id == id) {
-            let t = app.llm.test_model(id).await;
+            let t = app.llm.test_model(None, id).await;
             println!("test {id} : ok={} outils={} {} ms — {}", t.ok, t.tools, t.latency_ms, t.error);
         }
     }

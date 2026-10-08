@@ -489,17 +489,23 @@ let stepPage = null;
   });
 
   await step("Paramètres : bibliothèque de modèles (liste, test, refus, choix vocal)", async () => {
-    // Le modèle vocal de l'utilisateur, restauré à la fin quoi qu'il arrive.
-    // Avant, la suite le remettait à vide : elle a effacé MiMo deux fois le
-    // 4 octobre (piège 61).
-    const savedVoice = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm.voice_model ?? "");
+    // Le modèle vocal de l'utilisateur et SON fournisseur, restaurés à la fin
+    // quoi qu'il arrive : avant, la suite le remettait à vide (piège 61) et
+    // oublier le fournisseur aurait rebranché le vocal sur le principal.
+    const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm);
+    const savedVoice = saved.voice_model ?? "";
+    const savedVoiceProvider = saved.voice_provider || saved.provider || "opencode";
     await nav("Paramètres");
+    await p.locator(".subtab", { hasText: "LLM" }).click();
     await p.waitForSelector(".model-row", { timeout: 40000 });
     const total = await p.locator(".model-row").count();
-    expect(total >= 20, `${total} modèles listés (attendu ≥ 20)`);
+    // Le fournisseur principal de l'utilisateur peut être Anthropic (abonnement,
+    // ~14 modèles) ou OpenCode Go (~37) : la borne dépend du provider en place.
+    const minModeles = (saved.provider || "opencode") === "anthropic" ? 10 : 20;
+    expect(total >= minModeles, `${total} modèles listés (attendu ≥ ${minModeles})`);
     expect((await p.locator(".model-row.is-main").count()) === 1, "le modèle principal n'est pas repéré dans la liste");
     const ids = await p.$$eval(".model-row code", (els) => els.map((e) => e.textContent ?? ""));
-    expect(!ids.some((id) => id.includes("/")), `identifiants avec fournisseur : ${ids.filter((i) => i.includes("/")).slice(0, 2).join(", ")}`);
+    expect(!ids.some((id) => id.startsWith("opencode-go/")), `identifiants avec fournisseur : ${ids.filter((i) => i.startsWith("opencode-go/")).slice(0, 2).join(", ")}`);
     const main = (await p.locator(".model-current code").first().textContent()) ?? "";
 
     try {
@@ -513,7 +519,7 @@ let stepPage = null;
       const search = p.locator(".model-toolbar input[type=search]");
       await search.fill("glm");
       const filtered = await p.locator(".model-row").count();
-      expect(filtered > 0 && filtered < total, `recherche « glm » : ${filtered} sur ${total}`);
+      expect(filtered < total, `recherche « glm » : ${filtered} sur ${total}`);
       await search.fill("");
 
       // Muse Spark 1.3 n'accepte que le format Responses : muet avant le
@@ -529,16 +535,17 @@ let stepPage = null;
       // Un modèle qui a échoué au test ne peut pas devenir le modèle principal.
       // Plus aucun modèle du compte n'échoue depuis la prise en charge des trois
       // formats : l'échec est simulé dans les résultats gardés, puis restauré.
-      const KEY = "jimmy.llm-tests.v2";
+      const KEY = "jimmy.llm-tests.v3";
       const savedTests = await p.evaluate((key) => localStorage.getItem(key), KEY);
       try {
         await p.evaluate((key) => {
           const tests = JSON.parse(localStorage.getItem(key) ?? "{}");
-          tests["grok-4.6"] = { model: "grok-4.6", ok: false, tools: false, latency_ms: 0, tools_latency_ms: 0, reply: "", error: "HTTP 400 — échec simulé", tested_at: new Date().toISOString(), at: Date.now() };
+          tests["opencode:grok-4.6"] = { model: "grok-4.6", ok: false, tools: false, latency_ms: 0, tools_latency_ms: 0, reply: "", error: "HTTP 400 — échec simulé", tested_at: new Date().toISOString(), at: Date.now() };
           localStorage.setItem(key, JSON.stringify(tests));
         }, KEY);
         await nav("Historique");
         await nav("Paramètres");
+        await p.locator(".subtab", { hasText: "LLM" }).click();
         await p.waitForSelector(".model-row", { timeout: 40000 });
         const grok = p.locator(".model-row", { hasText: "grok-4.6" });
         if ((await grok.count()) > 0) {
@@ -579,12 +586,63 @@ let stepPage = null;
       }
     } finally {
       // La suite ne doit jamais laisser un modèle vocal modifié dans ta
-      // configuration : on remet exactement celui qui était choisi.
-      await p.evaluate((model) => window.__TAURI_INTERNALS__.invoke("set_llm_model", { role: "voice", model }), savedVoice);
-      const restored = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm.voice_model ?? "");
-      if (restored !== savedVoice) throw new Error(`modèle vocal non restauré : « ${restored} » au lieu de « ${savedVoice} »`);
+      // configuration : on remet exactement le modèle ET le fournisseur relevés
+      // au début.
+      await p.evaluate(([model, provider]) => window.__TAURI_INTERNALS__.invoke("set_llm_model", { role: "voice", model, provider: model ? provider : null }), [savedVoice, savedVoiceProvider]);
+      const restored = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm);
+      if ((restored.voice_model ?? "") !== savedVoice) throw new Error(`modèle vocal non restauré : « ${restored.voice_model} » au lieu de « ${savedVoice} »`);
+      if (savedVoice && (restored.voice_provider || restored.provider) !== savedVoiceProvider) {
+        throw new Error(`fournisseur vocal non restauré : « ${restored.voice_provider} » au lieu de « ${savedVoiceProvider} »`);
+      }
     }
     return `${total} modèles, principal « ${main} » testé`;
+  });
+
+  await step("Paramètres : fournisseurs (liste, clé masquée, ajout et retrait d'un personnalisé)", async () => {
+    await nav("Paramètres");
+    await p.locator(".subtab", { hasText: "LLM" }).click();
+    await p.waitForSelector(".provider-row", { timeout: 20000 });
+    const rows = p.locator(".card", { hasText: "Fournisseurs" }).locator(".provider-row:not(.provider-add)");
+    const before = await rows.count();
+    expect(before >= 5, `${before} fournisseurs listés (attendu ≥ 5)`);
+    // Les cinq intégrés existent, Claude est en format Messages. Attention :
+    // « Anthropic » ne doit pas se chercher en texte libre — le libellé d'un
+    // option des sélecteurs le contient, et tous les rows « ont ce texte ».
+    const claude = rows.filter({ has: p.locator("code", { hasText: "anthropic" }) });
+    expect((await claude.count()) === 1, "Anthropic absent de la liste");
+    expect((await claude.locator("select.provider-protocol").inputValue()) === "messages", "Anthropic pas en format messages");
+    // La méthode d'accès existe : clé API ou abonnement Claude (session Claude Code).
+    const auth = claude.locator("select.provider-auth");
+    expect((await auth.count()) === 1, "sélecteur de méthode d'accès absent chez Anthropic");
+    const authOptions = await auth.locator("option").allTextContents();
+    expect(authOptions.some((o) => o.includes("Abonnement Claude")), `méthode d'abonnement absente : ${authOptions.join(", ")}`);
+    // Le fournisseur du modèle principal porte le badge « principal ».
+    expect((await rows.filter({ has: p.locator(".badge.main", { hasText: "principal" }) }).count()) >= 1, "aucun fournisseur marqué principal");
+    // La clé ne remonte jamais : aucun champ mot de passe ne contient de valeur.
+    const filled = await p.$$eval(".provider-row .provider-key", (els) => els.filter((e) => e.value.length > 0).length);
+    expect(filled === 0, `${filled} champs clé contiennent une valeur (jamais renvoyée par Rust)`);
+
+    // Ajout d'un fournisseur personnalisé (sans test réseau), puis retrait.
+    const add = p.locator(".provider-add");
+    await add.locator("input").nth(0).fill("Suite UI Locale");
+    await add.locator("input").nth(1).fill("http://127.0.0.1:1234/v1");
+    await add.locator("button", { hasText: "Ajouter" }).click();
+    await p.waitForFunction(
+      () => [...document.querySelectorAll(".provider-row:not(.provider-add)")].some((r) => r.textContent.includes("Suite UI Locale")),
+      null,
+      { timeout: 20000 },
+    );
+    const after = await rows.count();
+    expect(after === before + 1, `après ajout : ${after} (attendu ${before + 1})`);
+    const custom = rows.filter({ hasText: "Suite UI Locale" });
+    await custom.locator("button", { hasText: "Supprimer" }).click();
+    await p.waitForSelector(".provider-row", { state: "attached", timeout: 20000 });
+    await p.waitForFunction(
+      (n) => document.querySelectorAll(".provider-row:not(.provider-add)").length === n,
+      before,
+      { timeout: 20000 },
+    );
+    return `${before} fournisseurs, ajout/retrait OK`;
   });
 
   await step("Voix : bibliothèque de voix (liste, recherche, choix)", async () => {

@@ -264,13 +264,30 @@ pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> s
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> std::result::Result<Settings, String> {
-    Ok(state.app.settings())
+    let mut settings = state.app.settings();
+    // Les clés d'API ne quittent jamais le Rust : l'interface les voit via
+    // `status` (has_key, key_from, key_hint) et les saisit par la commande
+    // dédiée `llm_set_provider_key`.
+    for provider in &mut settings.llm.providers {
+        provider.api_key = String::new();
+    }
+    Ok(settings)
 }
 
 #[tauri::command]
 pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> std::result::Result<(), String> {
     let app = state.app.clone();
     let before = app.settings();
+    // Une clé vide venant de l'interface veut dire « inchangée » (`get_settings`
+    // masque les clés) : seul `llm_set_provider_key` pose ou retire une clé.
+    let mut settings = settings;
+    for provider in &mut settings.llm.providers {
+        if provider.api_key.trim().is_empty() {
+            if let Some(old) = before.llm.providers.iter().find(|p| p.id == provider.id) {
+                provider.api_key = old.api_key.clone();
+            }
+        }
+    }
     app.save_settings(settings.clone()).map_err(err)?;
     // Les réglages d'avatar s'appliquent à chaud : sans cela, changer la
     // qualité ou le skin dans Paramètres n'avait d'effet qu'au relancement.
@@ -283,14 +300,20 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> st
     Ok(())
 }
 
-/// Modèles du compte OpenCode Go, enrichis par le catalogue public.
-/// `refresh` : ignore le cache d'une heure.
+/// Modèles d'un fournisseur (principal par défaut), enrichis par le catalogue
+/// public pour OpenCode Go. `refresh` : ignore le cache d'une heure.
 #[tauri::command]
 pub async fn list_models(
     state: State<'_, AppState>,
+    provider: Option<String>,
     refresh: Option<bool>,
 ) -> std::result::Result<Vec<serde_json::Value>, String> {
-    let models = state.app.llm.list_models(refresh.unwrap_or(false)).await.map_err(err)?;
+    let models = state
+        .app
+        .llm
+        .list_models(provider.as_deref().filter(|p| !p.is_empty()), refresh.unwrap_or(false))
+        .await
+        .map_err(err)?;
     Ok(models
         .into_iter()
         .map(|m| {
@@ -311,23 +334,27 @@ pub async fn list_models(
 pub async fn llm_test_model(
     state: State<'_, AppState>,
     model: String,
+    provider: Option<String>,
 ) -> std::result::Result<jimmy_agent::providers::llm::ModelTest, String> {
     let model = model.trim().to_string();
     if model.is_empty() {
         return Err("modèle vide".into());
     }
-    Ok(state.app.llm.test_model(&model).await)
+    Ok(state.app.llm.test_model(provider.as_deref().filter(|p| !p.is_empty()), &model).await)
 }
 
 /// Choisit le modèle principal (`main`) ou le modèle vocal (`voice`, vide = le
-/// même que le principal). S'applique immédiatement, sans redémarrage.
+/// même que le principal), et le fournisseur qui le sert. S'applique
+/// immédiatement, sans redémarrage.
 #[tauri::command]
 pub async fn set_llm_model(
     state: State<'_, AppState>,
     role: String,
     model: String,
+    provider: Option<String>,
 ) -> std::result::Result<(), String> {
     let model = model.trim().to_string();
+    let provider = provider.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
     let app = state.app.clone();
     let mut settings = app.settings();
     match role.as_str() {
@@ -336,11 +363,171 @@ pub async fn set_llm_model(
                 return Err("le modèle principal ne peut pas être vide".into());
             }
             settings.llm.model = model;
+            if let Some(p) = provider {
+                settings.llm.provider = p;
+            }
         }
-        "voice" => settings.llm.voice_model = model,
+        "voice" => {
+            settings.llm.voice_model = model.clone();
+            // Plus de modèle vocal : le fournisseur vocal suit le principal.
+            settings.llm.voice_provider = if model.is_empty() { String::new() } else { provider.unwrap_or(settings.llm.provider.clone()) };
+        }
         other => return Err(format!("rôle inconnu : {other}")),
     }
     app.save_settings(settings).map_err(err)
+}
+
+// ── Fournisseurs LLM (Paramètres → LLM) ──────────────────────────────────────
+
+/// Pose (`key` non vide) ou retire (`key` vide) la clé saisie d'un fournisseur.
+#[tauri::command]
+pub async fn llm_set_provider_key(
+    state: State<'_, AppState>,
+    provider: String,
+    key: String,
+) -> std::result::Result<(), String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    let Some(p) = settings.llm.providers.iter_mut().find(|p| p.id == provider) else {
+        return Err(format!("fournisseur inconnu : {provider}"));
+    };
+    p.api_key = key.trim().to_string();
+    app.save_settings(settings).map_err(err)
+}
+
+/// Modifie un fournisseur (URL, format, méthode d'accès, activé, libellé). Les
+/// clés ne passent pas par ici (voir `llm_set_provider_key`).
+#[tauri::command]
+pub async fn llm_update_provider(
+    state: State<'_, AppState>,
+    provider: String,
+    label: String,
+    base_url: String,
+    protocol: Option<String>,
+    auth: Option<String>,
+    enabled: bool,
+) -> std::result::Result<(), String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    let Some(p) = settings.llm.providers.iter_mut().find(|p| p.id == provider) else {
+        return Err(format!("fournisseur inconnu : {provider}"));
+    };
+    if !label.trim().is_empty() {
+        p.label = label.trim().to_string();
+    }
+    if !base_url.trim().is_empty() {
+        p.base_url = base_url.trim().to_string();
+    }
+    p.protocol = protocol.map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "auto");
+    if let Some(auth) = auth.as_deref().filter(|a| !a.trim().is_empty()) {
+        match auth {
+            jimmy_agent::config::AUTH_API_KEY => p.auth = auth.into(),
+            // L'abonnement Claude est une session Claude Code, pas un secret
+            // générique : seul le fournisseur Anthropic sait s'en servir.
+            jimmy_agent::config::AUTH_CLAUDE_PLAN if p.id == jimmy_agent::config::PROVIDER_ANTHROPIC => p.auth = auth.into(),
+            jimmy_agent::config::AUTH_CLAUDE_PLAN => {
+                return Err("l'abonnement Claude ne s'applique qu'au fournisseur Anthropic".into())
+            }
+            other => return Err(format!("méthode d'accès inconnue : {other}")),
+        }
+    }
+    p.enabled = enabled;
+    // Un fournisseur sur lequel un modèle est choisi ne peut pas être désactivé :
+    // le routing retomberait sur un autre fournisseur et enverrait des modèles
+    // qui n'existent pas chez lui.
+    let still_referenced = (settings.llm.provider == p.id && !p.enabled)
+        || (settings.llm.voice_provider == p.id && !p.enabled);
+    if still_referenced {
+        p.enabled = true;
+        return Err(format!("« {} » sert un modèle choisi : retire le modèle avant de le désactiver", p.label));
+    }
+    app.save_settings(settings).map_err(err)
+}
+
+/// Ajoute un fournisseur personnalisé (LM Studio local, API d'entreprise…).
+#[tauri::command]
+pub async fn llm_add_provider(
+    state: State<'_, AppState>,
+    label: String,
+    base_url: String,
+    protocol: Option<String>,
+    api_key: Option<String>,
+) -> std::result::Result<String, String> {
+    let label = label.trim().to_string();
+    let base_url = base_url.trim().to_string();
+    if label.is_empty() || base_url.is_empty() {
+        return Err("nom et URL de base sont requis".into());
+    }
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return Err("l'URL doit commencer par http:// ou https://".into());
+    }
+    let protocol = protocol.map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "auto");
+    if let Some(p) = protocol.as_deref() {
+        if !["chat", "responses", "messages"].contains(&p) {
+            return Err(format!("format inconnu : {p}"));
+        }
+    }
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    if settings.llm.providers.iter().any(|p| p.label.to_lowercase() == label.to_lowercase()) {
+        return Err(format!("un fournisseur « {label} » existe déjà"));
+    }
+    // Identifiant stable : custom-N après le plus grand existant.
+    let n = settings
+        .llm
+        .providers
+        .iter()
+        .filter_map(|p| p.id.strip_prefix("custom-").and_then(|s| s.parse::<u32>().ok()))
+        .max()
+        .map_or(1, |m| m + 1);
+    let id = format!("custom-{n}");
+    settings.llm.providers.push(jimmy_agent::config::ProviderConfig {
+        id: id.clone(),
+        label,
+        base_url,
+        api_key: api_key.unwrap_or_default().trim().to_string(),
+        protocol,
+        x_api_key: false,
+        auth: jimmy_agent::config::AUTH_API_KEY.into(),
+        session_header: false,
+        enabled: true,
+        builtin: false,
+    });
+    app.save_settings(settings).map_err(err)?;
+    Ok(id)
+}
+
+/// Retire un fournisseur personnalisé. Les intégrés ne se suppriment pas : on
+/// les désactive.
+#[tauri::command]
+pub async fn llm_remove_provider(
+    state: State<'_, AppState>,
+    provider: String,
+) -> std::result::Result<(), String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    let Some(found) = settings.llm.providers.iter().find(|p| p.id == provider) else {
+        return Err(format!("fournisseur inconnu : {provider}"));
+    };
+    if found.builtin {
+        return Err("un fournisseur intégré se désactive, ne se supprime pas".into());
+    }
+    if settings.llm.provider == provider || settings.llm.voice_provider == provider {
+        return Err("ce fournisseur sert un modèle choisi : choisis-en un autre d'abord".into());
+    }
+    settings.llm.providers.retain(|p| p.id != provider);
+    app.save_settings(settings).map_err(err)
+}
+
+/// Vérifie la connexion d'un fournisseur : liste ses modèles accessibles.
+/// Retourne le nombre (et la liste est de nouveau fraîche pour l'interface).
+#[tauri::command]
+pub async fn llm_check_provider(
+    state: State<'_, AppState>,
+    provider: String,
+) -> std::result::Result<usize, String> {
+    let models = state.app.llm.list_models(Some(&provider), true).await.map_err(err)?;
+    Ok(models.len())
 }
 
 #[tauri::command]

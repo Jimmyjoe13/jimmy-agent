@@ -1,8 +1,10 @@
-/** Vue Paramètres : modèle, voix, permissions, démarrage, diagnostic. */
+/** Vue Paramètres : deux sous-onglets — Général (voix, écoute, avatar…) et
+ *  LLM (fournisseurs, modèles, réglages du modèle de langage). */
 import { api, type Settings, type StartupMode } from "../api";
 import { QUALITY_LABEL, attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { modelsPanel } from "./models";
+import { providersPanel } from "./providers";
 
 export function settingsView(ctx: AppContext): HTMLElement {
   const container = h("section", { class: "view" });
@@ -17,6 +19,8 @@ export function settingsView(ctx: AppContext): HTMLElement {
     min: "0",
     max: "2",
   }) as HTMLInputElement;
+  const maxTokensInput = h("input", { class: "field", type: "number", min: "1024", step: "1024" }) as HTMLInputElement;
+  const maxIterationsInput = h("input", { class: "field", type: "number", min: "1", max: "100" }) as HTMLInputElement;
   const workspaceInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const sttSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const commandSelect = h("select", { class: "field" }) as HTMLSelectElement;
@@ -41,6 +45,8 @@ export function settingsView(ctx: AppContext): HTMLElement {
     modelInput.value = settings.llm.model;
     voiceModelInput.value = settings.llm.voice_model ?? "";
     temperatureInput.value = String(settings.llm.temperature ?? "");
+    maxTokensInput.value = String(settings.llm.max_tokens);
+    maxIterationsInput.value = String(settings.llm.max_iterations);
     workspaceInput.value = settings.workspace;
 
 
@@ -108,16 +114,25 @@ export function settingsView(ctx: AppContext): HTMLElement {
   // Construit une seule fois : la liste, les tests et le tri survivent aux
   // re-rendus de la page (retour depuis les permissions, rechargement).
   const modelsCard = modelsPanel(ctx, {
-    onApplied: (role, model) => {
+    onApplied: (role, model, provider) => {
       // Le choix est déjà enregistré côté Rust : les champs et la copie locale
       // suivent, sinon « Enregistrer » remettrait l'ancien modèle.
       if (role === "main") {
         modelInput.value = model;
         if (settings) settings.llm.model = model;
+        if (settings && provider) settings.llm.provider = provider;
       } else {
         voiceModelInput.value = model;
         if (settings) settings.llm.voice_model = model;
+        if (settings) settings.llm.voice_provider = provider ?? "";
       }
+    },
+  });
+  const providersCard = providersPanel(ctx, {
+    // Fournisseur ajouté, retiré ou modifié : la copie locale de la vue doit
+    // rester à jour, sinon « Enregistrer » écraserait le changement.
+    onChanged: () => {
+      void load();
     },
   });
 
@@ -126,9 +141,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.llm.model = modelInput.value.trim() || settings.llm.model;
     settings.llm.voice_model = voiceModelInput.value.trim();
     settings.llm.temperature = temperatureInput.value === "" ? null : Number(temperatureInput.value);
+    settings.llm.max_tokens = Math.max(1024, Number(maxTokensInput.value) || settings.llm.max_tokens);
+    settings.llm.max_iterations = Math.min(100, Math.max(1, Number(maxIterationsInput.value) || settings.llm.max_iterations));
     settings.workspace = workspaceInput.value.trim();
-    // `settings.tts.voice` et `library` se choisissent dans l'onglet Voix
-    // (enregistrés aussitôt côté Rust) : rien à relire dans ce formulaire.
+    // Les fournisseurs se règlent dans leur carte (enregistrements immédiats) :
+    // on repart de la copie fraîche de Rust pour ne rien écraser d'un formulaire
+    // resté ouvert pendant ce temps. Les clés masquées sont restaurées côté
+    // Rust (une clé vide = inchangée).
+    const fresh = await guard(() => api.getSettings(), "fournisseurs");
+    if (fresh) settings.llm.providers = fresh.llm.providers;
     settings.stt.model = sttSelect.value;
     settings.stt.command_model = commandSelect.value;
     settings.stt.language = languageSelect.value;
@@ -162,6 +183,27 @@ export function settingsView(ctx: AppContext): HTMLElement {
     await persist();
   }
 
+  // Deux sous-onglets, comme Skills → Serveurs MCP : tout ce qui touche au
+  // modèle de langage (fournisseurs, modèles, budget) est dans « LLM ».
+  const generalPane = h("div", {});
+  const llmPane = h("div", {});
+  let tab: "general" | "llm" = "general";
+  const tabButtons = {
+    general: h("button", { class: "subtab", role: "tab", onclick: () => select("general") }, "Général"),
+    llm: h("button", { class: "subtab", role: "tab", onclick: () => select("llm") }, "LLM"),
+  };
+
+  function select(next: "general" | "llm") {
+    tab = next;
+    for (const [key, button] of Object.entries(tabButtons)) {
+      const active = key === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    }
+    generalPane.hidden = tab !== "general";
+    llmPane.hidden = tab !== "llm";
+  }
+
   function render() {
     mount(
       container,
@@ -176,15 +218,16 @@ export function settingsView(ctx: AppContext): HTMLElement {
           h("button", { class: "primary", onclick: () => void persist() }, "Enregistrer"),
         ),
       ),
+      h("div", { class: "subtabs", role: "tablist" }, tabButtons.general, tabButtons.llm),
+      generalPane,
+      llmPane,
+    );
+    mount(
+      generalPane,
       card(
-        "Modèle de langage",
-        h("p", { class: "note" }, "Fournisseur : OpenCode Go (API compatible OpenAI)."),
-        field("Modèle principal", modelInput, "space-bunny-free, mimo-v2.6-pro, gpt-6-luna…"),
-        field("Modèle vocal (vide = le même)", voiceModelInput, "un modèle plus rapide pour les échanges à voix haute"),
-        field("Température (vide = réglage du fournisseur)", temperatureInput),
+        "Dossier de travail",
         field("Dossier de travail par défaut", workspaceInput, ctx.status.workspace),
       ),
-      modelsCard,
       card(
         "Voix de sortie",
         h("p", { class: "note" }, "Synthèse Fish Audio via OpenRouter. L'audio ne transite que par le réseau vers ce service."),
@@ -294,6 +337,30 @@ export function settingsView(ctx: AppContext): HTMLElement {
         ),
       ),
     );
+    mount(
+      llmPane,
+      providersCard,
+      card(
+        "Modèle de langage",
+        h("p", { class: "note" }, "Le modèle principal sert au Chat et aux tâches ; le modèle vocal aux échanges à voix haute. Ils peuvent venir de fournisseurs différents — choisis-les dans la bibliothèque, ou tape l'identifiant ici."),
+        field("Modèle principal", modelInput, "space-bunny-free, mimo-v2.6-pro, deepseek-chat…"),
+        field("Modèle vocal (vide = le même)", voiceModelInput, "un modèle plus rapide pour les échanges à voix haute"),
+        field("Température (vide = réglage du fournisseur)", temperatureInput),
+      ),
+      modelsCard,
+      card(
+        "Budget de l'agent",
+        h("p", { class: "note" }, "Limites d'une seule demande. Trop bas, Jimmy s'arrête avant d'avoir fini ; trop haut, une dérive coûte cher."),
+        field("Jetons maximum par réponse", maxTokensInput),
+        h(
+          "p",
+          { class: "note" },
+          "Le raisonnement caché d'un modèle compte dans ce budget : 16 384 est le minimum confortable (mesuré le 4 octobre).",
+        ),
+        field("Allers-retours maximum avec les outils", maxIterationsInput),
+      ),
+    );
+    select(tab);
   }
 
   async function openPermissions() {

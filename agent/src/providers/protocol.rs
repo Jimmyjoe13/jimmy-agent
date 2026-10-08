@@ -28,7 +28,7 @@ use super::llm::{LlmReply, Usage};
 use crate::core::types::{Message, Role, ToolCall, ToolSpec};
 use crate::error::{Error, Result};
 
-const SERVICE: &str = "OpenCode Go";
+const SERVICE: &str = "modèle";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -40,6 +40,17 @@ pub enum Protocol {
 impl Protocol {
     /// Tous les formats, dans l'ordre d'essai quand le catalogue ne dit rien.
     pub const ALL: [Protocol; 3] = [Protocol::Chat, Protocol::Responses, Protocol::Messages];
+
+    /// Format d'après le réglage du fournisseur (`"chat"`, `"responses"`,
+    /// `"messages"`) ; `None` pour toute autre valeur (= automatique).
+    pub fn from_label(label: &str) -> Option<Protocol> {
+        match label {
+            "chat" => Some(Protocol::Chat),
+            "responses" => Some(Protocol::Responses),
+            "messages" => Some(Protocol::Messages),
+            _ => None,
+        }
+    }
 
     /// Format attendu d'après le paquet SDK du catalogue (`provider.npm`).
     pub fn from_npm(npm: Option<&str>) -> Protocol {

@@ -7,6 +7,7 @@
 //! et le remplacement se fait dans [`crate::App`] sans toucher à la logique.
 
 pub mod avatar;
+pub mod claude_plan;
 pub mod llm;
 pub mod protocol;
 pub mod stt;

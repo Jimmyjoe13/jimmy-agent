@@ -336,7 +336,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       title: "Quel modèle pour réfléchir ?",
       body: [
         h("p", {}, "Le modèle qui me fait écrire le code, lire les fichiers et raisonner."),
-        h("p", { class: "note" }, status.llm.has_key ? "Clé OpenCode Go détectée." : "Aucune clé détectée : renseigne OPENCODE_API_KEY dans le fichier .env."),
+        h("p", { class: "note" }, status.llm.has_key ? "Clé OpenCode Go détectée." : "Aucune clé détectée : OPENCODE_API_KEY dans le .env, ou saisie dans Paramètres → LLM."),
         h("div", { class: "row" }, modelSelect),
       ],
     },

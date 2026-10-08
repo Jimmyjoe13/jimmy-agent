@@ -274,6 +274,9 @@ impl App {
             &secrets.opencode_api_key,
             &format!("{}-{}", settings.llm.session_prefix, session_id),
         )?);
+        // Multi-fournisseurs : la liste et le routing modèle → fournisseur
+        // viennent de la configuration, pas des deux arguments ci-dessus.
+        llm.update_providers(&settings.llm, &secrets);
         let tts = Tts::new(providers::tts::TtsProvider::FishAudio)?;
         let avatar = AvatarClient::new(&settings.avatar.host, settings.avatar.port)?;
 
@@ -662,7 +665,12 @@ impl App {
 
     pub fn save_settings(&self, settings: Settings) -> Result<()> {
         *self.settings.write().map_err(|_| Error::Config("verrou poisoned".into()))? = settings;
-        self.settings().save(&self.paths)
+        let result = self.settings().save(&self.paths);
+        // Les fournisseurs et le routing suivent l'enregistrement : un choix de
+        // modèle ou de clé dans l'interface s'applique sans redémarrage.
+        let current = self.settings();
+        self.llm.update_providers(&current.llm, &self.secrets);
+        result
     }
 
     pub fn permissions(&self) -> Arc<RwLock<Permissions>> {
@@ -1180,6 +1188,49 @@ impl App {
     /// État affiché dans l'interface : ce qui est prêt, ce qui manque.
     pub fn status(&self) -> serde_json::Value {
         let settings = self.settings();
+        // Les fournisseurs n'exposent jamais leur clé : seulement « saisie /
+        // environnement / absente » et les 4 derniers caractères de la clé
+        // saisie, pour la reconnaître. (Même règle que les serveurs MCP.)
+        let providers: Vec<serde_json::Value> = settings
+            .llm
+            .providers
+            .iter()
+            .map(|p| {
+                let plan = p.auth == config::AUTH_CLAUDE_PLAN;
+                // Abonnement Claude : l'credential est la session Claude Code,
+                // jamais une clé — on expose seulement son état.
+                let has_key = if plan {
+                    self.llm.provider_has_key(&p.id)
+                } else {
+                    !settings.llm.resolve_key(p, &self.secrets).trim().is_empty()
+                };
+                let from = if plan {
+                    if has_key { "abonnement" } else { "aucune" }
+                } else if !p.api_key.trim().is_empty() {
+                    "interface"
+                } else if has_key {
+                    "environnement"
+                } else {
+                    "aucune"
+                };
+                let hint = if plan {
+                    None
+                } else {
+                    let last4 = p.api_key.chars().rev().take(4).collect::<String>();
+                    (!last4.is_empty()).then(|| last4.chars().rev().collect::<String>())
+                };
+                let subscription = plan
+                    .then(|| providers::claude_plan::credentials_path())
+                    .flatten()
+                    .and_then(|path| providers::claude_plan::subscription_type(&path));
+                serde_json::json!({
+                    "id": p.id, "label": p.label, "base_url": p.base_url,
+                    "protocol": p.protocol, "enabled": p.enabled, "builtin": p.builtin,
+                    "auth": p.auth, "has_key": has_key, "key_from": from,
+                    "key_hint": hint, "subscription": subscription,
+                })
+            })
+            .collect();
         serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
             "dev": self.paths.dev,
@@ -1188,8 +1239,11 @@ impl App {
             "llm": {
                 "model": settings.llm.model,
                 "voice_model": settings.llm.voice_model,
-                "base_url": settings.llm.base_url,
-                "has_key": !self.secrets.opencode_api_key.is_empty(),
+                "provider": settings.llm.provider,
+                "voice_provider": settings.llm.voice_provider,
+                "base_url": settings.llm.active_provider().map(|p| p.base_url.clone()),
+                "has_key": self.llm.has_key(),
+                "providers": providers,
             },
             "tts": {
                 "enabled": settings.tts.enabled,

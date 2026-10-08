@@ -1,14 +1,15 @@
 /**
- * Bibliothèque de modèles de langage (OpenCode Go).
+ * Bibliothèque de modèles de langage, par fournisseur.
  *
- * La liste vient du compte (ce que le fournisseur accepte réellement),
- * enrichie par le catalogue public. Chaque modèle se **teste** dans les
- * conditions de Jimmy — une requête simple, puis avec un outil — et un modèle
- * qui échoue ne peut pas être choisi : « fonctionnel » veut dire vérifié.
+ * La liste vient du compte du fournisseur sélectionné (ce qu'il accepte
+ * réellement), enrichie par le catalogue public pour OpenCode Go. Chaque
+ * modèle se **teste** dans les conditions de Jimmy — une requête simple, puis
+ * avec un outil — et un modèle qui échoue ne peut pas être choisi :
+ * « fonctionnel » veut dire vérifié.
  *
- * Les résultats de test sont gardés dans le navigateur (par machine) : la
- * latence du fournisseur varie de 2 s à 25 s selon la charge, un test est une
- * indication datée, pas une garantie.
+ * Les résultats de test sont gardés dans le navigateur, par fournisseur et par
+ * machine (`fournisseur:modèle`) : la latence varie selon la charge, un test
+ * est une indication datée, pas une garantie.
  */
 import { api, type ModelInfo, type ModelTest } from "../api";
 import { attempt, h, mount, toast } from "../ui";
@@ -18,10 +19,10 @@ type Role = "main" | "voice";
 type Stored = ModelTest & { at: number };
 type Sort = "recommended" | "name" | "speed" | "context" | "recent";
 
-// v2 (6 octobre) : Jimmy parle désormais les trois formats d'API du
-// fournisseur ; les échecs gardés en v1 (« ModelProtocolUnsupported » de Muse
-// Spark, GPT, Grok, Qwen 3.8…) sont oubliés plutôt que de griser ces modèles.
-const STORAGE_KEY = "jimmy.llm-tests.v2";
+// v3 (8 octobre) : multi-fournisseurs — les clés de test deviennent
+// `fournisseur:modèle`, un même nom de modèle n'a rien à voir d'un
+// fournisseur à l'autre. v2 : les trois formats d'API (6 octobre).
+const STORAGE_KEY = "jimmy.llm-tests.v3";
 /** Un test plus vieux que cela est refait avant de choisir le modèle. */
 const FRESH_MS = 24 * 3600 * 1000;
 const CONCURRENCY = 3;
@@ -69,7 +70,7 @@ function ago(at: number): string {
 
 export interface ModelsPanelHooks {
   /** Appelé quand un modèle est appliqué : la vue Paramètres met ses champs à jour. */
-  onApplied: (role: Role, model: string) => void;
+  onApplied: (role: Role, model: string, provider?: string) => void;
 }
 
 export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLElement {
@@ -82,14 +83,15 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
   let batchCancelled = false;
   let batchRunning = false;
 
-  let mainModel = ctx.status.llm.model;
-  let voiceModel = ctx.status.llm.voice_model ?? "";
+  // Fournisseur affiché : celui du modèle principal au départ.
+  let providerId = ctx.status.llm.provider || "opencode";
 
   const current = h("div", { class: "model-current" });
   const list = h("div", { class: "model-list", "aria-live": "polite" });
   const progress = h("span", { class: "note" }, "");
   const rows = new Map<string, HTMLElement>();
 
+  const providerSelect = h("select", { class: "field", "aria-label": "Fournisseur" }) as HTMLSelectElement;
   const searchInput = h("input", {
     class: "field",
     type: "search",
@@ -116,7 +118,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     refreshButton.setAttribute("disabled", "");
     mount(list, h("div", { class: "empty" }, h("p", {}, "Chargement des modèles du compte…")));
     try {
-      models = await api.listModels(refresh);
+      models = await api.listModels(refresh, providerId);
     } catch (error) {
       models = [];
       mount(
@@ -124,7 +126,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
         h(
           "div",
           { class: "empty" },
-          h("p", {}, "Impossible de récupérer la liste des modèles."),
+          h("p", {}, "Impossible de récupérer la liste des modèles de ce fournisseur."),
           h("p", { class: "hint" }, String(error)),
         ),
       );
@@ -136,15 +138,36 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     renderList();
   }
 
+  /** Les fournisseurs activés, pour le sélecteur. */
+  function enabledProviders() {
+    return (ctx.status.llm.providers ?? []).filter((p) => p.enabled);
+  }
+
+  function renderProviderSelect() {
+    mount(providerSelect);
+    for (const provider of enabledProviders()) {
+      providerSelect.append(h("option", { value: provider.id }, provider.label));
+    }
+    if (![...providerSelect.options].some((o) => o.value === providerId)) {
+      providerId = providerSelect.options[0]?.value ?? "opencode";
+    }
+    providerSelect.value = providerId;
+  }
+
   // ── Test d'un modèle ───────────────────────────────────────────────────────
 
+  /** Clé des résultats : un « deepseek-chat » testé chez DeepSeek ne dit rien
+   *  de son homonyme chez OpenRouter. */
+  const testKey = (id: string) => `${providerId}:${id}`;
+
   async function runTest(id: string): Promise<Stored | null> {
-    if (testing.has(id)) return null;
-    testing.add(id);
+    const key = testKey(id);
+    if (testing.has(key)) return null;
+    testing.add(key);
     updateRow(id);
     let result: Stored;
     try {
-      const test = await api.llmTestModel(id);
+      const test = await api.llmTestModel(id, providerId);
       result = { ...test, at: Date.now() };
     } catch (error) {
       result = {
@@ -159,9 +182,9 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
         at: Date.now(),
       };
     }
-    tests[id] = result;
+    tests[key] = result;
     saveTests(tests);
-    testing.delete(id);
+    testing.delete(key);
     updateRow(id);
     return result;
   }
@@ -193,7 +216,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     batchRunning = false;
     batchButton.textContent = "Tester tous les modèles";
     batchButton.className = "primary";
-    const working = models.filter((m) => tests[m.id]?.ok && tests[m.id]?.tools).length;
+    const working = models.filter((m) => tests[testKey(m.id)]?.ok && tests[testKey(m.id)]?.tools).length;
     progress.textContent = batchCancelled
       ? `Arrêté — ${done} testé(s)`
       : `Terminé : ${working} modèle(s) fonctionnel(s) sur ${models.length}`;
@@ -204,7 +227,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
   // ── Choix du modèle ────────────────────────────────────────────────────────
 
   async function choose(role: Role, id: string) {
-    let result: Stored | undefined = tests[id];
+    const key = testKey(id);
+    let result: Stored | undefined = tests[key];
     // Un modèle n'est appliqué que s'il a été vu fonctionner récemment.
     if (!result || Date.now() - result.at > FRESH_MS) {
       toast(`Test de « ${id} » avant de l'appliquer…`);
@@ -220,10 +244,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
       );
       if (!accepted) return;
     }
-    if (!(await attempt(() => api.setLlmModel(role, id), "choix du modèle"))) return;
-    if (role === "main") mainModel = id;
-    else voiceModel = id;
-    hooks.onApplied(role, id);
+    if (!(await attempt(() => api.setLlmModel(role, id, providerId), "choix du modèle"))) return;
+    hooks.onApplied(role, id, providerId);
     await ctx.refreshStatus();
     renderCurrent();
     for (const model of models) updateRow(model.id);
@@ -232,8 +254,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
 
   async function clearVoice() {
     if (!(await attempt(() => api.setLlmModel("voice", ""), "modèle vocal"))) return;
-    voiceModel = "";
-    hooks.onApplied("voice", "");
+    hooks.onApplied("voice", "", "");
     await ctx.refreshStatus();
     renderCurrent();
     for (const model of models) updateRow(model.id);
@@ -242,7 +263,13 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
 
   // ── Affichage ──────────────────────────────────────────────────────────────
 
+  function providerLabel(id: string): string {
+    return ctx.status.llm.providers?.find((p) => p.id === id)?.label ?? id;
+  }
+
   function renderCurrent() {
+    const main = ctx.status.llm.model;
+    const voice = ctx.status.llm.voice_model ?? "";
     const name = (id: string) => models.find((m) => m.id === id)?.name;
     mount(
       current,
@@ -250,25 +277,28 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
         "div",
         {},
         h("span", { class: "model-role" }, "Principal"),
-        h("code", {}, mainModel),
-        name(mainModel) ? ` · ${name(mainModel)}` : "",
+        h("code", {}, main),
+        name(main) ? ` · ${name(main)}` : "",
+        ` — ${providerLabel(ctx.status.llm.provider)}`,
       ),
       h(
         "div",
         {},
         h("span", { class: "model-role" }, "Vocal"),
-        voiceModel ? h("code", {}, voiceModel) : h("em", {}, "même modèle que le principal"),
-        voiceModel && name(voiceModel) ? ` · ${name(voiceModel)}` : "",
-        voiceModel ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, "Retirer") : null,
+        voice ? h("code", {}, voice) : h("em", {}, "même modèle que le principal"),
+        voice && name(voice) ? ` · ${name(voice)}` : "",
+        voice ? ` — ${providerLabel(ctx.status.llm.voice_provider || ctx.status.llm.provider)}` : "",
+        voice ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, "Retirer") : null,
       ),
     );
   }
 
   function status(model: ModelInfo): HTMLElement {
-    if (testing.has(model.id)) {
+    const key = testKey(model.id);
+    if (testing.has(key)) {
       return h("span", { class: "model-test testing" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " test");
     }
-    const test = tests[model.id];
+    const test = tests[key];
     if (!test) return h("span", { class: "model-test none", title: "Pas encore testé" }, "non testé");
     const when = ago(test.at);
     if (test.ok && test.tools) {
@@ -292,16 +322,16 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
   }
 
   function buildRow(model: ModelInfo): HTMLElement {
-    const isMain = model.id === mainModel;
-    const isVoice = model.id === voiceModel;
-    const test = tests[model.id];
+    const isMain = model.id === ctx.status.llm.model && ctx.status.llm.provider === providerId;
+    const isVoice = model.id === (ctx.status.llm.voice_model ?? "") && providerId === (ctx.status.llm.voice_provider || ctx.status.llm.provider);
+    const test = tests[testKey(model.id)];
     const broken = Boolean(test && !test.ok);
-    const busy = testing.has(model.id);
+    const busy = testing.has(testKey(model.id));
     const capabilities: HTMLElement[] = [];
     if (model.reasoning) capabilities.push(badge("raisonne", "Réfléchit avant de répondre : plus lent mais plus juste"));
     if (model.vision) capabilities.push(badge("vision", "Comprend les images"));
     if (model.tool_call === false) capabilities.push(badge("sans outils", "Le catalogue indique qu'il n'appelle pas d'outils", "warn"));
-    if (!model.in_catalog) capabilities.push(badge("hors catalogue", "Le compte l'autorise mais le catalogue public ne le décrit pas"));
+    if (!model.in_catalog) capabilities.push(badge("hors catalogue", "Le fournisseur l'autorise mais sa liste ne le décrit pas"));
 
     return h(
       "div",
@@ -374,7 +404,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
       models.filter((m) => {
         if (needle && !`${m.name} ${m.id} ${m.family} ${m.description}`.toLowerCase().includes(needle)) return false;
         if (onlyWorking) {
-          const t = tests[m.id];
+          const t = tests[testKey(m.id)];
           return Boolean(t?.ok && t.tools);
         }
         return true;
@@ -383,9 +413,11 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
   }
 
   function rank(m: ModelInfo): number {
-    if (m.id === mainModel) return 0;
-    if (m.id === voiceModel) return 1;
-    const t = tests[m.id];
+    const isMainNow = m.id === ctx.status.llm.model && ctx.status.llm.provider === providerId;
+    const isVoiceNow = m.id === (ctx.status.llm.voice_model ?? "") && providerId === (ctx.status.llm.voice_provider || ctx.status.llm.provider);
+    if (isMainNow) return 0;
+    if (isVoiceNow) return 1;
+    const t = tests[testKey(m.id)];
     if (t?.ok && t.tools) return 2;
     if (!t) return 3;
     return t.ok ? 4 : 5;
@@ -403,16 +435,16 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
         return copy.sort((a, b) => b.released.localeCompare(a.released) || byName(a, b));
       case "speed":
         return copy.sort((a, b) => {
-          const ta = tests[a.id]?.ok ? tests[a.id].latency_ms : Infinity;
-          const tb = tests[b.id]?.ok ? tests[b.id].latency_ms : Infinity;
+          const ta = tests[testKey(a.id)]?.ok ? tests[testKey(a.id)].latency_ms : Infinity;
+          const tb = tests[testKey(b.id)]?.ok ? tests[testKey(b.id)].latency_ms : Infinity;
           return ta - tb || byName(a, b);
         });
       default:
         return copy.sort((a, b) => {
           const delta = rank(a) - rank(b);
           if (delta) return delta;
-          const ta = tests[a.id]?.ok ? tests[a.id].latency_ms : Infinity;
-          const tb = tests[b.id]?.ok ? tests[b.id].latency_ms : Infinity;
+          const ta = tests[testKey(a.id)]?.ok ? tests[testKey(a.id)].latency_ms : Infinity;
+          const tb = tests[testKey(b.id)]?.ok ? tests[testKey(b.id)].latency_ms : Infinity;
           return ta - tb || byName(a, b);
         });
     }
@@ -441,6 +473,10 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     }
   }
 
+  providerSelect.addEventListener("change", () => {
+    providerId = providerSelect.value;
+    void load();
+  });
   searchInput.addEventListener("input", () => {
     query = searchInput.value;
     renderList();
@@ -453,23 +489,30 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks): HTMLEleme
     onlyWorking = workingBox.checked;
     renderList();
   });
+  // La carte Fournisseurs a ajouté, retiré ou activé un fournisseur : le
+  // sélecteur doit suivre (écouteur retiré à la sortie de la vue).
+  const onProvidersChanged = () => renderProviderSelect();
+  window.addEventListener("jimmy-providers-changed", onProvidersChanged);
+  ctx.onCleanup(() => window.removeEventListener("jimmy-providers-changed", onProvidersChanged));
 
+  renderProviderSelect();
   renderCurrent();
   void load();
 
   return h(
     "section",
     { class: "card models-panel" },
-    h("h3", {}, "Modèles de langage — bibliothèque OpenCode Go"),
+    h("h3", {}, "Modèles de langage — bibliothèque"),
     h(
       "p",
       { class: "note" },
-      "La liste vient de ton compte. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
+      "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
     ),
     current,
     h(
       "div",
       { class: "model-toolbar" },
+      providerSelect,
       searchInput,
       sortSelect,
       h("label", { class: "toggle" }, workingBox, h("span", {}, "Seulement ceux qui fonctionnent")),
