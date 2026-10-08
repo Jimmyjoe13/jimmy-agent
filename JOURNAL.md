@@ -1239,6 +1239,45 @@ champ synchronisé, retiré, config restaurée — vert, 0 erreur JS.
 Vérifié : 194 unitaires (0 avertissement), `tsc` strict, release code 0,
 **suite 30/30**, 0 erreur JS. Jimmy relancé proprement, une instance, sans debug.
 
+## 3undécies. Session 12 — 8 octobre, soir : mises à jour et secrets au journal
+
+Demande née d'un second Jimmy : l'utilisateur l'a installé au travail
+(depuis le zip GitHub) et veut y tester les notifications — corriger un
+bug ici, pousser, voir la bulle là-bas, `/update` pour appliquer. Plan
+validé avant le code, en cinq lots (le mécanisme d'abord : le Jimmy du
+travail ne peut pas notifier avant de l'avoir reçu).
+
+**Constat d'audit.** `check_update` existait côté Rust mais rien ne
+l'appelait (famille des pièges 11/22), et elle comparait `CARGO_PKG_VERSION`
+(0.1.0, figé) : inutilisable. La bulle (`say()`), la boucle périodique
+(`review_loop`) et `is_busy()` existaient déjà : le mécanisme les assemble.
+
+**Livré.** Détection SHA (`update.rs`, `git` bornés), boucle 5 min/30 min,
+état `update_state.json` ; bulle si inactif + session « Mise à jour » une
+fois par SHA + pastille latérale (clic vers l'Historique) ; `/update`
+déterministe (pull ff-only, build en tâche de fond avec lapin, restart
+après binaire vérifié, « STOP » sûr). Le zip sans `.git` a imposé une
+migration manuelle vers un clone au travail (doc « Deuxième PC ») et révélé
+que l'installeur NSIS livre Jimmy sans avatar ni voix (piège 93).
+
+**Véhicule.** Le masquage des secrets au journal (« Ensuite » 3) : test de
+reproduction d'abord (clé `aggregate` réelle qui fuit), `mask_json` /
+`mask_text` sans dépendance, appliqué aux arguments, aux extraits bruts et
+à la carte d'autorisation. Vert puis rouge puis vert, comme la règle
+l'exige. Reste à l'utilisateur : régénérer les deux clés exposées.
+
+Vérifié : 206 tests unitaires, 0 avertissement ; TypeScript strict ;
+suite 30/31, 0 erreur JS — la pastille est prouvée (capture
+`suite-badge.png`, clic vers l'Historique). L'échec unique, deux fois de
+suite, est le parcours tâche de fond : la question « cerise » elle-même a
+dépassé 45 s (modèle lent ce soir) et s'est détachée — le sélecteur
+`:not(.from-background)` ne pouvait pas la trouver (journal 20:26-20:28).
+Même famille que les minuteries déjà consignées, sans lien avec ce
+chantier (aucun chemin modifié ne touche le détachement). À re-mesurer
+fournisseur rapide.
+Non vérifié en réel : la boucle bout-en-bout entre les deux PC
+(premier push à venir) et l'installeur NSIS de bout en bout.
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 9 octobre (soir)** : l'abonnement Claude sert Jimmy comme moteur

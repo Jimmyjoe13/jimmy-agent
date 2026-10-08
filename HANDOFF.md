@@ -1395,6 +1395,28 @@ retour, testés unitairement et en réel. Le bloc de facturation reste
 indispensable (sans lui, premium refusé). Anthropic peut durcir : liste noire
 plus large ou facturation validée — surveiller les 400/429 au journal.
 
+  **93. L'installeur NSIS livre Jimmy sans avatar ni voix.** `tauri.conf.json`
+  (`bundle.targets = ["nsis"]`) n'embarque aucune ressource : ni `godot/`,
+  ni whisper, ni skills. En mode installé, `paths.app` vaut
+  `%APPDATA%\Jimmy` : `godot_project()` n'y existe pas, l'avatar ne démarre
+  pas, et les serveurs vocaux n'ont aucun binaire à lancer. L'installeur ne
+  remplace donc pas `install.ps1` sur un second PC — il installe une coquille
+  (interface + agent). Documenté dans le README (section Installation),
+  non vérifié de bout en bout. Le jour où l'installeur devient la voie
+  normale, il faudra y mettre les ressources (ou les télécharger au premier
+  lancement, comme `install.ps1`).
+
+  **94. `/update` exige un clone git : ni zip ni installeur.** La détection
+  compare `git rev-parse HEAD` (dans `paths.app`) à `git ls-remote origin
+  HEAD`. Sans `.git`, les deux rendent `None` et la vérification **se tait**
+  (pas d'alerte, pas d'erreur) : un Jimmy issu du zip GitHub ne saura jamais
+  qu'il est périmé. La migration zip → clone est manuelle (README « Deuxième
+  PC ») ; `/update` sur un non-clone répond la procédure au lieu d'échouer
+  en silence. Et `/update` ne part jamais sans binaire vérifié : si le build
+  échoue, le Jimmy actuel continue (le redémarrage est programmé seulement
+  après `target/release/jimmy.exe` plus récent que le début du build).
+
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée
@@ -1549,6 +1571,43 @@ dans l'interface, fournisseur personnalisé, refonte de la bibliothèque.
   et le bloc de facturation (piège 92). Choix du moteur laissé à l'utilisateur
   via le sous-onglet LLM.
 
+### Décisions prises (8 octobre 2026 — mises à jour et secrets au journal)
+
+Demande de l'utilisateur : tester les notifications de mise à jour entre
+deux PC (corriger ici, pousser, voir la bulle au travail, `/update`
+là-bas), documenter l'installeur, et corriger la fuite des secrets au
+journal comme véhicule du test.
+
+- **Détection par SHA git, pas par version** : `CARGO_PKG_VERSION`
+  (0.1.0) ne bouge jamais d'un commit à l'autre ; on compare
+  `git rev-parse HEAD` à `git ls-remote origin HEAD` (`agent/src/update.rs`,
+  `git` bornés 10 s / 30 s, `kill_on_drop`). Sans `.git` : silence, pas
+  d'erreur (piège 94).
+- **Boucle `update_loop`** (5 min puis 30 min, modèle `review_loop`),
+  état dans `data/update_state.json` (`pending` + `notified`) : une alerte
+  survit au redémarrage.
+- **Notification en deux canaux** : bulle `say()` à chaque cycle **si
+  inactif** (`App::is_busy` : ni tâche au premier plan, ni synthèse —
+  sinon le rappel écrase la bulle lue) + session « Mise à jour » écrite
+  **une fois par SHA** + pastille persistante dans la barre latérale
+  (`status().update.pending`, clic vers l'Historique, rafraîchie toutes
+  les 15 s).
+- **`/update` déterministe** (intercepté avant le modèle dans `chat`) :
+  `pull --ff-only` (refus explicite si dépôt sale), recompilation
+  `build.ps1 -Release` en tâche suivie (détachement, lapin, `Progress`
+  toutes les 60 s pour le filet 3 min), redémarrage **seulement si le
+  binaire est plus récent que le début du build**. Le redémarrage attend
+  le calme (`schedule_restart` : ni tâche ni parole, capuchon 5 min) puis
+  relance `launcher.ps1` détaché et quitte ; un « STOP » annule tout et
+  ne redémarre pas (`pending` revérifié avant de quitter).
+- **Secrets masqués avant journal et affichage** (`sensitive::mask_json`
+  / `mask_text`, sans dépendance) : arguments d'outils (`agent.rs`),
+  extraits bruts `learn.rs` / `capture.rs`, et carte d'autorisation
+  (`describe`). Motifs : clés nommées (`KEY=`, `:`, `Bearer`, `?...=`),
+  valeur au mot suivant (`X-API-Key: <clé>`), `sk-…`, identifiants d'URL.
+  Reste à l'utilisateur : **régénérer les deux clés exposées**
+  (`aggregate`, SynaptiQ) — aucun code ne le fait à sa place.
+
 ### Ensuite (au 7 octobre, par priorité)
 
 1. **Essais réels** de ce qui n'est vérifié que par tests : navigateur
@@ -1562,10 +1621,7 @@ dans l'interface, fournisseur personnalisé, refonte de la bibliothèque.
    passaient. Rejouer la demande (`agent/tests/replay.rs`) pour savoir s'il
    refuse par principe d'écrire un `.env` : si oui, c'est le parcours qu'il
    faut adapter (cible moins « secrète »), pas le garde-fou.
-3. **Secrets dans le journal** : les arguments d'outils sont journalisés tels
-   quels ; la clé d'`aggregate` et, depuis la reconfiguration d'Antigravity du
-   7 octobre, une clé SynaptiQ y sont en clair. Masquer `KEY=`, `TOKEN=`,
-   `SECRET=`, `sk-…` avant journalisation, puis régénérer ces deux clés.
+3. **Secrets dans le journal (code fait le 8 octobre, reste l'humain)** : les arguments d'outils et extraits bruts sont masqués (`sensitive::mask_json` / `mask_text`). Reste à **régénérer les deux clés déjà exposées** (`aggregate`, SynaptiQ) : les anciennes restent lisibles dans l'historique du journal.
 4. **Lapin et chien de garde** : si Godot redémarre pendant une tâche de fond,
    le lapin ne revient qu'à la tâche suivante ; renvoyer `/helper working`
    au redémarrage si `App::tasks` a une tâche de fond.
@@ -1617,7 +1673,9 @@ dans l'interface, fournisseur personnalisé, refonte de la bibliothèque.
 
 - Export Godot (~1 Go de gabarits) pour que l'installateur n'installe pas le
    moteur complet.
-- Mise à jour automatique, quand il existera une distribution.
+- Mise à jour automatique : V1 livrée le 8 octobre pour les clones git
+  (détection SHA, pastille, `/update` avec rebuild + restart) ; reste la
+  distribution par installeur (piège 93), quand il existera une distribution.
 
 ---
 

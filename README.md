@@ -209,6 +209,42 @@ cd desktop; npm install; cd ..
 - `models/ggml-small-q5_1.bin` — modèle plus précis, français impeccable (181 Mo)
 - `models/ggml-silero-v6.2.0.bin` — détection de la parole
 
+### Installeur Windows (NSIS)
+
+```powershell
+.\scripts\build.ps1 -Release -Bundles
+```
+
+Produit un installeur dans `target/release/bundle/nsis/` (mode
+utilisateur courant : pas de droits administrateur). Limites connues,
+lues dans `tauri.conf.json` et `paths.rs` — **non vérifié de bout en
+bout** :
+
+- l'installeur n'embarque ni `godot/`, ni whisper, ni les skills :
+  l'avatar et la voix y sont indisponibles ;
+- les données partent dans `%APPDATA%\Jimmy` (base, config et logs
+  frais, sans vos réglages) ;
+- **pas de mise à jour automatique** depuis un installeur : `/update`
+  exige un clone git (voir ci-dessous).
+
+Pour un Jimmy complet (avatar, voix, mises à jour), passez par les
+sources (`git clone` + `install.ps1`).
+
+### Deuxième PC (depuis les sources)
+
+```powershell
+git clone https://github.com/Jimmyjoe13/jimmy-agent.git
+cd jimmy-agent
+.\scripts\install.ps1
+```
+
+Puis : clés dans l'interface (Paramètres → LLM) ou `.env` recréé
+depuis `.env.example`, et `.\scripts\shortcut.ps1` pour le raccourci.
+**Ne recopiez pas `data/`** (base, journaux, extraits audio et chemins
+de l'autre machine) ; les modèles whisper sont retéléchargés par
+`install.ps1`. SynaptiQ reste optionnel (tunnel SSH vers le serveur,
+voir HANDOFF) : sans lui, Jimmy travaille avec le vault seul.
+
 ---
 
 ## Lancement
@@ -412,10 +448,12 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
    intermédiaire qui ne nomme pas le fichier y échappe. Ce n'est pas un bac à
    sable.
 
-4. **Mise à jour automatique non branchée.** Il n'existe pas de source de
-   distribution publique pour un prototype personnel. La commande
-   `check_update` est écrite et branchée sur `JIMMY_UPDATE_ENDPOINT` ; sans
-   cette variable, elle le dit clairement plutôt que de faire semblant.
+4. **Mise à jour depuis un installeur.** Le mécanisme de mise à jour
+   (pastille + `/update` : `pull` fast-forward, recompilation,
+   redémarrage) exige un clone git : ni le zip GitHub ni l'installeur
+   NSIS ne peuvent s'auto-mettre à jour. Sans `.git`, la vérification
+   se tait. L'ancienne commande `check_update` (source
+   `JIMMY_UPDATE_ENDPOINT`, jamais configurée ni appelée) ne sert plus.
 
 5. **Pas d'export Godot.** L'avatar tourne depuis le projet en mode
    développement. L'export (gabarits ~1 Go) n'a pas été fait : le prototype
