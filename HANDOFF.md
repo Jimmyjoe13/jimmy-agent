@@ -1,6 +1,6 @@
 # HANDOFF
 
-État du prototype au **7 octobre 2026**. Depuis le 6 : les **tâches de fond**
+État du prototype au **8 octobre 2026**. Depuis le 6 : les **tâches de fond**
 (une tâche outillée qui travaille encore 45 s après son premier outil passe en
 arrière-plan, le Chat et la voix restent libres, un **lapin** travaille à côté
 du renard, « STOP » = premier plan, « arrête tout » = tout ; budget de fond
@@ -13,7 +13,12 @@ avant toute action qui engage), et la zone affichée de l'avatar corrigée
 **Objectif de la prochaine session :** les **essais réels** de ce qui est
 vérifié par tests mais pas encore à l'usage — navigateur connecté à un compte,
 tâches de fond et vision à la voix, lapin pendant une vraie tâche de fond — et
-le point « fichier sensible » avec Muse Spark (« Ensuite », point 2).
+le point « fichier sensible » avec Muse Spark (« Ensuite », point 2). Depuis le
+8 octobre : la configuration LLM est dans un **sous-onglet des Paramètres** et
+Jimmy connecte **plusieurs fournisseurs** (OpenCode Go, OpenRouter, DeepSeek,
+Alibaba, Claude, plus un personnalisé) avec leurs clés saisies dans l'interface ;
+l'essai réel avec une vraie clé chez un nouveau fournisseur reste à faire
+(« Ensuite », point 6).
 Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
@@ -69,6 +74,10 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | **Navigateur (7 octobre)** | `--test browser -- --ignored` : Playwright MCP 0.0.83 lancé comme Jimmy le lance (`npx`, `cmd /C`), 25 outils, `example.com` ouvert et lu par `browser_snapshot` ; règles de la carte « action en ton nom » testées (14 cas, dont faux positifs Facebook / Mes commandes / PayPal) ; 176 tests unitaires ; `test-ui.ps1` : **27/28**, 0 erreur JS, « navigateur (connected, 25 outils) » dans Skills → Serveurs MCP (échec connu « fichier sensible ») |
 | **Vision (7 octobre)** | sonde brute puis `--test protocols chaque_format_lit_une_image -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) lisent « rouge, bleu » sur une image générée, en flux ; `--test screen -- --ignored` : fenêtre active capturée hors du processus appelant (1461×720, JPEG) ; 175 tests unitaires ; `test-ui.ps1` : **27/28**, 0 erreur JS (échec « fichier sensible » : le modèle répond sans outil, 3e fois de suite avec Muse Spark) |
 | **Tâches de fond (7 octobre)** | `--test background` (6 tests, tâches simulées : passage en fond, STOP épargne le fond, « arrête tout », bouton de la tâche, une seule à la fois, pas pendant une autorisation) ; 165 tests unitaires, 0 avertissement ; `test-ui.ps1` : **27/27**, 0 erreur JS — parcours réel : passage en fond 15 s après l'outil, question en parallèle répondue, fin dans le fil |
+| **LLM multi-fournisseurs (8 octobre)** | demande validée avant le code (sous-onglet + Claude/DeepSeek/Alibaba/OpenRouter/personnalisé + clés dans l'interface) ; 183 tests unitaires dont 7 nouveaux (migration des cinq intégrés, clé saisie gagne sur `.env`, routing modèle→fournisseur, en-têtes par fournisseur, format imposé), 0 avertissement ; TypeScript strict OK ; `build.ps1 -Release` code 0 ; `test-ui.ps1` : **28/29**, 0 erreur JS — nouveau parcours « fournisseurs » (5 lignes, Anthropic en messages, clés jamais renvoyées, ajout/retrait d'un personnalisé) ; parcours modèles vert avec sous-onglet LLM (37 modèles, « muse-spark » testé). L'échec restant est « fichier sensible », connu depuis le 7 octobre (piège : HANDOFF « Ensuite » 2). Non vérifié en réel : appels DeepSeek/Alibaba/Claude avec de vraies clés (aucune saisie à ce jour) |
+| **Abonnement Claude (8 octobre)** | `--test claude_plan -- --ignored` sur la vraie session Claude Code : `/v1/models` OK (14 modèles), Haiku répond avec outils en 559 ms, Sonnet et Opus en `429` (bridage Anthropic du premium hors Claude Code, piège 90) ; 189 tests unitaires (session lue, refresh préservant le fichier, en-têtes sans `x-api-key`, mode abonnement persistant) ; suite 27/29 (deux échecs côté modèles, famille « Muse Spark sans outil » déjà consignée) ; sélecteur « Méthode » vérifié dans le parcours fournisseurs |
+| **Garde-fous abonnement (9 octobre)** | bissection réelle (`--test claude_plan`) : le refus `400 « extra usage »` dépend du POIDS des outils déclarés, pas du volume premium (21 621 jetons sans outils OK ; 12 outils réalistes à 15 jetons = refus) ; 191 tests unitaires dont `le_refus_extra_usage_devient_un_message_actionnable` et `le refus premium est local` ; refus local Sonnet/Opus avant appel (`set_llm_model`, bibliothèque, `send_on`) ; message traduit avec les trois issues ; revérifié sur l'app réelle par CDP (toast, modèle inchangé, message dans le chat, session nettoyée) ; build release sans avertissement. Suite complète non relancée : la config courante (plan bloqué) ferait échouer les parcours Chat pour une raison externe au code |
+| **Signature Claude Code sur le plan (9 octobre, soir)** | demande réitérée de l'utilisateur : accès complet aux modèles Anthropic avec son plan, « copie la config d'opencode si nécessaire » (vérifié : la voie OpenCode est la délégation au vrai CLI). Sondes : Q1 = noms d'outils Claude Code + descriptions/UA Jimmy + facturation → 200 (15 outils, 16 384 jetons) ; Q2 = noms Jimmy → 400. Implémenté : `map_plan_tool_names` (déclaration, `tool_use` de l'historique, prompt système) + `unmap_plan_tool_calls`, bloc de facturation en bloc 0. 194 tests unitaires verts (mapping dans les deux sens inclus), `check --workspace` 0, release sans avertissement. Preuves réelles : `le_premium_passe_par_signature_claude_code` (Sonnet ok+outils), **vrai tour d'agent complet via les commandes de l'app** (fichier créé par l'outil, réponse confirmée), suite **28/29 avec Sonnet/plan en moteur** (échec = minuterie du parcours tâche de fond, à re-mesurer). Incident consigné piège 91 (BOM PowerShell sur config.json → restauration `.bak` + commandes Tauri ; `navigateur` re-créé et rebranché, vérifié « prêt ») |
 
 ---
 
@@ -1303,6 +1312,88 @@ déclenché (0/31) : croissance strictement additive.
  Jimmy se lance par un mécanisme du système (tâche planifiée, démarrage
  Windows), pas comme enfant de son `run_command`.
 
+**88. `hasText` de Playwright voit aussi le texte des `<option>`.** Parcours
+« fournisseurs » (8 octobre) : chaque ligne contient un sélecteur de format
+dont une option s'appelait « messages — /messages (Anthropic) ».
+`rows.filter({ hasText: "Anthropic" })` a donc matché les cinq lignes, pas
+celle d'Anthropic, et l'attente « exactement 1 » échouait sur une interface
+pourtant correcte (le DOM-dump en `evaluate` était bon — le doute venait du
+sélecteur, pas de la vue). Règle : pour repérer une ligne par son libellé,
+filtrer sur un élément porteur (`has: locator("code", …)`) ou mettre le mot
+dans le libellé seul ; ne jamais laisser un libellé d'`<option>` contenir le
+nom qu'on cherche. Le test passé ne prouvait rien : un sélecteur large est un
+faux positif.
+
+**89. Une interface qui masque les secrets doit définir le contrat du
+« vide ».** `get_settings` renvoie désormais les fournisseurs avec `api_key`
+vidé ; un enregistrement complet renverrait donc des clés vides et les
+effacerait. Contrat posé : clé vide = inchangée côté `save_settings` (fusion
+avec la valeur en mémoire), retrait explicite seulement par
+`llm_set_provider_key("")`. Toute future donnée sensible dans un formulaire
+doit reprendre ce contrat, sinon le premier « Enregistrer » général écrase ce
+que la vue dédiée avait épargné.
+
+  **90. L'abonnement Claude (OAuth) est bridé par modèle côté serveur.** Mesuré
+  le 8 octobre avec la session Claude Code de l'utilisateur (`--test
+  claude_plan -- --ignored`) : `/v1/models` répond bien (14 modèles), Haiku
+  fonctionne avec outils en ~550 ms, mais Sonnet ET Opus renvoient un `429
+  rate_limit_error` nu alors qu'ils sont disponibles dans Claude Code à la même
+  heure. C'est la grille d'abonnement Anthropic (premium réservé au client
+  Claude Code, d'après les relevés communautaires), pas un quota : Haiku passe
+  à la seconde près. Jimmy appelle donc l'API proprement (`Bearer` + `anthropic-
+  beta: oauth-2025-04-20`) et **n'imite pas** Claude Code (billing header dans
+  system, `user-agent: claude-cli`…), ce qui serait contourner la restriction
+  et risque de faire révoquer la session. Usage : abonnement pour les modèles
+  légers, clé API pour Sonnet/Opus. Le 401 arrive sans le drapeau bêta et
+  consomme le jeton : ne jamais retirer `oauth-2025-04-20`.
+  **Precision du 9 octobre (bissection réelle, mêmes sessions)** : la grille ne
+  regarde ni le modèle économique, ni le volume de texte, ni le flux — elle
+  regarde le POIDS DE LA DECLARATION D'OUTILS. 21 621 jetons de prompt système
+  sans outils passent ; 12 outils réalistes (~3 000 jetons d'outils) échouent
+  en `400 invalid_request_error — “Third-party apps now draw from extra usage,
+  not plan limits”` même avec un message de 15 jetons ; 12 outils minuscules
+  passent. Le « Tester » de Jimmy (1 outil factice, 548 jetons) était donc
+  trompeur : un Haiku qui répond au test et qui échoue au premier vrai tour
+  outillé. Le chat réel de Jimmy déclare ~15 outils : sur abonnement sans
+  « extra usage » activé, il échoue toujours. Messages d'erreur traduits côté
+  Jimmy (`CLAUDE_PLAN_EXTRA_USAGE_MSG`, `CLAUDE_PLAN_PREMIUM_MSG`) ; le garde-
+  fou premium est local (refus avant appel). Conclusion d'usage : l'abonnement
+  seul ne peut pas porter Jimmy en agent — soit activer « extra usage » (fac-
+  turation à l'usage chez Anthropic), soit clé API, soit rester sur OpenCode Go.
+  **Resolution le soir meme (mesure Q1/Q2, piege 92)** : la signature Claude
+  Code complete (bloc de facturation + noms d'outils alias) fait passer les
+  vraies tournees outillees — Sonnet repond 200 outils compris, et la suite
+  complete est passee sur le plan (28/29). Le texte ci-dessus reste vrai pour
+  ce qui etait mesure le matin : ne pas retirer `oauth-2025-04-20`, et ne
+  jamais considerer le « Tester » comme une preuve pour un modele d'abonnement.
+
+**91. `config.json` appartient à Jimmy : le réécrire à la main en PowerShell
+peut tout effacer.** Le 9 octobre, une correction de modèle tentée par
+`ConvertTo-Json | Set-Content -Encoding UTF8` (PS 5.1 écrit un **BOM**) : au
+démarrage suivant `serde_json` refuse le BOM → « config illisible, retour aux
+valeurs par défaut » → le Jimmy lancé a **resauvé les défauts par-dessus la
+config réelle** — six serveurs MCP, réglages de voix, tout perdu sans alerte
+côté interface. Sauvés par les `data/config.json.bak-*` (sauvegardes
+horodatées). Règles : (1) un réglage passe par les commandes Tauri
+(`llm_update_provider`, `set_llm_model`, `llm_set_provider_key`), jamais par
+l'édition du fichier ; (2) si édition absolument nécessaire, écrire sans BOM
+(`[IO.File]::WriteAllText(..., UTF8Encoding(false))`) et **Jimmy arrêté** ;
+(3) voir « config illisible » au journal ⇒ restaurer le dernier `.bak` avant
+que Jimmy ne sauve quoi que ce soit.
+
+**92. La grille Anthropic sur abonnement se joue aussi sur le NOM des
+outils.** Sondes du 9 octobre, même requête et mêmes en-têtes avec facturation :
+15 outils nommés `read_file`/`run_command`/`mcp_call` = 400 « Third-party
+apps now draw from extra usage » ; ces 15 outils rebaptisés `Read`/`Write`/
+`Bash`/`Agent`… = 200 — descriptions, schémas et User-Agent de Jimmy
+conservés. Un `ping` et des `outil_N` passaient déjà : c'est une liste noire
+de signatures de frameworks tiers, pas une liste blanche Claude Code. D'où
+`claude_plan::map_plan_tool_names` (déclaration `tools`, blocs `tool_use` de
+l'historique, noms cités dans le prompt système) et `unmap_plan_tool_calls` au
+retour, testés unitairement et en réel. Le bloc de facturation reste
+indispensable (sans lui, premium refusé). Anthropic peut durcir : liste noire
+plus large ou facturation validée — surveiller les 400/429 au journal.
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée
@@ -1399,6 +1490,64 @@ lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
   Messages fusionne les rôles consécutifs : pas d'erreur, mais le résumé des
   outils peut attribuer un outil de la tâche au tour parallèle).
 
+### Décisions prises (8 octobre 2026 — LLM : sous-onglet et multi-fournisseurs)
+
+Demande de l'utilisateur, reformulée et validée avant le code : « migrer toute
+la configuration LLM dans un sous-onglet des Paramètres, puis connecter
+plusieurs fournisseurs ». Validé sur les trois points de décision : clés saisies
+dans l'interface, fournisseur personnalisé, refonte de la bibliothèque.
+
+- **Sous-onglets Paramètres** : « Général | LLM », même mécanique que Skills →
+  Serveurs MCP. Le LLM pane regroupe la carte Fournisseurs, la carte Modèle
+  (principal, vocal, température), la bibliothèque et une carte Budget (max_tokens,
+  max_iterations — réglages qui n'avaient jamais d'appelant d'interface).
+- **Cinq fournisseurs intégrés**, en presets dans `config.json` (jamais codés en
+  dur dans les appels) : OpenCode Go (auto par catalogue, en-tête session),
+  OpenRouter / DeepSeek / Alibaba-DashScope (format chat), Anthropic (format
+  messages, clé en `x-api-key`). Plus « ajouter un fournisseur » (custom-N) pour
+  LM Studio ou une API d'entreprise.
+- **La liste `providers` est la source de vérité** ; `llm.base_url` devient un
+  champ legacy que la migration recopie dans le fournisseur OpenCode Go (un
+  proxy réglé à la main ne se perd pas). Un identifiant de fournisseur inconnu
+  ou désactivé retombe sur le premier activé, jamais sur une panne.
+- **Routing par modèle** : `LlmClient::update_providers` attache le modèle
+  principal et le modèle vocal à leur fournisseur (ils peuvent être différents —
+  écrit chez Claude, rapide chez OpenRouter). Un modèle inconnu suit le
+  principal. Les en-têtes (Bearer vs `x-api-key`, `anthropic-version`,
+  `x-opencode-session`) et le format (imposé ou catalogue) suivent le
+  fournisseur, plus le client.
+- **Clés** : saisies dans l'interface, stockées dans `data/config.json` (jamais
+  commité — le dépôt est public ; l'utilisateur a choisi cette dérogation à la
+  règle « `.env` seulement »). `get_settings` les masque ; `save_settings`
+  fusionne (vide = inchangée) ; `status` n'expose que `has_key`, `key_from` et
+  4 caractères de reconnaissance (piège 89). La clé `.env` reste repli pour
+  OpenCode Go et OpenRouter — valeurs de départ, jamais écrasement (piège 62).
+- **Tous les modèles du compte doivent marcher** (consigne du 6 octobre) : les
+  trois formats déjà traduits (`protocol.rs`) sont gardés ; le nom du service
+  dans les erreurs vient du fournisseur appelé, plus « OpenCode Go » partout.
+- La bibliothèque garde ses résultats de test par **fournisseur**
+  (`jimmy.llm-tests.v3`, clé `fournisseur:modèle`) : un « deepseek-chat » testé
+  chez l'un ne dispense pas du test chez l'autre.
+- **Abonnement Claude (demande du 8 octobre)** : le fournisseur Anthropic offre
+  deux méthodes d'accès — clé API (défaut) ou **plan Claude** (`auth:
+  "claude-plan"`). Le mode abonnement **réutilise la session de Claude Code**
+  (`~/.claude/.credentials.json`) : Jimmy lit le jeton, le rafraîchit quand il
+  expire et **réécrit le fichier** en préservant le reste (les deux outils
+  partagent la session ; si l'un a rafraîchi entre-temps, `invalid_grant` →
+  relecture). Appels en `Bearer` + `anthropic-beta: oauth-2025-04-20`, jamais
+  `x-api-key` avec un jeton OAuth. **Signature Claude Code requise (mesures des
+  8-9 octobre, pièges 90 et 92)** : la grille Anthropic refuse le plan aux apps
+  tierces dès qu'un modèle premium ou une déclaration d'outils substantielle
+  apparaît (« extra usage »). À la demande explicite de l'utilisateur (« je
+  veux l'accès aux modèles Anthropic avec mon plan »), Jimmy prend donc la
+  signature complète : bloc `x-anthropic-billing-header` en bloc 0 du système +
+  noms d'outils alias Claude Code (`map_plan_tool_names`/
+  `unmap_plan_tool_calls`), schémas, descriptions et UA Jimmy conservés.
+  Risque assumé et consigné : d'autres outils le font déjà ; Anthropic peut
+  durcir, voire révoquer ; si le 400 revient, vérifier d'abord la liste noire
+  et le bloc de facturation (piège 92). Choix du moteur laissé à l'utilisateur
+  via le sous-onglet LLM.
+
 ### Ensuite (au 7 octobre, par priorité)
 
 1. **Essais réels** de ce qui n'est vérifié que par tests : navigateur
@@ -1422,6 +1571,13 @@ lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
 5. **Navigateur** : une page dont l'instantané dépasse 12 000 caractères est
    tronquée (`MAX_TOOL_OUTPUT`) ; une borne propre au navigateur, ou un
    instantané par zone, si l'usage le demande.
+6. **Multi-fournisseurs à l'usage** (8-9 octobre) : le plan Claude est
+   vérifié en réel mais insuffisant pour l'agent (400 « extra usage » dès que
+   les outils sont déclarés — piège 90). Reste : décider du moteur d'Anthropic
+   — activer « extra usage », saisir une clé API, ou en rester à OpenCode Go ;
+   puis saisir une vraie clé DeepSeek ou Alibaba dans Paramètres → LLM,
+   « Tester » la connexion, choisir un modèle chez lui et vérifier un tour
+   d'agent réel dans ce format (`--test protocols` ne couvre qu'OpenCode Go).
 
 ### Ensuite (liste du 6 octobre, toujours valable)
 

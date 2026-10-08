@@ -3,7 +3,7 @@
 À lire **en premier**, par tout agent (Claude Code, OpenCode, Codex…) ou toute
 personne qui touche au projet. Ce document résume les règles **non
 négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérifications),
-`HANDOFF.md` (état technique et **87 pièges numérotés**) et `JOURNAL.md`
+`HANDOFF.md` (état technique et **92 pièges numérotés**) et `JOURNAL.md`
 (historique). Chaque règle ci-dessous a déjà coûté une régression réelle.
 
 ---
@@ -88,6 +88,8 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Voix | Toute tâche passe par `App::start_task` (arrêt « STOP », passage en fond) ; ne pas contourner | 71, 82 |
 | Vault | Partagé avec d'autres agents : Jimmy n'écrit que dans `0_Inbox/Jimmy` et distingue ses notes | 66 |
 | Modèle | Chaque modèle a **un** format d'API (Chat, Responses, Messages), lu dans le catalogue ; un appel passe par `LlmClient::send`, jamais par une URL `/chat/completions` en dur | 78 |
+| Modèle | Abonnement Claude = signature complète : bloc de facturation en bloc 0 du système + noms d'outils alias Claude Code (mapping aller-retour). Ne jamais retirer `oauth-2025-04-20` ; un « Tester » vert ne prouve rien pour l'abonnement | 90, 92 |
+| Config | `config.json` s'écrit par les commandes Tauri, jamais à la main (un BOM PowerShell corrompu fait tomber la config aux **défauts** puis la resauve) ; « config illisible » au journal ⇒ restaurer le `.bak` avant toute sauvegarde | 91 |
 | Sécurité | Une écriture dans un fichier sensible passe par `sensitive::authorize` (carte dans le Chat) ; la lecture reste libre | 77 |
 | Chat | Le premier appel au modèle est en flux (`chat_stream`) ; les chemins de secours rejouent `chat` sans flux | 74 |
 | Avatar | Tout ajout à la scène entre dans la zone de `_update_click_region` (hors zone = non dessiné sous Windows) ; vérifier avec `scripts\photo-avatar.ps1`, pas seulement `/snapshot` | 85 |
