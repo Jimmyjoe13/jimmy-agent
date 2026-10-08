@@ -10,7 +10,10 @@ principalement en disant « Jimmy ».
 
 Tout tourne sur votre machine. Les seuls échanges réseau sont ceux, explicitement
 nécessaires, vers les fournisseurs d'IA (OpenCode Go pour le modèle, Fish Audio
-pour la voix). L'audio, lui, **ne quitte jamais l'ordinateur**.
+pour la voix), les serveurs MCP que vous branchez (dont la mémoire SynaptiQ) et
+les sites que Jimmy visite dans son navigateur. L'audio **ne quitte jamais
+l'ordinateur** ; une capture de fenêtre ne part au modèle **que si vous la
+demandez**.
 
 ---
 
@@ -39,10 +42,15 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | États de l'avatar | ✅ `idle`, `listening`, `thinking`, `speaking`, `executing`, `success`, `error`, `waiting` | `POST /state` + rendu |
 | Bulle de dialogue | ✅ affichage, auto-masquage, parole synchronisée | `POST /say` + capture |
 | Clic sur l'avatar | ✅ ouvre l'interface Tauri | pont HTTP 8790 |
-| Communication Tauri ↔ Godot | ✅ HTTP local, 6 routes | tests `curl` sur 8787 |
+| Communication Tauri ↔ Godot | ✅ HTTP local, 10 routes (dont `/helper`, `/snapshot`) | tests `curl` sur 8787 |
 | Chat texte + LLM | ✅ OpenCode Go, outils, réponse en français, **écrite en direct** (flux SSE) | `agent/tests/happy_path.rs` |
 | Formats d'API des modèles | ✅ Chat, Responses (Muse Spark, GPT, Grok) et Messages (Qwen 3.7+, MiniMax), choisis d'après le catalogue | `agent/tests/protocols.rs` (un vrai modèle par format) |
 | Fichiers sensibles | ✅ toute **écriture** dans un `.env`, une clé, un secret attend ton accord (carte dans le Chat) ; la lecture reste libre | tests `sensitive` + suite d'interface |
+| Tâches de fond | ✅ une tâche qui travaille encore 45 s après son premier outil passe en arrière-plan : Chat libre, voix qui réécoute, annonce de fin, « arrête tout » | `agent/tests/background.rs` + suite d'interface |
+| Lapin des tâches de fond | ✅ un lapin travaille à côté du renard pendant la tâche, saute à la réussite, baisse les oreilles à l'échec | captures de l'écran réel (`scripts/photo-avatar.ps1`) |
+| Vision | ✅ la fenêtre active est jointe à la demande (bouton « Joindre ma fenêtre » ou « regarde mon écran »), jamais à l'initiative du modèle | `--test protocols` (image), `--test screen` |
+| Navigateur | ✅ son propre Chrome (Playwright MCP, profil gardé) ; accord demandé avant d'envoyer, payer, publier, supprimer | `--test browser` + tests `sensitive` |
+| SynaptiQ | ✅ mémoire partagée entre agents, par MCP (identité `jimmy`) | serveur connecté, 9 outils |
 | **Loop agentique** | ✅ outils enchaînés, erreurs relues, itérations | test happy path (4 appels d'outils) |
 | Outils fichiers | ✅ lister, lire, écrire, chercher | test happy path |
 | Outil CLI | ✅ PowerShell, stdout/stderr, code de sortie | test happy path |
@@ -59,7 +67,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Boucle vocale | ✅ wake → STT → agent → voix → avatar | `voice/listener.rs` |
 | Profils graphiques | ✅ `low` / `medium` / `high` appliqués à Godot | logs `[godot/main]` |
 | Diagnostic | ✅ 8 vérifications, chemins, secrets | vue Diagnostic |
-| Interface | ✅ 26 parcours sur la vraie application (Chat, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
+| Interface | ✅ 28 parcours sur la vraie application (Chat, tâches de fond, capture, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
 
 ### Chiffres mesurés sur cette machine
 
@@ -416,7 +424,15 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
 6. **MCP : stdio seule.** Le client MCP implémente le transport stdio, le plus
    répandu. Le transport HTTP streamable n'est pas implémenté.
 
-7. **Latence du modèle STT.** `base-q5` (1,3 s) est le défaut pour le wake
+7. **Navigateur : accord d'après la description.** La carte « action en ton
+   nom » se fonde sur la description de l'élément donnée par le modèle : un
+   bouton mal décrit y échappe. Une page dont l'instantané dépasse 12 000
+   caractères est tronquée.
+
+8. **Tâches de fond en mémoire.** Une seule à la fois ; un redémarrage de
+   Jimmy perd la tâche en cours (l'historique garde ce qui a été fait).
+
+9. **Latence du modèle STT.** `base-q5` (1,3 s) est le défaut pour le wake
    word ; `small-q5` (4,7 s) est plus précis sur le français. Les deux sont
    sélectionnables dans les paramètres.
 

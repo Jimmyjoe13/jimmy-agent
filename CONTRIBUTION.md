@@ -177,7 +177,7 @@ Jimmy est une application que l'utilisateur **utilise en direct**.
 |---|---|---|
 | Du Rust (logique pure) | `.\scripts\with-msvc.ps1 cargo test --workspace` | 0 échec, 0 avertissement |
 | Le frontend | `npm run build` dans `desktop/` | strict, sans erreur |
-| Une vue, une commande Tauri, un événement | `.\scripts\test-ui.ps1` | tous les parcours OK (26 au 6 octobre), **0 erreur JavaScript** |
+| Une vue, une commande Tauri, un événement | `.\scripts\test-ui.ps1` | tous les parcours OK (28 au 7 octobre), **0 erreur JavaScript** |
 | La boucle d'agent, les outils, le modèle | `.\scripts\test-happy.ps1 -SkipAudio` | réponse FR avec outils (un échec transitoire du fournisseur : relancer) |
 | L'écoute, Whisper, la synthèse | tests `--ignored` de `agent/tests/audio.rs` | **Jimmy arrêté** (§2) |
 | Le vault | `cargo test --test vault '--' --ignored` | notes trouvées, extraits justes |

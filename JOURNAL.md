@@ -7,17 +7,18 @@ les autres documents.
 | Document | À lire pour… |
 |---|---|
 | `JOURNAL.md` (ici) | comprendre **comment on est arrivé là** et pourquoi |
-| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 85 pièges numérotés |
+| `HANDOFF.md` | l'**état technique actuel**, les commandes et les 87 pièges numérotés |
 | `PLAN.md` | la vision et le cahier des charges d'origine |
 | `README.md`, `docs/` | installer, lancer, architecture, dépannage |
 
-Le projet tient en **quatre journées**. Le **3 octobre 2026**, de 00h29 à 23h :
+Le projet tient en **cinq journées**. Le **3 octobre 2026**, de 00h29 à 23h :
 une session **OpenCode** construit la V1, puis des sessions **Claude Code**
 l'améliorent et la réparent à l'usage. Le **4 octobre**, une journée d'**usage
 réel** (Claude Code) : chaque retour de l'utilisateur est reproduit puis
 corrigé (section 3ter). Les **5 et 6 octobre** : streaming, garde-fou des
 fichiers sensibles, trois formats d'API des modèles et publication du dépôt
-sur GitHub (section 3quater).
+sur GitHub (section 3quater). Le **7 octobre** : tâches de fond, vision,
+SynaptiQ par MCP, lapin et navigateur (section 3octies).
 
 ---
 
@@ -936,6 +937,10 @@ ceux du tableau ci-dessus ont été recalés de même) :
 | 06/10 11:06 | `a443786` | Fichiers sensibles : n'exiger l'accord que pour une ecriture reperee |
 | 06/10 13:43 | `bb71b2b` | Preparation de la publication : licence MIT, chemins personnels anonymises |
 | 06/10 16:21 | `d55e183` | Modeles : prise en charge des trois formats d'API (Chat, Responses, Messages) |
+| 07/10 09:23 | `94ea557` | Tâches de fond : le Chat et la voix restent disponibles |
+| 07/10 11:40 | `b9b2d42` | Tâches de fond : budget élargi et commandes d'inspection comptées en lectures |
+| 07/10 15:37 | `3f0d3b3` | Vision : Jimmy voit la fenêtre active, sur demande de l'utilisateur seul |
+| 07/10 22:18 | `a2950f6` | Tâches de fond : seuil à 45 s, et un lapin qui travaille à côté du renard |
 
 ---
 
@@ -1101,9 +1106,23 @@ de la fenêtre découpe aussi l'affichage sous Windows, et ne couvrait que le
 corps du renard. Les snapshots, pris avant la découpe, montraient tout —
 d'où la nouvelle règle de vérifier sur l'écran réel (piège 85).
 
+### Le navigateur (7 octobre, nuit)
+
+Choix de l'utilisateur : Jimmy a son propre Chrome mais peut s'y connecter à
+ses comptes et naviguer en son nom. Serveur MCP Playwright, profil gardé,
+connexion faite par l'utilisateur lui-même, et une carte d'autorisation
+avant tout ce qui engage (envoyer, payer, publier, supprimer). Le test réel
+a montré que les actions de Playwright ne renvoient pas la page (piège 86) :
+Jimmy prend un instantané après chaque action. Liste des mots d'engagement
+resserrée avant livraison (« book » visait Facebook, « command » le lien Mes
+commandes).
+
 ## 8. Reste à faire et questions ouvertes
 
-0. **État au 6 octobre** : tout est commité ; dépôt **public**
+0. **État au 7 octobre** : tâches de fond, vision, SynaptiQ par MCP, lapin
+   et navigateur livrés (section 3octies) ; prochaines étapes par priorité
+   dans le HANDOFF (« Ensuite (au 7 octobre) »).
+   **État au 6 octobre** : tout est commité ; dépôt **public**
    github.com/Jimmyjoe13/jimmy-agent (licence MIT). Reste à **régénérer les
    clés exposées** (`aggregate` dans `jimmy.log`, `skillsmp` dans
    `data/config.json`, `.env.api` de JobXpress lu en clair par le modèle le

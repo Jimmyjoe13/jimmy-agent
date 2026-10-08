@@ -1,17 +1,19 @@
 # HANDOFF
 
-État du prototype au **6 octobre 2026**. Depuis le 5 au soir : la **sortie
-courte et nette** (prompt concis, voix bornée), le **streaming** du chat, le
-**garde-fou des fichiers sensibles** (accord explicite pour toute écriture,
-lecture libre), la **prise en charge des trois formats d'API** des modèles
-(Muse Spark, GPT, Grok, Qwen 3.8, MiniMax utilisables) et la **publication**
-du dépôt sur GitHub (public, licence MIT, historique réécrit sans données
-personnelles). Tout est commité ; `main` est poussé jusqu'à `bb71b2b`.
+État du prototype au **7 octobre 2026**. Depuis le 6 : les **tâches de fond**
+(une tâche outillée qui travaille encore 45 s après son premier outil passe en
+arrière-plan, le Chat et la voix restent libres, un **lapin** travaille à côté
+du renard, « STOP » = premier plan, « arrête tout » = tout ; budget de fond
+60 étapes / 20 min), la **vision** (fenêtre active jointe à la demande, sur
+demande de l'utilisateur seul), **SynaptiQ** rebranché par MCP (identité
+`jimmy`), le **navigateur** (Playwright, son propre Chrome, carte d'accord
+avant toute action qui engage), et la zone affichée de l'avatar corrigée
+(piège 85). Modèle principal et vocal : `muse-spark-1.3-contributor`.
 
-**Objectif de la prochaine session :** l'**usage réel**. Utiliser Jimmy au
-quotidien avec un modèle des nouveaux formats (Muse Spark 1.3 : surveiller
-qu'il ne commente pas sa « consigne développeur » au lieu de répondre), et
-vérifier que la carte d'autorisation n'apparaît que pour des écritures.
+**Objectif de la prochaine session :** les **essais réels** de ce qui est
+vérifié par tests mais pas encore à l'usage — navigateur connecté à un compte,
+tâches de fond et vision à la voix, lapin pendant une vraie tâche de fond — et
+le point « fichier sensible » avec Muse Spark (« Ensuite », point 2).
 Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
@@ -63,6 +65,8 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 | **Fichiers sensibles (5-6 octobre)** | tests `sensitive` (dont les 11 lectures réelles du 6 octobre, libres, et 8 écritures déguisées, bloquées) ; parcours UI : carte « garde-N.env », refus respecté (piège 77) |
 | **Trois formats d'API (6 octobre)** | `--test protocols -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) — outil appelé, résultat relu, réponse en flux ; test de bibliothèque vert pour les trois (piège 78) |
 | **État au 6 octobre** | 151 tests unitaires, 0 avertissement ; `test-ui.ps1` : **26/26**, 0 erreur JS |
+| **État au 7 octobre** | 176 tests unitaires + 7 de tâches de fond, 0 avertissement ; tests réels `protocols` (image), `screen`, `browser` ; `test-ui.ps1` : **27/28**, 0 erreur JS — l'échec est « fichier sensible » (Muse Spark répond sans outil, « Ensuite » 2) |
+| **Navigateur (7 octobre)** | `--test browser -- --ignored` : Playwright MCP 0.0.83 lancé comme Jimmy le lance (`npx`, `cmd /C`), 25 outils, `example.com` ouvert et lu par `browser_snapshot` ; règles de la carte « action en ton nom » testées (14 cas, dont faux positifs Facebook / Mes commandes / PayPal) ; 176 tests unitaires ; `test-ui.ps1` : **27/28**, 0 erreur JS, « navigateur (connected, 25 outils) » dans Skills → Serveurs MCP (échec connu « fichier sensible ») |
 | **Vision (7 octobre)** | sonde brute puis `--test protocols chaque_format_lit_une_image -- --ignored` : glm-5.3-flash (Chat), muse-spark-1.3-contributor (Responses), qwen3.8-flash (Messages) lisent « rouge, bleu » sur une image générée, en flux ; `--test screen -- --ignored` : fenêtre active capturée hors du processus appelant (1461×720, JPEG) ; 175 tests unitaires ; `test-ui.ps1` : **27/28**, 0 erreur JS (échec « fichier sensible » : le modèle répond sans outil, 3e fois de suite avec Muse Spark) |
 | **Tâches de fond (7 octobre)** | `--test background` (6 tests, tâches simulées : passage en fond, STOP épargne le fond, « arrête tout », bouton de la tâche, une seule à la fois, pas pendant une autorisation) ; 165 tests unitaires, 0 avertissement ; `test-ui.ps1` : **27/27**, 0 erreur JS — parcours réel : passage en fond 15 s après l'outil, question en parallèle répondue, fin dans le fil |
 
@@ -1278,6 +1282,47 @@ déclenché (0/31) : croissance strictement additive.
  doit entrer dans cette zone, et se vérifie sur l'écran réel
  (`scripts\photo-avatar.ps1`), pas seulement par `/snapshot`.
 
+ **86. Playwright MCP ne renvoie pas la page après une action.**
+ Version 0.0.83 : `browser_navigate`, `browser_click`… répondent par l'URL,
+ le titre et un **lien vers un fichier** d'instantané (`[Snapshot](….yml)`)
+ — le modèle ne voit pas le contenu. Seul `browser_snapshot` le met dans la
+ réponse. Et sans `--output-dir`, ces fichiers s'écrivent dans le dossier
+ courant (un `.playwright-mcp` est apparu dans `agent/` pendant les tests).
+ Règle : le prompt demande un `browser_snapshot` après chaque action
+ (`prompt::BROWSER_GUIDE`), et le serveur a toujours un `--output-dir`
+ (`data/browser-output` pour Jimmy, dossier temporaire pour le test).
+
+ **87. Arrêter Jimmy avec son arbre tue aussi ce qu'il a lancé pour
+ durer.** INSTRUCTIONS §2 impose `taskkill /T` (sinon MCP et whisper restent
+ orphelins). Mais le 7 octobre, Jimmy avait lui-même ouvert un tunnel SSH
+ (`Start-Process ssh … -N -L 8000:…`) depuis `run_command` : descendant de
+ son processus, il est mort au premier arrêt pour compilation — SynaptiQ
+ « connexion refusée » pour tous les agents, sans rien dans `jimmy.log`.
+ Règle : avant d'arrêter Jimmy, regarder s'il a lancé un processus durable
+ (tunnel, serveur) et le relancer après ; un processus qui doit survivre à
+ Jimmy se lance par un mécanisme du système (tâche planifiée, démarrage
+ Windows), pas comme enfant de son `run_command`.
+
+### Décisions prises (7 octobre 2026 — navigateur)
+
+- **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée
+  `@playwright/mcp@0.0.83`, Chrome visible), branché sans code comme
+  SynaptiQ. Outils à la demande (`mcp_call`), sorties bornées à 12 000
+  caractères (un instantané de page plus long est tronqué).
+- **Son propre Chrome, connecté à tes comptes** (choix de l'utilisateur) :
+  profil persistant `data/browser-profile`. L'utilisateur s'y connecte
+  **lui-même** une fois ; Jimmy ne saisit jamais de mot de passe (consigne
+  du prompt).
+- **Carte « action en ton nom »** (`sensitive::browser_action_needs_approval`,
+  même mécanisme que les fichiers sensibles) : clic dont la description
+  contient un mot d'engagement (envoyer, payer, commander, publier,
+  supprimer, confirmer, valider, s'abonner, virement, réserver, signer,
+  répondre…), saisie validée hors recherche, touche Entrée, envoi de
+  fichier, script qui agit dans la page. Libres : navigation, lecture,
+  recherche, saisie, cookies. À la voix : refus d'office, comme les
+  fichiers sensibles. Limite : la description vient du modèle ; un bouton
+  mal décrit échappe à la carte.
+
 ### Décisions prises (7 octobre 2026 — vision de la fenêtre active)
 
 Demande : que Jimmy ait le contexte de ce que fait l'utilisateur, **seulement
@@ -1354,7 +1399,31 @@ lançant les tâches en arrière-plan ». Plan validé, avec ses choix :
   Messages fusionne les rôles consécutifs : pas d'erreur, mais le résumé des
   outils peut attribuer un outil de la tâche au tour parallèle).
 
-### Ensuite
+### Ensuite (au 7 octobre, par priorité)
+
+1. **Essais réels** de ce qui n'est vérifié que par tests : navigateur
+   (« ouvre gmail.com », connexion faite par l'utilisateur, carte « action en
+   ton nom » sur un envoi) ; tâches de fond **à la voix** (« je m'en occupe »,
+   retour à l'écoute, annonce de fin, « arrête tout ») ; vision à la voix
+   (« Jimmy, regarde mon écran ») ; lapin pendant une vraie tâche de fond.
+2. **Muse Spark et le parcours « fichier sensible »** : 4 suites d'interface
+   de suite en échec depuis qu'il est le modèle principal (0 outil, réponse
+   en texte au lieu de `write_file` sur un `.env`), alors que MiMo et GLM
+   passaient. Rejouer la demande (`agent/tests/replay.rs`) pour savoir s'il
+   refuse par principe d'écrire un `.env` : si oui, c'est le parcours qu'il
+   faut adapter (cible moins « secrète »), pas le garde-fou.
+3. **Secrets dans le journal** : les arguments d'outils sont journalisés tels
+   quels ; la clé d'`aggregate` et, depuis la reconfiguration d'Antigravity du
+   7 octobre, une clé SynaptiQ y sont en clair. Masquer `KEY=`, `TOKEN=`,
+   `SECRET=`, `sk-…` avant journalisation, puis régénérer ces deux clés.
+4. **Lapin et chien de garde** : si Godot redémarre pendant une tâche de fond,
+   le lapin ne revient qu'à la tâche suivante ; renvoyer `/helper working`
+   au redémarrage si `App::tasks` a une tâche de fond.
+5. **Navigateur** : une page dont l'instantané dépasse 12 000 caractères est
+   tronquée (`MAX_TOOL_OUTPUT`) ; une borne propre au navigateur, ou un
+   instantané par zone, si l'usage le demande.
+
+### Ensuite (liste du 6 octobre, toujours valable)
 
 1. **Usage réel avec un modèle Responses** (Muse Spark 1.3) : vérifier qu'il
    répond sans commenter sa consigne. Sinon, passer le prompt système en

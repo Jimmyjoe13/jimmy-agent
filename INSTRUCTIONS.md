@@ -3,7 +3,7 @@
 À lire **en premier**, par tout agent (Claude Code, OpenCode, Codex…) ou toute
 personne qui touche au projet. Ce document résume les règles **non
 négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérifications),
-`HANDOFF.md` (état technique et **85 pièges numérotés**) et `JOURNAL.md`
+`HANDOFF.md` (état technique et **87 pièges numérotés**) et `JOURNAL.md`
 (historique). Chaque règle ci-dessous a déjà coûté une régression réelle.
 
 ---
@@ -26,7 +26,8 @@ négociables** ; le détail est dans `CONTRIBUTION.md` (règles et vérification
   `data/logs/jimmy.log`, dernière ligne `[agent]`, `commande :` ou `[tts]`.
   Activité de moins de 2 minutes → **attendre** (ou demander).
 - Arrêter Jimmy **avec tout son arbre** (`taskkill /T /F /PID <jimmy>`), sinon
-  ses serveurs MCP et whisper restent orphelins.
+  ses serveurs MCP et whisper restent orphelins — mais cela tue aussi ce qu'il
+  a lancé pour durer (tunnel SSH, serveur) : le relancer ensuite (piège 87).
 - Ne jamais tuer un processus non identifié (chemin, parent, date).
 - Les tests d'écoute (`--test audio … --ignored`) prennent les ports whisper
   8178/8179 : **Jimmy arrêté** pendant ce temps (piège 35).
@@ -90,6 +91,7 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Sécurité | Une écriture dans un fichier sensible passe par `sensitive::authorize` (carte dans le Chat) ; la lecture reste libre | 77 |
 | Chat | Le premier appel au modèle est en flux (`chat_stream`) ; les chemins de secours rejouent `chat` sans flux | 74 |
 | Avatar | Tout ajout à la scène entre dans la zone de `_update_click_region` (hors zone = non dessiné sous Windows) ; vérifier avec `scripts\photo-avatar.ps1`, pas seulement `/snapshot` | 85 |
+| Navigateur | Action qui engage l'utilisateur = carte (`browser_action_needs_approval`) ; jamais de mot de passe saisi par Jimmy ; serveur Playwright toujours avec `--output-dir` | 86 |
 | Vision | Jamais d'outil de capture pour le modèle ; une image ne va ni sur disque ni dans l'historique (`Message::images` hors sérialisation) | 84 |
 | Tâches | Un tour de l'agent passe par `App::start_task` (jamais `agent::run` nu) ; le délai de passage en fond part du premier outil | 82 |
 
@@ -115,9 +117,9 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
   (`C:\Users\user`, `203.0.113.10`, `vps.key`).
 - `data/` (base, journaux, audio) ne se committe jamais et ne se recopie pas
   dans une réponse.
-- **Ouvert** : la clé du serveur MCP `aggregate` figure en clair dans
-  `data/logs/jimmy.log` (arguments d'outils journalisés tels quels) → à
-  régénérer, et à masquer dans ce journal.
+- **Ouvert** : les clés du serveur MCP `aggregate` et de SynaptiQ figurent
+  en clair dans `data/logs/jimmy.log` (arguments d'outils journalisés tels
+  quels) → à masquer dans ce journal, puis à régénérer (HANDOFF, « Ensuite »).
 
 ## 8. Git
 
@@ -130,8 +132,9 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
-- État au 6 octobre 2026 : tout est commité ; `main` est publié jusqu'à
-  `bb71b2b`, les commits suivants attendent une demande de push.
+- État au 7 octobre 2026 : `main` est publié jusqu'à `25bda71` (tâches de
+  fond, vision, lapin) ; le navigateur et la mise à jour des docs attendent
+  une demande de commit et de push.
 
 ## 9. Fin de travail
 
@@ -148,7 +151,8 @@ Bloqué : <ce qui empêche d'avancer, ou "rien">
 
 ## 10. Préférences de l'utilisateur (validées)
 
-- Modèle : **MiMo-V2.6-Flash** (principal et vocal). Voix : **« Le narrateur »**
+- Modèle : **muse-spark-1.3-contributor** (principal et vocal, choisi par
+  l'utilisateur ; MiMo-V2.6-Flash jusqu'au 7 octobre). Voix : **« Le narrateur »**
   (Fish Audio `4f2a0684dd0247dda68f339738c780e6`).
 - Jimmy doit être **réactif et aller au bout** d'une tâche validée, en disant
   où il en est ; « STOP » l'arrête à tout moment.
