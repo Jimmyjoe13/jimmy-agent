@@ -457,6 +457,64 @@ fn mcp_modifies_sensitive(tool: &str, args: &serde_json::Value) -> Option<String
     None
 }
 
+/// Préfixe de la cible d'une action du navigateur (carte « action en ton
+/// nom ») : l'interface et les messages de refus la distinguent d'un fichier.
+pub const BROWSER_TARGET: &str = "navigateur : ";
+
+/// Mots d'un élément de page dont le clic **engage** l'utilisateur : envoyer,
+/// payer, publier, supprimer… (navigation en son nom, décision du 7 octobre).
+/// « Accepter » n'y est pas : il ferait demander pour chaque bandeau de
+/// cookies.
+// Formes précises : « book » prenait « Facebook », « command » le lien « Mes
+// commandes », « pay » le logo PayPal (d'où « pay » suivi d'une espace).
+const COMMITTING_WORDS: &[&str] = &[
+    "envoy", "envoi", "send", "submit", "soumet", "payer", "paiement", "pay ", "pay now", "acheter", "achat",
+    "buy", "purchase", "commander", "passer la commande", "place order", "checkout", "publier", "publish",
+    "poster", "post ", "tweet", "partager", "share", "supprim", "delete", "remove", "effacer", "confirm",
+    "valider", "validate", "souscri", "subscribe", "s'abonner", "virement", "transfer", "réserver", "reserve",
+    "signer", "répondre", "reply",
+];
+
+/// Champs dont la validation (`submit`) ne fait que chercher ou naviguer.
+const SEARCH_WORDS: &[&str] = &["recherch", "search", "cherch", "adresse", "address", "url", "filtr", "filter"];
+
+/// Action du navigateur (serveur MCP Playwright, outils `browser_*`) qui
+/// engage l'utilisateur et demande son accord : clic ou validation dont la
+/// description contient un mot d'engagement, envoi d'un fichier, script
+/// arbitraire. La lecture, la navigation et la saisie simple restent libres.
+fn browser_action_needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
+    let element = args.get("element").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let lower = element.to_lowercase();
+    let committing = COMMITTING_WORDS.iter().any(|w| lower.contains(w));
+    let target = |what: &str| Some(format!("{BROWSER_TARGET}{what}"));
+    match tool {
+        "browser_click" if committing => target(&format!("clic sur « {element} »")),
+        // Saisie validée par Entrée : envoie un message, un formulaire… sauf
+        // dans une barre de recherche ou d'adresse.
+        "browser_type"
+            if args.get("submit").and_then(|v| v.as_bool()).unwrap_or(false)
+                && !SEARCH_WORDS.iter().any(|w| lower.contains(w)) =>
+        {
+            target(&format!("saisie validée dans « {element} »"))
+        }
+        "browser_press_key"
+            if args.get("key").and_then(|v| v.as_str()).is_some_and(|k| k.eq_ignore_ascii_case("enter")) =>
+        {
+            target("touche Entrée (peut valider un formulaire)")
+        }
+        "browser_file_upload" => target("envoi d'un fichier depuis le PC"),
+        "browser_run_code" | "browser_run_code_unsafe" => target("script exécuté dans la page"),
+        "browser_evaluate" => {
+            let code = args.get("function").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            ["click(", "submit", "dispatchevent", "fetch("]
+                .iter()
+                .any(|m| code.contains(m))
+                .then(|| format!("{BROWSER_TARGET}script qui agit dans la page"))
+        }
+        _ => None,
+    }
+}
+
 /// L'appel d'outil modifie-t-il un fichier sensible ? Renvoie le fichier en
 /// cause ; `None` pour tout le reste (lecture comprise).
 pub fn needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
@@ -464,11 +522,14 @@ pub fn needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
     match tool {
         "write_file" => Some(arg("path")).filter(|p| is_sensitive_path(p)).map(str::to_string),
         "run_command" => command_modifies_sensitive(arg("command")),
-        "mcp_call" => mcp_modifies_sensitive(arg("tool"), &inner_args(args.get("arguments"))),
+        "mcp_call" => {
+            let inner = inner_args(args.get("arguments"));
+            browser_action_needs_approval(arg("tool"), &inner).or_else(|| mcp_modifies_sensitive(arg("tool"), &inner))
+        }
         // Outil MCP enregistré directement (`mcp_<serveur>__<outil>`).
         name if name.starts_with("mcp_") => {
             let short = name.split("__").nth(1).unwrap_or(name);
-            mcp_modifies_sensitive(short, args)
+            browser_action_needs_approval(short, args).or_else(|| mcp_modifies_sensitive(short, args))
         }
         _ => None,
     }
@@ -542,12 +603,17 @@ pub async fn authorize(
     timeout: Duration,
 ) -> Option<String> {
     let target = needs_approval(tool, args)?;
+    // Action du navigateur en son nom, ou écriture d'un fichier sensible :
+    // même carte, mots différents.
+    let what = match target.strip_prefix(BROWSER_TARGET) {
+        Some(action) => format!("l'action dans le navigateur ({action})"),
+        None => format!("la modification de « {target} » (fichier sensible)"),
+    };
     if voice {
-        log::warn!("[sécurité] modification de « {target} » refusée : demande vocale, accord impossible");
+        log::warn!("[sécurité] {what} refusée : demande vocale, accord impossible");
         return Some(format!(
-            "REFUSÉ : modifier « {target} » (fichier sensible) exige l'accord explicite de l'utilisateur, \
-             impossible à donner à la voix. Ne tente pas de le modifier autrement ; dis-lui de refaire \
-             la demande dans le Chat écrit."
+            "REFUSÉ : {what} exige l'accord explicite de l'utilisateur, impossible à donner à la voix. \
+             Ne tente pas de la faire autrement ; dis-lui de refaire la demande dans le Chat écrit."
         ));
     }
     let (id, answer) = approvals.request();
@@ -567,9 +633,9 @@ pub async fn authorize(
         None
     } else {
         Some(format!(
-            "REFUSÉ par l'utilisateur (ou sans réponse) : la modification de « {target} » (fichier sensible) \
-             n'a PAS été faite. Ne tente pas de la faire autrement (autre commande, script intermédiaire) ; \
-             explique ce que tu voulais changer et pourquoi, et laisse-le décider."
+            "REFUSÉ par l'utilisateur (ou sans réponse) : {what} n'a PAS été faite. Ne tente pas de la faire \
+             autrement (autre commande, autre bouton, script intermédiaire) ; explique ce que tu voulais faire \
+             et pourquoi, et laisse-le décider."
         ))
     }
 }
@@ -578,6 +644,46 @@ pub async fn authorize(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Navigation en son nom : seules les actions qui engagent demandent
+    /// l'accord (formes réelles des arguments de Playwright MCP 0.0.83).
+    #[test]
+    fn le_navigateur_demande_avant_d_engager_l_utilisateur() {
+        let call = |tool: &str, arguments: serde_json::Value| {
+            needs_approval("mcp_call", &json!({ "server": "navigateur", "tool": tool, "arguments": arguments }))
+        };
+        // Engagent : envoyer, payer, publier, supprimer, valider un message.
+        for (tool, arguments) in [
+            ("browser_click", json!({ "element": "Bouton Envoyer", "ref": "e12" })),
+            ("browser_click", json!({ "element": "Payer 49,90 €", "ref": "e3" })),
+            ("browser_click", json!({ "element": "Publish post button", "ref": "e3" })),
+            ("browser_click", json!({ "element": "Supprimer le compte", "ref": "e9" })),
+            ("browser_type", json!({ "element": "Zone de message", "ref": "e4", "text": "Salut", "submit": true })),
+            ("browser_press_key", json!({ "key": "Enter" })),
+            ("browser_file_upload", json!({ "paths": ["C:\\Users\\user\\cv.pdf"] })),
+        ] {
+            let target = call(tool, arguments.clone()).unwrap_or_else(|| panic!("{tool} {arguments} doit demander"));
+            assert!(target.starts_with(BROWSER_TARGET), "{target}");
+        }
+        // Libres : naviguer, lire, chercher, saisir sans valider, cookies.
+        for (tool, arguments) in [
+            ("browser_navigate", json!({ "url": "https://mail.example.com" })),
+            ("browser_snapshot", json!({})),
+            ("browser_click", json!({ "element": "Lien Boîte de réception", "ref": "e2" })),
+            ("browser_click", json!({ "element": "Accepter les cookies", "ref": "e5" })),
+            ("browser_click", json!({ "element": "Lien Facebook", "ref": "e6" })),
+            ("browser_click", json!({ "element": "Mes commandes", "ref": "e7" })),
+            ("browser_click", json!({ "element": "Logo PayPal", "ref": "e8" })),
+            ("browser_type", json!({ "element": "Barre de recherche", "ref": "e1", "text": "facture", "submit": true })),
+            ("browser_type", json!({ "element": "Zone de message", "ref": "e4", "text": "Brouillon" })),
+            ("browser_press_key", json!({ "key": "ArrowDown" })),
+            ("browser_evaluate", json!({ "function": "() => document.title" })),
+        ] {
+            assert_eq!(call(tool, arguments.clone()), None, "{tool} {arguments} doit rester libre");
+        }
+        // Outil enregistré directement : même règle.
+        assert!(needs_approval("mcp_navigateur__browser_click", &json!({ "element": "Send", "ref": "e1" })).is_some());
+    }
 
     /// Commandes réelles du 7 octobre (inspection SSH), et leurs contraires.
     #[test]

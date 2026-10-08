@@ -739,9 +739,11 @@ export function chatView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "approval-title" },
-        event.taskId
-          ? "Autorisation demandée par la tâche de fond : modifier un fichier sensible"
-          : "Autorisation demandée : modifier un fichier sensible",
+        `Autorisation demandée${event.taskId ? " par la tâche de fond" : ""} : ${
+          (event.target ?? "").startsWith("navigateur : ")
+            ? "action en ton nom dans le navigateur"
+            : "modifier un fichier sensible"
+        }`,
       ),
       h("code", { class: "approval-target" }, event.target ?? ""),
       h("pre", { class: "approval-detail" }, event.detail ?? ""),

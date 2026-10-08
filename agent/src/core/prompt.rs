@@ -133,6 +133,13 @@ La demande vient d'être dite à voix haute et transcrite automatiquement.
   outil. N'utilise des outils que si la demande l'exige vraiment.
 - C'est une conversation : tiens compte des échanges précédents de la session."#;
 
+/// Mode d'emploi du navigateur, ajouté seulement s'il est branché.
+const BROWSER_GUIDE: &str = "\n\n## Navigateur\nTon propre Chrome (profil gardé : les comptes où l'utilisateur s'est \
+connecté le restent). Après chaque action, appelle `browser_snapshot` pour voir la page : les actions ne la \
+renvoient pas. Ne saisis jamais de mot de passe : si un site demande une connexion, demande à l'utilisateur de \
+se connecter lui-même dans la fenêtre du navigateur, puis continue. Envoyer, payer, publier ou supprimer \
+demande son accord (carte dans le Chat) : décris précisément l'élément cliqué.";
+
 /// Liste des outils pour le prompt système. Les définitions complètes sont
 /// déjà envoyées à l'API : ici, seulement un repère. Les outils MCP sont
 /// regroupés par serveur (« aggregate : 74 outils ») au lieu d'être recopiés
@@ -161,6 +168,11 @@ pub fn tools_summary(names: &[String]) -> String {
         );
         for (server, tools) in &mcp {
             out.push_str(&format!("\n- {server} ({}) : {}", tools.len(), tools.join(", ")));
+        }
+        // Navigateur (Playwright) : ses actions ne renvoient pas la page, et
+        // l'utilisateur se connecte lui-même à ses comptes.
+        if mcp.iter().any(|(_, tools)| tools.iter().any(|t| t == "browser_navigate")) {
+            out.push_str(BROWSER_GUIDE);
         }
     }
     out
