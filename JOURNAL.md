@@ -1278,6 +1278,10 @@ fournisseur rapide.
 Non vérifié en réel : la boucle bout-en-bout entre les deux PC
 (premier push à venir) et l'installeur NSIS de bout en bout.
 
+Poussé le soir même : `main` = `49a2b95` des deux côtés (3 commits).
+Suite le 9 au matin : clone + build au travail, commit déclencheur ici,
+bulle et `/update` là-bas (voir « Reprise » du HANDOFF).
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 9 octobre (soir)** : l'abonnement Claude sert Jimmy comme moteur

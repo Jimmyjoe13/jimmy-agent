@@ -134,6 +134,9 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 8 octobre 2026 (soir) : `main` = `49a2b95`, tout est poussé
+  (mécanisme MAJ multi-PC, masquage des secrets au journal, docs
+  installeur et deuxième PC). Reprise le 9 au matin : voir HANDOFF.
 - État au 7 octobre 2026 : `main` est publié jusqu'à `25bda71` (tâches de
   fond, vision, lapin) ; le navigateur et la mise à jour des docs attendent
   une demande de commit et de push.

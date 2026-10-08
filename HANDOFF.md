@@ -23,6 +23,24 @@ Tout ce qui suit est lu dans le code et vérifié, pas une liste d'idées.
 
 ---
 
+## Reprise — matin du 9 octobre 2026
+
+Poussé la veille au soir : `main` = `49a2b95` (mécanisme MAJ + masquage
+secrets + docs), à jour des deux côtés. Le Jimmy de ce PC tourne sur le
+binaire final, à jour, sans alerte (normal : rien n'a bougé depuis).
+
+Reste, dans l'ordre :
+1. Au travail : cloner (README « Deuxième PC »), `install.ps1`, clés dans
+   l'interface, `build.ps1 -Release`, lancer depuis le clone.
+2. Ici : petit commit déclencheur visible, puis push.
+3. Au travail (sous 30 min) : bulle + pastille + session « Mise à jour »,
+   puis `/update` (pull + rebuild + restart auto).
+4. Régénérer les 2 clés exposées (`aggregate`, SynaptiQ).
+5. Re-mesurer le parcours tâche de fond quand le fournisseur est rapide
+   (échec ×2 le 8 au soir : la question « cerise » elle-même a dépassé
+   45 s et s'est détachée — latence modèle, sans lien avec ce chantier).
+
+
 ## Ce qui est vérifié
 
 | Domaine | Comment c'a été vérifié |
