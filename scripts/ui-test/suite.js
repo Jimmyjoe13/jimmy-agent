@@ -773,6 +773,50 @@ let stepPage = null;
   await nav("Chat");
   await p.screenshot({ path: path.join(OUT, "suite-chat.png") });
 
+  await step("Mise à jour : pastille quand une mise à jour attend", async () => {
+    const fs = require("fs");
+    const stateFile = path.resolve(__dirname, "..", "..", "data", "update_state.json");
+    const already = await p.evaluate(() =>
+      window.__TAURI_INTERNALS__.invoke("status").then((s) => s.update.pending),
+    );
+    if (!already) {
+      // Simule une mise à jour en attente : la barre latérale se rafraîchit
+      // toutes les 15 s via `status`. La boucle de fond peut réécrire le
+      // fichier pile entre l'apparition et le clic : écrire → attendre →
+      // cliquer est rejoué jusqu'à 3 fois.
+      const fake = JSON.stringify({
+        last_check: new Date().toISOString(),
+        local: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        remote: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        pending: true,
+        notified: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      });
+      const backup = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf-8") : null;
+      try {
+        let clicked = false;
+        for (let attempt = 0; attempt < 3 && !clicked; attempt++) {
+          fs.writeFileSync(stateFile, fake);
+          const shown = await p.waitForSelector(".update-badge", { timeout: 25000 }).then(() => true).catch(() => false);
+          if (!shown) continue;
+          await p.screenshot({ path: path.join(OUT, "suite-badge.png") });
+          clicked = await p.locator(".update-badge").click({ timeout: 8000 }).then(() => true).catch(() => false);
+        }
+        expect(clicked, "pastille jamais cliquable en 3 essais");
+      } finally {
+        // Restaure l'état réel (arbre à jour : plus d'alerte).
+        if (backup === null) fs.rmSync(stateFile, { force: true });
+        else fs.writeFileSync(stateFile, backup);
+      }
+      await p.waitForFunction(() => !document.querySelector(".update-badge"), null, { timeout: 25000 });
+    } else {
+      await p.waitForSelector(".update-badge", { timeout: 10000 });
+      await p.locator(".update-badge").click({ timeout: 8000 });
+    }
+    await p.waitForFunction(() => document.querySelector(".topbar h1")?.textContent === "Historique", null, { timeout: 5000 });
+    await nav("Chat");
+    return already ? "vraie alerte : pastille et clic vérifiés" : "pastille simulée, clic vers Historique, disparue après restauration";
+  });
+
   await step("Aucune erreur JavaScript", async () => {
     expect(errors.length === 0, errors.join(" | "));
   });

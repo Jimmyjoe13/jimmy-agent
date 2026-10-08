@@ -202,6 +202,19 @@ async function main() {
           {},
           h("strong", {}, "Jimmy"),
           h("span", { class: "brand-sub" }, `v${info.version}${info.dev ? " · dépôt local" : ""}`),
+          ...(info.update.pending
+            ? [
+                h(
+                  "button",
+                  {
+                    class: "update-badge",
+                    title: "Mise à jour disponible : tape /update dans le Chat",
+                    onclick: () => ctx.navigate("history"),
+                  },
+                  "mise à jour",
+                ),
+              ]
+            : []),
         ),
       ),
       h(

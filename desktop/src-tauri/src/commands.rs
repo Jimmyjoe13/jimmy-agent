@@ -88,6 +88,12 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         }
     };
 
+    // `/update` : mise à jour déterministe, pas un tour d'agent (le modèle
+    // n'a rien à y décider : récupérer, recompiler, redémarrer).
+    if jimmy_agent::update::is_update_command(&message) {
+        return update_chat(state, session_id, message).await;
+    }
+
     // Projet de la conversation : l'agent y travaille ; sans projet, le
     // dossier par défaut (même règle que la voix, `App::session_context`).
     let (settings, tool_context) = app.session_context(&session_id);
@@ -192,6 +198,117 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         match &outcome {
             Ok(answer) => cue_app.speak(&answer.text).await,
             Err(_) => cues::play(&cue_app, Cue::Error).await,
+        }
+
+        if let Err(error) = outcome {
+            log::error!("[agent] {error}");
+            if let Some(window) = &window_label {
+                let _ = window.emit(
+                    "agent-event",
+                    AgentEvent::Failed {
+                        message: error.to_string(),
+                    },
+                );
+            }
+            let _ = avatar.set_state(AvatarState::Error, "").await;
+        }
+    });
+
+    Ok(session_id)
+}
+
+/// `/update` tapé dans le Chat : applique la mise à jour disponible
+/// (`pull` fast-forward, recompilation, redémarrage — voir
+/// `jimmy_agent::update::apply`). Tourne en tâche suivie comme un tour
+/// normal : passage en fond, bouton « Arrêter » et annonces compris.
+async fn update_chat(
+    state: State<'_, AppState>,
+    session_id: String,
+    message: String,
+) -> std::result::Result<String, String> {
+    let app = state.app.clone();
+    let window_label = state.window.clone();
+    let avatar = app.avatar.clone();
+    let cue_app = app.clone();
+    let answer_session = session_id.clone();
+    let _ = app.history.append(
+        &session_id,
+        &jimmy_agent::core::types::Message::user(message.clone()),
+    );
+
+    tauri::async_runtime::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
+        let forward_window: Option<WebviewWindow> = window_label.clone();
+        let relay_avatar = avatar.clone();
+
+        // Relais allégé : tout vers la fenêtre, la réponse finale dans la
+        // bulle de l'avatar.
+        let relay = tauri::async_runtime::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let Some(window) = &forward_window {
+                    let _ = window.emit("agent-event", &event);
+                }
+                match &event {
+                    AgentEvent::ToolStart { .. } => {
+                        let _ = relay_avatar.set_state(AvatarState::Thinking, "").await;
+                    }
+                    AgentEvent::Final { text } => {
+                        relay_avatar.say(text, 0).await;
+                    }
+                    AgentEvent::Failed { .. } => {
+                        let _ = relay_avatar.set_state(AvatarState::Error, "").await;
+                    }
+                    AgentEvent::Detached { .. } | AgentEvent::Background { .. } => {
+                        background_avatar(&relay_avatar, &event).await;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let stop_session = answer_session.clone();
+        let run_session = answer_session.clone();
+        let update_app = cue_app.clone();
+        let ticket = cue_app.start_task(&answer_session, &message, tx, move |tx, _background| {
+            jimmy_agent::update::apply(update_app, run_session, tx)
+        });
+        let outcome = match ticket.wait().await {
+            jimmy_agent::TaskOutcome::Done(outcome) => outcome,
+            jimmy_agent::TaskOutcome::Detached => return,
+        };
+        let _ = relay.await;
+
+        if let Err(jimmy_agent::error::Error::Cancelled) = &outcome {
+            log::info!("[agent] mise à jour arrêtée à la demande de l'utilisateur");
+            let _ = cue_app.history.append(
+                &stop_session,
+                &jimmy_agent::core::types::Message::assistant("(Mise à jour arrêtée à la demande de l'utilisateur, avant la fin.)"),
+            );
+            if let Some(window) = &window_label {
+                let _ = window.emit(
+                    "agent-event",
+                    AgentEvent::Final { text: "Arrêté à ta demande. Le Jimmy actuel tourne toujours.".into() },
+                );
+            }
+            let _ = avatar.set_state(AvatarState::Idle, "").await;
+            return;
+        }
+
+        match &outcome {
+            Ok(answer) => {
+                let _ = cue_app.history.append(
+                    &stop_session,
+                    &jimmy_agent::core::types::Message::assistant(answer.text.clone()),
+                );
+                cue_app.speak(&answer.text).await
+            }
+            Err(error) => {
+                let _ = cue_app.history.append(
+                    &stop_session,
+                    &jimmy_agent::core::types::Message::assistant(format!("(Mise à jour impossible : {error})")),
+                );
+                cues::play(&cue_app, Cue::Error).await
+            }
         }
 
         if let Err(error) = outcome {

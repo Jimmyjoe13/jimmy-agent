@@ -21,6 +21,7 @@ pub mod sensitive;
 pub mod skills;
 pub mod tasks;
 pub mod tools;
+pub mod update;
 pub mod voice;
 
 use std::sync::{Arc, RwLock};
@@ -1234,6 +1235,9 @@ impl App {
         serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
             "dev": self.paths.dev,
+            "update": {
+                "pending": update::load_state(&self.paths.data).pending,
+            },
             "data_dir": self.paths.data,
             "workspace": settings.workspace,
             "llm": {

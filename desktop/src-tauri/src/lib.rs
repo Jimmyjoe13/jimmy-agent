@@ -201,6 +201,13 @@ pub fn run() {
                     tauri::async_runtime::spawn(jimmy_agent::growth::review_loop(app_for_growth));
                 }
 
+                // Mises à jour : détection (commit local vs `origin/main`) et
+                // notification (bulle, session, pastille), en tâche de fond.
+                {
+                    let app_for_update = app.clone();
+                    tauri::async_runtime::spawn(jimmy_agent::update::update_loop(app_for_update));
+                }
+
                 if !settings.ui.first_run_done {
                     // Premier lancement : on montre l'interface pour l'onboarding.
                     if let Some(window) = handle.get_webview_window("main") {

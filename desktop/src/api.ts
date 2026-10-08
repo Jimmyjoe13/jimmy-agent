@@ -107,6 +107,7 @@ export interface VoiceStatus {
 export interface Status {
   version: string;
   dev: boolean;
+  update: { pending: boolean };
   data_dir: string;
   workspace: string;
   llm: {
