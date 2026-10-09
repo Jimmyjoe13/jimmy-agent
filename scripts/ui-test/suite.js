@@ -124,7 +124,7 @@ let stepPage = null;
     const free = await p.locator(".composer button.primary").textContent();
     expect(free === "Envoyer", `bouton après réponse : « ${free} »`);
     const labels = await p.$$eval(".stream .bubble", (els) => els.map((e) => e.textContent));
-    expect(!labels.some((t) => /^(Jimmy|Vous)/.test(t)), "libellé en double dans une bulle");
+    expect(!labels.some((t) => /^(Jimy|Jimmy|Vous)/.test(t)), "libellé en double dans une bulle");
     return `« ${text.slice(0, 60)} »`;
   });
 
@@ -395,8 +395,8 @@ let stepPage = null;
       return img instanceof HTMLImageElement && img.src.startsWith("data:image/jpeg;base64,");
     });
     expect(ok, "vignette absente ou pas en JPEG");
-    // La fenêtre principale de Jimmy s'intitule « Jimmy » : elle doit être écartée.
-    expect(label !== "Fenêtre jointe : « Jimmy »", "la capture vise la fenêtre de Jimmy");
+    // La fenêtre principale s'intitule « Jimy » : elle doit être écartée.
+    expect(label !== "Fenêtre jointe : « Jimy »", "la capture vise la fenêtre de Jimy");
     await p.locator(".capture-chip button", { hasText: "Retirer" }).click();
     await p.waitForSelector(".capture-chip[hidden]", { state: "attached", timeout: 5000 });
     return label;

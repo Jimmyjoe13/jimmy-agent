@@ -60,7 +60,7 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
   function keyState(status: ProviderStatus | undefined): HTMLElement {
     if (!status) return h("span", { class: "badge" }, "état inconnu");
     if (status.key_from === "abonnement") {
-      return h("span", { class: "badge ok", title: "Jeton lu dans la session Claude Code (~/.claude/.credentials.json), rafraîchi par Jimmy" }, `abonnement${status.subscription ? ` ${status.subscription}` : ""}`);
+      return h("span", { class: "badge ok", title: "Jeton lu dans la session Claude Code (~/.claude/.credentials.json), rafraîchi par Jimy" }, `abonnement${status.subscription ? ` ${status.subscription}` : ""}`);
     }
     if (status.key_from === "interface") {
       return h("span", { class: "badge ok", title: "Clé saisie dans l'interface, stockée dans config.json (jamais journalisée)" }, `clé ••••${status.key_hint ?? ""}`);

@@ -2,7 +2,7 @@
  * Vue Chat : l'écran principal, texte d'abord, vocal ensuite.
  *
  * Une conversation peut être rattachée à un **projet** (un dossier), à la
- * manière de Codex Desktop : Jimmy y travaille, et le panneau « Fichiers »
+ * manière de Codex Desktop : Jimy y travaille, et le panneau « Fichiers »
  * permet d'y naviguer sans quitter le chat.
  */
 import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo, type ScreenCapture, type TaskInfo } from "../api";
@@ -44,7 +44,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   // `final` la remplace par la réponse complète, un appel d'outil la résout
   // en ligne d'activité (ce qui était écrit n'était qu'une annonce).
   let streaming: HTMLElement | null = null;
-  // Fichiers écrits par Jimmy dans le tour courant (`write_file`) : la
+  // Fichiers écrits par Jimy dans le tour courant (`write_file`) : la
   // matière du bloc « travaux » ajouté sous la réponse finale.
   let turnFiles: string[] = [];
   // Fichiers écrits par chaque tâche de fond : son bloc « travaux » à la fin.
@@ -98,7 +98,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   function renderProject() {
     const path = project ?? defaultFolder?.path ?? "";
     projectLabel.textContent = project ? nameOf(project) : "aucun (dossier par défaut)";
-    projectButton.setAttribute("title", path ? `Jimmy travaille dans : ${path}` : "Choisir un projet");
+    projectButton.setAttribute("title", path ? `Jimy travaille dans : ${path}` : "Choisir un projet");
     if (path) explorer.setRoot(path, project ? nameOf(project) : "Dossier par défaut");
   }
 
@@ -112,7 +112,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     if (!sessionId) ctx.pendingProject = path;
     renderProject();
     if (path && !readable) {
-      toast("Jimmy n'a pas la permission de lire ce dossier : ajoute-le dans Paramètres → Permissions.", "error");
+      toast("Jimy n'a pas la permission de lire ce dossier : ajoute-le dans Paramètres → Permissions.", "error");
     } else if (path) {
       toast(`Projet : ${nameOf(path)}`);
     }
@@ -172,13 +172,13 @@ export function chatView(ctx: AppContext): HTMLElement {
   const stream = h("div", { class: "stream", "aria-live": "polite" });
   // Journal d'activité (outils, mémoire, vault). Masqué en CSS tant qu'il
   // est vide. Avant, il n'était jamais inséré dans la page.
-  const activity = h("div", { class: "activity", "aria-label": "Activité de Jimmy" });
+  const activity = h("div", { class: "activity", "aria-label": "Activité de Jimy" });
 
   const input = h("textarea", {
     class: "composer-input",
     rows: 1,
-    placeholder: "Dis à Jimmy ce qu'il doit faire…",
-    "aria-label": "Message pour Jimmy",
+    placeholder: "Dis à Jimy ce qu'il doit faire…",
+    "aria-label": "Message pour Jimy",
   }) as HTMLTextAreaElement;
   const sendLabel = h("span", { class: "send-label" }, "Envoyer");
   const sendButton = h(
@@ -187,7 +187,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     icon("send", 17, 2.2),
     sendLabel,
   );
-  // Arrêt d'urgence, visible pendant que Jimmy travaille (équivaut à « STOP »).
+  // Arrêt d'urgence, visible pendant que Jimy travaille (équivaut à « STOP »).
   const stopButton = h(
     "button",
     {
@@ -250,7 +250,7 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   // ── Vision : « Joindre ma fenêtre » ───────────────────────────────────────
   // Capture au clic (ce qui est montré est ce qui part), vignette retirable,
-  // jointe au prochain message. Jimmy ne capture jamais de lui-même.
+  // jointe au prochain message. Jimy ne capture jamais de lui-même.
   let capture: ScreenCapture | null = null;
   const captureChip = h("div", { class: "capture-chip", hidden: true });
 
@@ -282,7 +282,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     "button",
     {
       class: "ghost capture-button",
-      title: "Joindre la fenêtre sur laquelle tu travailles (Jimmy ne regarde jamais sans ta demande)",
+      title: "Joindre la fenêtre sur laquelle tu travailles (Jimy ne regarde jamais sans ta demande)",
       onclick: async () => {
         const got = await guard(() => api.screenCapture(), "capture");
         if (!got) return;
@@ -334,7 +334,7 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   // ── Mentions « @ » (façon Codex) ───────────────────────────────────────────
   // « @ » ouvre un menu des fichiers du projet ; les suivants du jeton
-  // filtrera. Entrée, Tab ou clic insère le chemin relatif en texte : Jimmy
+  // filtrera. Entrée, Tab ou clic insère le chemin relatif en texte : Jimy
   // lit le chemin comme n'importe quel texte, l'interface n'envoie rien de
   // spécial. Menu dans le composer : le clic dehors le referme.
   const mentionMenu = h("div", { class: "mention-menu", hidden: true, role: "listbox" });
@@ -444,7 +444,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     stopButton.hidden = !busy;
     if (busy) {
       sendButton.setAttribute("disabled", "");
-      sendLabel.textContent = "Jimmy travaille…";
+      sendLabel.textContent = "Jimy travaille…";
     } else {
       sendButton.removeAttribute("disabled");
       sendLabel.textContent = "Envoyer";
@@ -716,7 +716,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       pending = h(
         "div",
         { class: "bubble assistant pending" },
-        h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimmy réfléchit"),
+        h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
       );
       append(pending);
     }
@@ -738,7 +738,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     }, ANSWER_TIMEOUT_MS);
   }
 
-  /** Un événement du tour en cours prouve que Jimmy travaille : le filet
+  /** Un événement du tour en cours prouve que Jimy travaille : le filet
    *  repart de zéro. Sans tour suivi (filet jamais armé, ex. commande vocale),
    *  ne rien faire : ne pas étendre le périmètre du filet en douce. */
   function pokeSafety() {
@@ -757,13 +757,13 @@ export function chatView(ctx: AppContext): HTMLElement {
     }
   }
 
-  /** Carte « Autoriser / Refuser » : Jimmy veut modifier un fichier sensible
+  /** Carte « Autoriser / Refuser » : Jimy veut modifier un fichier sensible
    *  (`.env`, clés, secrets) et son outil est suspendu jusqu'à la réponse. */
   function showApproval(event: AgentEvent) {
     const id = event.id ?? "";
     if (!id || approvalCards.has(id)) return;
     if (event.taskId) approvalTasks.set(id, event.taskId);
-    const status = h("span", { class: "approval-status" }, "Jimmy attend ta réponse");
+    const status = h("span", { class: "approval-status" }, "Jimy attend ta réponse");
     const allow = h("button", { class: "primary small" }, "Autoriser") as HTMLButtonElement;
     const deny = h("button", { class: "danger small" }, "Refuser") as HTMLButtonElement;
     const answer = async (approved: boolean) => {
@@ -832,7 +832,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     pending = h(
       "div",
       { class: "bubble assistant pending" },
-      h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimmy réfléchit"),
+      h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
     );
     append(pending);
     setBusy(true);
@@ -1009,7 +1009,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           pending = h(
             "div",
             { class: "bubble assistant pending" },
-            h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimmy réfléchit"),
+            h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
           );
           append(pending);
         }
@@ -1089,7 +1089,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           h("div", { class: "chat-orb-shell" }, h("div", { class: "chat-orb-core" })),
         ),
         title,
-        h("p", { class: "chat-empty-example" }, "Exemple : « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »"),
+        h("p", { class: "chat-empty-example" }, "Exemple : « Jimy, analyse ce dossier et explique-moi ce que tu trouves. »"),
         h(
           "div",
           { class: "chat-suggestions" },
@@ -1115,7 +1115,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   /**
    * Conversation vocale qui démarre ou continue : le Chat l'adopte. Si elle
    * n'a pas de projet et qu'un projet est ouvert dans le Chat, il lui est
-   * appliqué — Jimmy y travaille aussi à la voix.
+   * appliqué — Jimy y travaille aussi à la voix.
    */
   async function adoptVoiceSession(id: string) {
     if (id === sessionId) return;

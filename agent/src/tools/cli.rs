@@ -29,7 +29,7 @@ impl Tool for RunCommand {
         schema(
             serde_json::json!({
                 "command": {"type": "string", "description": "Ligne de commande à exécuter, ex. « git status --short »."},
-                "cwd": {"type": "string", "description": "Dossier de travail. Par défaut le dossier de travail de Jimmy."},
+                "cwd": {"type": "string", "description": "Dossier de travail. Par défaut le dossier de travail de Jimy."},
                 "timeout_ms": {"type": "integer", "description": "Durée maximale, en millisecondes (défaut 120000)."}
             }),
             &["command"],

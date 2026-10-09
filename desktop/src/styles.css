@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────────
-   Jimmy — feuille de style unique.
+   Jimy — feuille de style unique.
    Thème graphite, accent cuivre (le renard) — refonte d'après la maquette
    Claude Design du 9 octobre 2026. Aucune dépendance : pas de framework CSS,
    polices embarquées (assets/fonts, OFL) — l'interface doit démarrer
@@ -751,7 +751,7 @@ input[type="range"] {
   content: "erreur";
 }
 
-/* Carte d'autorisation : Jimmy veut modifier un fichier sensible et attend
+/* Carte d'autorisation : Jimy veut modifier un fichier sensible et attend
  * l'accord explicite de l'utilisateur. */
 .bubble.approval {
   align-self: flex-start;
@@ -805,7 +805,7 @@ input[type="range"] {
   background: var(--bg-card);
 }
 
-/* Bulle d'attente : trois points animés pendant que Jimmy travaille. */
+/* Bulle d'attente : trois points animés pendant que Jimy travaille. */
 .bubble.pending p {
   color: var(--text-dim);
 }
@@ -900,7 +900,7 @@ input[type="range"] {
 }
 
 .bubble.assistant::before {
-  content: "jimmy";
+  content: "jimy";
 }
 
 .chip {
@@ -1484,7 +1484,7 @@ input[type="range"] {
   letter-spacing: 0.16em;
 }
 
-/* Fil « ce que Jimmy entend » (vue Voix). */
+/* Fil « ce que Jimy entend » (vue Voix). */
 .heard {
   display: flex;
   flex-direction: column;
@@ -1511,7 +1511,7 @@ input[type="range"] {
   border-color: rgba(52, 211, 153, 0.5);
 }
 
-/* Bandeau de phase : ce que Jimmy attend de toi, à chaque instant. */
+/* Bandeau de phase : ce que Jimy attend de toi, à chaque instant. */
 .phase-banner {
   display: flex;
   align-items: center;

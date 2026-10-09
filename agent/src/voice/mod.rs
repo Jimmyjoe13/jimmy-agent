@@ -837,6 +837,19 @@ mod tests {
         assert_eq!(strip_wake_word("Guimmi, quelle heure est-il ?", "jimmy"), "quelle heure est-il ?");
     }
 
+    /// L'agent s'appelle « Jimy » (9 octobre) ; whisper écrit presque toujours
+    /// « Jimmy ». Les deux orthographes doivent déclencher, dans les deux sens
+    /// (une config restée sur « jimmy » comme une neuve sur « jimy »).
+    #[test]
+    fn jimy_et_jimmy_se_valent() {
+        for transcript in ["Jimmy, ouvre mes notes", "Jimy, ouvre mes notes", "Hé Jimmy !", "Guimmi, quelle heure est-il ?", "Djimi, analyse ça"] {
+            assert!(matches_wake_word(transcript, "jimy"), "{transcript}");
+        }
+        assert!(matches_wake_word("Jimy, ouvre mes notes", "jimmy"));
+        assert_eq!(strip_wake_word("Jimmy, quelle heure est-il ?", "jimy"), "quelle heure est-il ?");
+        assert!(!matches_wake_word("Jean, ouvre mes notes", "jimy"));
+    }
+
     #[test]
     fn interjection_avant_le_nom() {
         assert!(matches_wake_word("Hé Jimmy, ouvre mes notes", "jimmy"));

@@ -21,7 +21,7 @@ impl Tool for SearchMemory {
         "search_memory"
     }
     fn description(&self) -> &str {
-        "Interroge la mémoire personnelle de Jimmy (préférences, projets, habitudes apprises à partir des conversations)."
+        "Interroge la mémoire personnelle de Jimy (préférences, projets, habitudes apprises à partir des conversations)."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
@@ -113,7 +113,7 @@ impl Tool for VaultSearch {
         "vault_search"
     }
     fn description(&self) -> &str {
-        "Recherche en plein texte dans le vault Obsidian de l'utilisateur, partagé avec d'autres agents (notes, projets, journaux d'agents, souvenirs de Jimmy). Renvoie les extraits les plus proches avec leur note et son origine (« ta note » ou « partagée »)."
+        "Recherche en plein texte dans le vault Obsidian de l'utilisateur, partagé avec d'autres agents (notes, projets, journaux d'agents, souvenirs de Jimy). Renvoie les extraits les plus proches avec leur note et son origine (« ta note » ou « partagée »)."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
@@ -199,7 +199,7 @@ impl Tool for VaultWrite {
         "vault_write"
     }
     fn description(&self) -> &str {
-        "Écrit un souvenir durable dans le dossier de Jimmy, dans le vault Obsidian : une note datée que l'utilisateur relit comme les autres. À n'utiliser que si l'information est stable et utile plus tard."
+        "Écrit un souvenir durable dans le dossier de Jimy, dans le vault Obsidian : une note datée que l'utilisateur relit comme les autres. À n'utiliser que si l'information est stable et utile plus tard."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(

@@ -4,7 +4,7 @@ import { MEMORY_KIND_LABEL, QUALITY_LABEL, STATE_LABEL, attempt, formatTime, gua
 import type { AppContext } from "../context";
 import { card, toggle } from "./settings";
 
-/** Mémoire : ce que Jimmy a retenu, et le droit de l'oublier. */
+/** Mémoire : ce que Jimy a retenu, et le droit de l'oublier. */
 export function memoryView(ctx: AppContext): HTMLElement {
   const container = h("section", { class: "view" });
   const list = h("div", { class: "list" });
@@ -19,7 +19,7 @@ export function memoryView(ctx: AppContext): HTMLElement {
           "div",
           { class: "empty" },
           h("p", {}, "La mémoire est vide pour l'instant."),
-          h("p", { class: "hint" }, "Jimmy extrait des préférences et des règles au fil des échanges."),
+          h("p", { class: "hint" }, "Jimy extrait des préférences et des règles au fil des échanges."),
         ),
       );
       return;
@@ -49,7 +49,7 @@ export function memoryView(ctx: AppContext): HTMLElement {
               {
                 class: "danger",
                 onclick: async () => {
-                  if (!window.confirm("Oublier ce souvenir ? Jimmy ne pourra plus s'en servir.")) return;
+                  if (!window.confirm("Oublier ce souvenir ? Jimy ne pourra plus s'en servir.")) return;
                   if (!(await attempt(() => api.memoryForget(memory.id), "oubli"))) return;
                   await ctx.refreshStatus();
                   await reload();
@@ -107,9 +107,9 @@ const MCP_STATE: Record<McpServerStatus["state"], { label: string; cls: string }
 };
 
 /**
- * Skills : deux sous-onglets. « Skills » : les procédures que Jimmy sait
+ * Skills : deux sous-onglets. « Skills » : les procédures que Jimy sait
  * appliquer, et qu'il peut créer. « Serveurs MCP » : les serveurs connectés
- * (ajoutés en config ou par Jimmy via `mcp_add_server`) et leurs outils.
+ * (ajoutés en config ou par Jimy via `mcp_add_server`) et leurs outils.
  */
 export function skillsView(): HTMLElement {
   const container = h("section", { class: "view" });
@@ -147,7 +147,7 @@ export function skillsView(): HTMLElement {
           "div",
           { class: "empty" },
           h("p", {}, "Aucun serveur MCP."),
-          h("p", { class: "hint" }, "Demande à Jimmy : « connecte-toi au serveur MCP … ». Il l'ajoutera lui-même."),
+          h("p", { class: "hint" }, "Demande à Jimy : « connecte-toi au serveur MCP … ». Il l'ajoutera lui-même."),
         ),
       );
       return;
@@ -201,7 +201,7 @@ export function skillsView(): HTMLElement {
           h(
             "p",
             { class: "hint" },
-            "Dis à Jimmy : « la prochaine fois, fais toujours X comme ça ». Il en créera un lui-même.",
+            "Dis à Jimy : « la prochaine fois, fais toujours X comme ça ». Il en créera un lui-même.",
           ),
         ),
       );
@@ -228,7 +228,7 @@ export function skillsView(): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Un skill par dossier, avec un fichier SKILL.md. Jimmy peut en créer et en améliorer lui-même.",
+        "Un skill par dossier, avec un fichier SKILL.md. Jimy peut en créer et en améliorer lui-même.",
       ),
       list,
     ),
@@ -240,7 +240,7 @@ export function skillsView(): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Les outils de ces serveurs sont proposés à Jimmy comme les siens. Les clés présentes dans les commandes sont masquées.",
+        "Les outils de ces serveurs sont proposés à Jimy comme les siens. Les clés présentes dans les commandes sont masquées.",
       ),
       mcpList,
     ),
@@ -260,7 +260,7 @@ export function skillsView(): HTMLElement {
   return container;
 }
 
-/** Skin : choix de l'apparence de Jimmy, appliqué à chaud par Godot. */
+/** Skin : choix de l'apparence de Jimy, appliqué à chaud par Godot. */
 export function skinView(ctx: AppContext): HTMLElement {
   const skinButtons = h(
     "div",
@@ -304,7 +304,7 @@ export function skinView(ctx: AppContext): HTMLElement {
     ),
   );
 
-  const bubbleInput = h("input", { class: "field", value: "Bonjour, je suis Jimmy." }) as HTMLInputElement;
+  const bubbleInput = h("input", { class: "field", value: "Bonjour, je suis Jimy." }) as HTMLInputElement;
   const dodgeToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
   dodgeToggle.checked = ctx.status.avatar.dodge;
   dodgeToggle.addEventListener("change", async () => {
@@ -314,7 +314,7 @@ export function skinView(ctx: AppContext): HTMLElement {
       return;
     }
     await ctx.refreshStatus();
-    toast(enabled ? "Jimmy s'écartera à l'approche de la souris" : "Esquive désactivée");
+    toast(enabled ? "Jimy s'écartera à l'approche de la souris" : "Esquive désactivée");
   });
 
   return h(
@@ -333,7 +333,7 @@ export function skinView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Jimmy est l'identité, le skin n'est qu'une apparence : le changer ne touche ni à la mémoire ni aux réglages.",
+        "Jimy est l'identité, le skin n'est qu'une apparence : le changer ne touche ni à la mémoire ni aux réglages.",
       ),
     ),
     card("Qualité graphique", h("p", { class: "note" }, "Appliquée immédiatement à l'avatar Godot."), qualityButtons),
@@ -342,7 +342,7 @@ export function skinView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Seul le personnage capte la souris : le reste de sa fenêtre laisse passer les clics vers le bureau. Avec l'esquive, Jimmy s'écarte quand le curseur approche et revient à sa place ensuite — va le chercher là où il s'est réfugié pour le cliquer.",
+        "Seul le personnage capte la souris : le reste de sa fenêtre laisse passer les clics vers le bureau. Avec l'esquive, Jimy s'écarte quand le curseur approche et revient à sa place ensuite — va le chercher là où il s'est réfugié pour le cliquer.",
       ),
       toggle("S'écarter à l'approche de la souris", dodgeToggle),
     ),

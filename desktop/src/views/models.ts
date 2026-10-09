@@ -3,7 +3,7 @@
  *
  * La liste vient du compte du fournisseur sélectionné (ce qu'il accepte
  * réellement), enrichie par le catalogue public pour OpenCode Go. Chaque
- * modèle se **teste** dans les conditions de Jimmy — une requête simple, puis
+ * modèle se **teste** dans les conditions de Jimy — une requête simple, puis
  * avec un outil — et un modèle qui échoue ne peut pas être choisi :
  * « fonctionnel » veut dire vérifié.
  *
@@ -240,7 +240,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
     }
     if (!result.tools) {
       const accepted = window.confirm(
-        `« ${id} » répond, mais refuse les outils.\n\nAvec lui, Jimmy ne pourrait plus lire de fichiers ni lancer de commandes : il ne ferait que discuter.\n\nL'appliquer quand même ?`,
+        `« ${id} » répond, mais refuse les outils.\n\nAvec lui, Jimy ne pourrait plus lire de fichiers ni lancer de commandes : il ne ferait que discuter.\n\nL'appliquer quand même ?`,
       );
       if (!accepted) return;
     }
@@ -518,8 +518,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
       "p",
       { class: "note" },
       onlyRole === "voice"
-        ? "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi comme modèle vocal que s'il répond. Le choix s'applique tout de suite."
-        : "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimmy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
+        ? "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimy le fait (puis une avec outils) : un modèle ne peut être choisi comme modèle vocal que s'il répond. Le choix s'applique tout de suite."
+        : "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
     ),
     current,
     h(

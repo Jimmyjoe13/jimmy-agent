@@ -173,7 +173,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
       ),
       card(
         "Voix et écoute",
-        h("p", { class: "note" }, "Tout ce qui touche à la voix de Jimmy (modèle vocal, synthèse, écoute, mot d'activation) se règle dans l'onglet ", h("strong", {}, "Voix"), "."),
+        h("p", { class: "note" }, "Tout ce qui touche à la voix de Jimy (modèle vocal, synthèse, écoute, mot d'activation) se règle dans l'onglet ", h("strong", {}, "Voix"), "."),
       ),
       card(
         "Avatar",
@@ -225,15 +225,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
         h(
           "p",
           { class: "note" },
-          "Mémoire persistante de Jimmy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimmy lit tout le vault et écrit dans son dossier.",
+          "Mémoire persistante de Jimy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimy lit tout le vault et écrit dans son dossier.",
         ),
         toggle("Connecter le vault Obsidian", vaultEnabled),
         field("Chemin du vault", vaultPathInput),
-        field("Dossier des souvenirs de Jimmy", vaultFolderInput),
+        field("Dossier des souvenirs de Jimy", vaultFolderInput),
       ),
       card(
         "Permissions",
-        h("p", { class: "note" }, "Jimmy agit sans redemander tant qu'une capacité est accordée."),
+        h("p", { class: "note" }, "Jimy agit sans redemander tant qu'une capacité est accordée."),
         h(
           "div",
           { class: "permissions" },
@@ -270,7 +270,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
       modelsCard,
       card(
         "Budget de l'agent",
-        h("p", { class: "note" }, "Limites d'une seule demande. Trop bas, Jimmy s'arrête avant d'avoir fini ; trop haut, une dérive coûte cher."),
+        h("p", { class: "note" }, "Limites d'une seule demande. Trop bas, Jimy s'arrête avant d'avoir fini ; trop haut, une dérive coûte cher."),
         field("Jetons maximum par réponse", maxTokensInput),
         h(
           "p",
@@ -327,7 +327,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
         h(
           "p",
           { class: "note" },
-          "Une capacité non accordée produit un refus lisible que Jimmy reçoit et peut expliquer.",
+          "Une capacité non accordée produit un refus lisible que Jimy reçoit et peut expliquer.",
         ),
         ...rows,
         h(
@@ -353,7 +353,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
 
 /** Durées proposées pour la conversation continue : [secondes, libellé]. */
 export const FOLLOW_UP_CHOICES: [number, string][] = [
-  [0, "Désactivée (dire « Jimmy » à chaque phrase)"],
+  [0, "Désactivée (dire « Jimy » à chaque phrase)"],
   [5, "5 secondes"],
   [8, "8 secondes (recommandé)"],
   [12, "12 secondes"],

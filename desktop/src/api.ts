@@ -167,7 +167,7 @@ export interface ProjectInfo {
   path: string;
   name: string;
   exists: boolean;
-  /** Lisible avec les permissions de Jimmy. */
+  /** Lisible avec les permissions de Jimy. */
   readable: boolean;
 }
 
@@ -518,7 +518,7 @@ export const api = {
   skillsList: () => invoke<Skill[]>("skills_list"),
   skillRead: (name: string) => invoke<string>("skill_read", { name }),
   mcpServers: () => invoke<McpServerStatus[]>("mcp_servers"),
-  /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimmy). */
+  /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimy). */
   agentStop: () => invoke<boolean>("agent_stop"),
   tasksList: () => invoke<TaskInfo[]>("tasks_list"),
   taskStop: (id: string) => invoke<boolean>("task_stop", { id }),
@@ -526,7 +526,7 @@ export const api = {
   ttsSearchVoices: (query: string) => invoke<VoiceInfo[]>("tts_search_voices", { query }),
   ttsSetVoice: (voice: VoiceInfo) => invoke<void>("tts_set_voice", { voice }),
   ttsRemoveVoice: (id: string) => invoke<string>("tts_remove_voice", { id }),
-  /** `voice` : écouter une autre voix que celle de Jimmy (bibliothèque). */
+  /** `voice` : écouter une autre voix que celle de Jimy (bibliothèque). */
   ttsPreview: (text: string, voice?: string) =>
     invoke<{ bytes: number; durationMs: number }>("tts_preview", { text, voice: voice ?? null }),
   voiceDevices: () => invoke<string[]>("voice_devices"),

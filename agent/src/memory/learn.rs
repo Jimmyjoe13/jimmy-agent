@@ -83,7 +83,7 @@ pub async fn learn(
     let messages = vec![
         Message::system(EXTRACTOR),
         Message::user(format!(
-            "Demande de l'utilisateur :\n{request}\n\nRéponse de Jimmy :\n{answer}{incidents}"
+            "Demande de l'utilisateur :\n{request}\n\nRéponse de Jimy :\n{answer}{incidents}"
         )),
     ];
     // L'extraction tourne en tâche de fond (aucune latence pour

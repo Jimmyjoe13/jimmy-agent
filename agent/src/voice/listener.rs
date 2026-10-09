@@ -347,7 +347,7 @@ impl App {
                     };
                     if command.trim().is_empty() {
                         log::info!("[voice] rien entendu après le nom");
-                        emit(&events, AgentEvent::Notice { message: "Je n'ai rien entendu après « Jimmy ».".into() }).await;
+                        emit(&events, AgentEvent::Notice { message: "Je n'ai rien entendu après « Jimy ».".into() }).await;
                         emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
                         phase(&events, "idle", Duration::ZERO).await;
                         // Sinon le même « Jimmy » serait redétecté au tour suivant.

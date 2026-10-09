@@ -11,7 +11,7 @@ impl Tool for ListSkills {
         "list_skills"
     }
     fn description(&self) -> &str {
-        "Liste les skills dont Jimmy dispose, avec leur description. Utile avant d'en créer un nouveau."
+        "Liste les skills dont Jimy dispose, avec leur description. Utile avant d'en créer un nouveau."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(serde_json::json!({}), &[])

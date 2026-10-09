@@ -1,17 +1,17 @@
-# JIMMY — agent IA desktop incarné
+# JIMY — agent IA desktop incarné
 
 > **Statut : prototype personnel V1 — local**
 > Un assistant agentique qui vit sur le bureau de Windows, incarné par un
 > renard humanoïde 3D, et qui travaille **à la voix**.
 
-Jimmy n'est pas un chatbot dans une fenêtre. C'est un personnage que l'on peut
+Jimy n'est pas un chatbot dans une fenêtre. C'est un personnage que l'on peut
 déplacer sur son bureau, qui réagit à ce qu'il fait, et à qui l'on parle
-principalement en disant « Jimmy ».
+principalement en disant « Jimy ».
 
 Tout tourne sur votre machine. Les seuls échanges réseau sont ceux, explicitement
 nécessaires, vers les fournisseurs d'IA (OpenCode Go pour le modèle, Fish Audio
 pour la voix), les serveurs MCP que vous branchez (dont la mémoire SynaptiQ) et
-les sites que Jimmy visite dans son navigateur. L'audio **ne quitte jamais
+les sites que Jimy visite dans son navigateur. L'audio **ne quitte jamais
 l'ordinateur** ; une capture de fenêtre ne part au modèle **que si vous la
 demandez**.
 
@@ -59,7 +59,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Skills | ✅ création, lecture, amélioration, suggestion | 3 tests unitaires |
 | Vault Obsidian | ✅ lecture plein texte du vault, écriture des souvenirs en notes | recherche réelle sur le vault `C:\Obsidian\Jimmy` |
 | Vault — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
-| Wake word « Jimmy » | ✅ détection locale, variantes ASR gérées | 5 tests unitaires |
+| Wake word « Jimy » | ✅ détection locale, variantes ASR gérées | 5 tests unitaires |
 | Écoute permanente | ✅ micro ouvert, `whisper-server` démarré | `test audio` |
 | STT local | ✅ whisper.cpp, français, hors-ligne | WAV de test transcrit correctement |
 | TTS Fish Audio | ✅ voix française **lue** | `test audio` — PCM 44,1 kHz |
@@ -127,7 +127,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
   en HTTP.
 
 Le crate `jimmy-agent` ne dépend pas de Tauri : c'est un choix d'architecture,
-pas une commodité. Le cœur de Jimmy est donc vérifiable en une commande, sans
+pas une commodité. Le cœur de Jimy est donc vérifiable en une commande, sans
 fenêtre.
 
 ### Arborescence
@@ -145,7 +145,7 @@ jimmy-agent-personnel/
 │   │   ├── skills/         création et amélioration de skills
 │   │   ├── mcp/            client MCP (stdio)
 │   │   └── voice/          micro, wake word, boucle d'écoute
-│   ├── skills/             skills créés par Jimmy
+│   ├── skills/             skills créés par Jimy
 │   └── tests/              test du chemin heureux
 ├── desktop/                application Tauri
 │   ├── src/                interface TypeScript
@@ -222,12 +222,12 @@ bout** :
 
 - l'installeur n'embarque ni `godot/`, ni whisper, ni les skills :
   l'avatar et la voix y sont indisponibles ;
-- les données partent dans `%APPDATA%\Jimmy` (base, config et logs
+- les données partent dans `%APPDATA%\Jimy` (base, config et logs
   frais, sans vos réglages) ;
 - **pas de mise à jour automatique** depuis un installeur : `/update`
   exige un clone git (voir ci-dessous).
 
-Pour un Jimmy complet (avatar, voix, mises à jour), passez par les
+Pour un Jimy complet (avatar, voix, mises à jour), passez par les
 sources (`git clone` + `install.ps1`).
 
 ### Deuxième PC (depuis les sources)
@@ -243,7 +243,7 @@ depuis `.env.example`, et `.\scripts\shortcut.ps1` pour le raccourci.
 **Ne recopiez pas `data/`** (base, journaux, extraits audio et chemins
 de l'autre machine) ; les modèles whisper sont retéléchargés par
 `install.ps1`. SynaptiQ reste optionnel (tunnel SSH vers le serveur,
-voir HANDOFF) : sans lui, Jimmy travaille avec le vault seul.
+voir HANDOFF) : sans lui, Jimy travaille avec le vault seul.
 
 ---
 
@@ -251,7 +251,7 @@ voir HANDOFF) : sans lui, Jimmy travaille avec le vault seul.
 
 ### Le plus simple : le raccourci Bureau
 
-Un raccourci **Jimmy** est posé sur le bureau. Un double-clic lance
+Un raccourci **Jimy** est posé sur le bureau. Un double-clic lance
 l'application avec son avatar, sans fenêtre de console et sans compilation.
 
 Pour le (re)créer, ou gérer le démarrage automatique :
@@ -275,13 +275,13 @@ le compiler plutôt que d'échouer en silence.
 .\scripts\dev.ps1
 ```
 
-Au premier lancement, Jimmy :
+Au premier lancement, Jimy :
 
 1. démarre son avatar sur le bureau ;
 2. affiche l'onboarding (nom, modèle, voix, qualité, langue) ;
 3. se met en écoute du mot d'activation.
 
-**Fermer la fenêtre ne tue pas Jimmy** : il reste sur le bureau avec son
+**Fermer la fenêtre ne tue pas Jimy** : il reste sur le bureau avec son
 avatar. Pour le quitter, fermez le processus ou utilisez la zone de
 notification.
 
@@ -338,10 +338,10 @@ avec recherche et écoute avant choix. Voix de départ :
 
 **L'écoute permanente** se pilote depuis la vue **Voix** — bouton « Activer
 l'écoute » — et s'active automatiquement à la fin de l'onboarding. Tant qu'elle
-n'est pas active, Jimmy n'ouvre pas le micro et n'entend rien : c'est un choix,
+n'est pas active, Jimy n'ouvre pas le micro et n'entend rien : c'est un choix,
 le micro ne s'active jamais sans que vous l'ayez demandé.
 
-> Fish Audio ne produit pas de WAV (`wav` renvoie 400). Jimmy demande donc du
+> Fish Audio ne produit pas de WAV (`wav` renvoie 400). Jimy demande donc du
 > **PCM 16 bits** : le flux arrive déjà dans le format que la carte son consomme,
 > ce qui évite d'embarquer un décodeur MP3.
 
@@ -393,14 +393,14 @@ Isolément :
 
 À la main, dans l'interface :
 
-> « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »
+> « Jimy, analyse ce dossier et explique-moi ce que tu trouves. »
 
-Jimmy doit détecter « Jimmy », écouter, transcrire, analyser, utiliser ses
+Jimy doit détecter « Jimy », écouter, transcrire, analyser, utiliser ses
 outils, répondre à la voix, animer l'avatar et afficher la réponse dans la
 bulle.
 
 **L'écoute doit être active** (bouton en tête de la vue **Voix**, ou
-automatiquement après l'onboarding). Sinon Jimmy reste muet : c'est voulu.
+automatiquement après l'onboarding). Sinon Jimy reste muet : c'est voulu.
 
 ### Tests automatisés
 
@@ -435,7 +435,7 @@ nu), par exemple les trois formats d'API des modèles :
 Ces points sont assumés pour la V1 et documentés plutôt que masqués :
 
 1. **Mémoire sémantique dépendante de LM Studio.** Les embeddings viennent de
-   LM Studio (`memory/semantic.rs`) ; s'il est éteint, Jimmy retombe sur le
+   LM Studio (`memory/semantic.rs`) ; s'il est éteint, Jimy retombe sur le
    hachage 512 dimensions (`memory/embed.rs`), local mais **non** sémantique
    (« voiture » et « véhicule » ne se rapprochent pas), compensé par la
    recherche lexicale FTS5.
@@ -468,7 +468,7 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
    caractères est tronquée.
 
 8. **Tâches de fond en mémoire.** Une seule à la fois ; un redémarrage de
-   Jimmy perd la tâche en cours (l'historique garde ce qui a été fait).
+   Jimy perd la tâche en cours (l'historique garde ce qui a été fait).
 
 9. **Latence du modèle STT.** `base-q5` (1,3 s) est le défaut pour le wake
    word ; `small-q5` (4,7 s) est plus précis sur le français. Les deux sont

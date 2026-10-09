@@ -35,7 +35,7 @@ function Say-Erreur([string]$m) {
     Add-Type -AssemblyName System.Windows.Forms | Out-Null
     [System.Windows.Forms.MessageBox]::Show(
         $m,
-        'Jimmy',
+        'Jimy',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
 }
@@ -56,7 +56,7 @@ if (Test-Path $release) {
 # Aucun binaire : on explique quoi faire plutôt que d'ouvrir une console qui
 # disparaît aussitôt.
 Say-Erreur @"
-Jimmy n'est pas encore compilé.
+Jimy n'est pas encore compilé.
 
 Ouvre une invite PowerShell dans le dossier du projet et lance :
 
@@ -69,7 +69,7 @@ La première compilation prend quelques minutes.
 $racine = $root
 if ((New-Object System.Windows.Forms.MessageBox).Show(
         "Voulez-vous lancer la compilation maintenant ?",
-        'Jimmy',
+        'Jimy',
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
         [System.Windows.Forms.MessageBoxIcon]::Question) -eq 'Yes') {
     Start-Process -FilePath 'powershell.exe' `

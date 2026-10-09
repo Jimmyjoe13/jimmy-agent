@@ -39,7 +39,7 @@ pub async fn bootstrap(state: State<'_, AppState>) -> std::result::Result<serde_
         "voices": TtsVoice::PRESETS.iter().map(|v| serde_json::json!({
             "id": v.id, "label": v.label, "description": v.description
         })).collect::<Vec<_>>(),
-        "wake_words": ["jimmy"],
+        "wake_words": ["jimy"],
         "startup_modes": ["manual", "with_windows", "with_windows_hidden"],
     }))
 }
@@ -287,7 +287,7 @@ async fn update_chat(
             if let Some(window) = &window_label {
                 let _ = window.emit(
                     "agent-event",
-                    AgentEvent::Final { text: "Arrêté à ta demande. Le Jimmy actuel tourne toujours.".into() },
+                    AgentEvent::Final { text: "Arrêté à ta demande. Le Jimy actuel tourne toujours.".into() },
                 );
             }
             let _ = avatar.set_state(AvatarState::Idle, "").await;

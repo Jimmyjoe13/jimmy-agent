@@ -127,7 +127,7 @@ impl ProviderConfig {
 /// (`claude_plan::inject_billing_block`), ce message ne revient qu'en cas de
 /// durcissement serveur.
 pub const CLAUDE_PLAN_EXTRA_USAGE_MSG: &str =
-    "HTTP 400 — Anthropic ne facture plus les requêtes d'agent (avec outils) d'une app tierce sur l'abonnement : elles puisent dans le solde « extra usage », non activé sur ce compte. Trois issues : activer « extra usage » dans les réglages de Claude (facturation à l'usage), saisir une clé API chez Anthropic, ou laisser Jimmy sur OpenCode Go.";
+    "HTTP 400 — Anthropic ne facture plus les requêtes d'agent (avec outils) d'une app tierce sur l'abonnement : elles puisent dans le solde « extra usage », non activé sur ce compte. Trois issues : activer « extra usage » dans les réglages de Claude (facturation à l'usage), saisir une clé API chez Anthropic, ou laisser Jimy sur OpenCode Go.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmSettings {
@@ -362,7 +362,10 @@ impl Default for SttSettings {
             server_exe: "whisper-server.exe".into(),
             port: 8178,
             wake_window_ms: 2400,
-            wake_word: "jimmy".into(),
+            // Nom de l'agent : « Jimy ». La détection compare la prononciation
+            // (`voice::phonetic`) : « Jimmy », forme que whisper écrit le plus
+            // souvent, déclenche aussi.
+            wake_word: "jimy".into(),
             threads: 0,
             command_model: default_command_model(),
             command_port: default_command_port(),

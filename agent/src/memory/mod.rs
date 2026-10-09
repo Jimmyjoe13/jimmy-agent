@@ -343,7 +343,7 @@ impl MemoryStore {
         if lines.is_empty() {
             return Ok(String::new());
         }
-        Ok(format!("Ce que Jimmy sait de l'utilisateur :\n{}\n", lines.join("\n")))
+        Ok(format!("Ce que Jimy sait de l'utilisateur :\n{}\n", lines.join("\n")))
     }
 
     pub fn mark_used(&self, ids: &[String]) -> Result<()> {

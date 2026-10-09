@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use crate::core::types::Message;
 use crate::error::Result;
 
-const REVIEW: &str = r#"Tu es Jimmy, un assistant personnel. Ceci est une revue périodique de ta croissance, écrite pour être lue par ton utilisateur.
+const REVIEW: &str = r#"Tu es Jimy, un assistant personnel. Ceci est une revue périodique de ta croissance, écrite pour être lue par ton utilisateur.
 
 Tu reçois tes leçons récentes (tirées de tes échecs d'outils) et la liste de tes skills. Rédige une liste COURTE de propositions concrètes :
 - une nouvelle skill à écrire : « name: » un nom en tirets, « description: » quand l'utiliser, et un corps en étapes numérotées ;
@@ -117,7 +117,7 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
     // d'application — l'utilisateur décide, le filet de rejeu décide encore.
     let proposals = if proposals.contains("Amendement proposé") {
         format!(
-            "{proposals}\n\n---\n**Application d'un amendement (sécurisée).** Dans une conversation, demande à Jimmy \
+            "{proposals}\n\n---\n**Application d'un amendement (sécurisée).** Dans une conversation, demande à Jimy \
              d'ajouter la phrase proposée à `data/growth_amendments.md` (sauvegarde `.bak` d'abord), puis lance le \
              filet de rejeu :\n`scripts\\with-msvc.ps1 cargo test --test amendment '--' --ignored`\n\
              L'amendement n'est réellement acté que si le filet passe."

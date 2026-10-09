@@ -8,8 +8,8 @@ config_version=5
 
 [application]
 
-config/name="Jimmy Avatar"
-config/description="Avatar 3D de Jimmy, piloté par Tauri via HTTP local."
+config/name="Jimy Avatar"
+config/description="Avatar 3D de Jimy, piloté par Tauri via HTTP local."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 boot_splash/show_image=false

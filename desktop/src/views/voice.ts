@@ -3,7 +3,7 @@
  *
  * C'est la page qui rend vérifiable la chaîne vocale sans passer par le wake
  * word : on enregistre, on transcrit, on relit. Elle montre aussi ce que
- * comprend le détecteur de « Jimmy », pour diagnosing sans matériel particulier.
+ * comprend le détecteur de « Jimy », pour diagnosing sans matériel particulier.
  */
 import { api } from "../api";
 import { Recorder } from "../audio";
@@ -23,7 +23,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
   const servers = h("div", { class: "note" }, "");
   const heard = h("div", { class: "heard" });
 
-  // Bandeau de phase : à chaque instant, ce que Jimmy attend de toi.
+  // Bandeau de phase : à chaque instant, ce que Jimy attend de toi.
   const phaseText = h("span", { class: "phase-text" }, "…");
   const banner = h("div", { class: "phase-banner idle", role: "status" }, h("span", { class: "phase-dot" }), phaseText);
   let phaseTimer = 0;
@@ -137,11 +137,11 @@ export function voiceView(ctx: AppContext): HTMLElement {
     mount(heard, h("p", { class: "hint" }, "Les phrases transcrites par l'écoute s'affichent ici, en direct."));
   }
 
-  // Fil « ce que Jimmy entend » : le retour qui manquait pour savoir si le
+  // Fil « ce que Jimy entend » : le retour qui manquait pour savoir si le
   // micro capte, et si le mot d'éveil est reconnu.
   ctx.onEvent((event) => {
     if (event.type === "listen") showPhase(event.phase ?? "idle", event.remaining ?? 0);
-    // Après « Oui ? » ou une réponse, Jimmy attend la suite : on le dit clairement.
+    // Après « Oui ? » ou une réponse, Jimy attend la suite : on le dit clairement.
     if (event.type === "state" && event.state === "listening" && (event.detail === "Oui ?" || event.detail === "À toi")) {
       heard.querySelector(".hint")?.remove();
       heard.prepend(
@@ -149,7 +149,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
           "div",
           { class: "heard-line matched" },
           h("span", { class: "heard-tag" }, "à toi"),
-          h("span", {}, event.detail === "À toi" ? "Conversation ouverte — réponds sans dire « Jimmy »." : "Jimmy t'écoute — parle maintenant."),
+          h("span", {}, event.detail === "À toi" ? "Conversation ouverte — réponds sans dire « Jimy »." : "Jimy t'écoute — parle maintenant."),
         ),
       );
       return;
@@ -202,7 +202,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
   }
 
   // ── Synthèse vocale ───────────────────────────────────────────────────────
-  const ttsInput = h("input", { class: "field", type: "text", value: "Bonjour, je suis Jimmy." }) as HTMLInputElement;
+  const ttsInput = h("input", { class: "field", type: "text", value: "Bonjour, je suis Jimy." }) as HTMLInputElement;
   const ttsButton = h("button", { class: "primary", onclick: () => void speak() }, "Lire");
 
   async function speak() {
@@ -250,7 +250,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
   const voices = voicesPanel({ onApplied: () => void ctx.refreshStatus() });
 
   // ── Réglages voix et écoute (rapatriés des Paramètres) ───────────────────
-  // Tout ce qui touche à la voix de Jimmy vit dans cet onglet : modèle vocal
+  // Tout ce qui touche à la voix de Jimy vit dans cet onglet : modèle vocal
   // LLM, synthèse, STT, mot d'activation. Enregistrement dédié : on repart de
   // la copie fraîche de Rust pour ne rien écraser des autres onglets.
   const voiceModelInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
@@ -306,7 +306,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
     fresh.stt.model = sttSelect.value;
     fresh.stt.command_model = commandSelect.value;
     fresh.stt.language = languageSelect.value;
-    fresh.stt.wake_word = wakeWordInput.value.trim() || "jimmy";
+    fresh.stt.wake_word = wakeWordInput.value.trim() || "jimy";
     fresh.tts.cues = cuesEnabled.checked;
     fresh.voice.follow_up_ms = Number(followSelect.value) * 1000;
     fresh.voice.end_of_speech_ms = Math.min(1500, Math.max(400, Number(pauseInput.value) || 700));
@@ -349,7 +349,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
         h(
           "p",
           { class: "note" },
-          "Jimmy garde le micro ouvert et attend « ",
+          "Jimy garde le micro ouvert et attend « ",
           h("strong", {}, capitalize(ctx.status.stt.wake_word)),
           " ». La reconnaissance tourne en local : rien n'est envoyé sur le réseau. Si tu la laisses active, l'écoute reprend toute seule au prochain lancement.",
         ),
@@ -359,7 +359,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
       banner,
       liveMeter,
       servers,
-      h("h4", {}, "Ce que Jimmy entend"),
+      h("h4", {}, "Ce que Jimy entend"),
       heard,
     ),
     card(
@@ -388,13 +388,13 @@ export function voiceView(ctx: AppContext): HTMLElement {
       field("Modèle du wake word (rapide)", sttSelect),
       field("Modèle de la commande (précis)", commandSelect),
       field("Langue", languageSelect),
-      field("Mot d'activation", wakeWordInput, "jimmy"),
+      field("Mot d'activation", wakeWordInput, "jimy"),
       field("Conversation continue (écoute sans redire le nom)", followSelect),
       field("Pause qui termine ta phrase (ms)", pauseInput),
       h(
         "p",
         { class: "note" },
-        "Après chaque réponse, Jimmy t'écoute encore quelques secondes sans que tu aies à redire son nom. Une pause plus courte rend les réponses plus vives, mais Jimmy peut te couper si tu hésites.",
+        "Après chaque réponse, Jimy t'écoute encore quelques secondes sans que tu aies à redire son nom. Une pause plus courte rend les réponses plus vives, mais Jimy peut te couper si tu hésites.",
       ),
       toggle("Sons d'état (« Oui ? » quand tu dis son nom, « Oups… » en cas d'échec)", cuesEnabled),
       toggle("Garder les 40 derniers extraits audio pour le diagnostic (sur cette machine seulement)", debugAudio),
@@ -406,11 +406,11 @@ export function voiceView(ctx: AppContext): HTMLElement {
       ),
     ),
     card(
-      "Voix de Jimmy",
+      "Voix de Jimy",
       h(
         "p",
         { class: "note" },
-        "La voix avec laquelle Jimmy te parle (Fish Audio). « Écouter » lit une phrase d'essai ; « Choisir » l'applique tout de suite. Cherche dans le catalogue pour en ajouter d'autres.",
+        "La voix avec laquelle Jimy te parle (Fish Audio). « Écouter » lit une phrase d'essai ; « Choisir » l'applique tout de suite. Cherche dans le catalogue pour en ajouter d'autres.",
       ),
       voices,
       h("h4", {}, "Lire un texte avec la voix actuelle"),
@@ -487,7 +487,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
     {
       title: "Bonjour.",
       body: [
-        h("p", {}, "Je suis Jimmy. Je vais vivre sur ton bureau et t'aider surtout à la voix."),
+        h("p", {}, "Je suis Jimy. Je vais vivre sur ton bureau et t'aider surtout à la voix."),
         h("p", { class: "note" }, "Ça prend quatre minutes. Chaque étape peut être corrigée plus tard dans les paramètres."),
       ],
     },
@@ -555,7 +555,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
         h(
           "p",
           { class: "note" },
-          "Première chose à essayer : « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »",
+          "Première chose à essayer : « Jimy, analyse ce dossier et explique-moi ce que tu trouves. »",
         ),
         h(
           "p",

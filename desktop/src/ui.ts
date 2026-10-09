@@ -190,7 +190,7 @@ export const PHASE_LABEL: Record<string, string> = {
   speaking: "je parle",
 };
 
-/** « jimmy » → « Jimmy » (affichage du mot d'activation). */
+/** « jimmy » → « Jimy » (affichage du mot d'activation). */
 export function capitalize(word: string): string {
   return word ? word[0].toUpperCase() + word.slice(1) : word;
 }

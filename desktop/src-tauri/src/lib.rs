@@ -76,7 +76,7 @@ fn init_logging(paths: &Paths) {
 }
 
 pub fn run() {
-    let paths = Paths::discover().expect("chemins Jimmy introuvables");
+    let paths = Paths::discover().expect("chemins Jimy introuvables");
     init_logging(&paths);
 
     // Le `.env` est chargé avant tout : les secrets doivent exister avant la
@@ -101,7 +101,7 @@ pub fn run() {
     let app = match jimmy_agent::App::new(paths, secrets) {
         Ok(app) => app,
         Err(error) => {
-            eprintln!("Jimmy n'a pas pu démarrer : {error}");
+            eprintln!("Jimy n'a pas pu démarrer : {error}");
             std::process::exit(1);
         }
     };
@@ -295,5 +295,5 @@ pub fn run() {
                 show_main,
             ])
             .run(tauri::generate_context!())
-            .expect("échec du démarrage de la fenêtre Jimmy");
+            .expect("échec du démarrage de la fenêtre Jimy");
 }

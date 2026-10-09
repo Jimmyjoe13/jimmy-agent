@@ -7,7 +7,7 @@
  * - glisser n'importe où sur la bande déplace la fenêtre, double-clic =
  *   agrandir / restaurer (`data-tauri-drag-region`) ;
  * - fermer passe par `close()` : l'événement `CloseRequested` côté Rust
- *   cache la fenêtre (Jimmy reste vivant), comme l'ancien bouton natif.
+ *   cache la fenêtre (Jimy reste vivant), comme l'ancien bouton natif.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { h, icon } from "./ui";

@@ -1,5 +1,5 @@
 /**
- * Bibliothèque de voix de Jimmy (Fish Audio).
+ * Bibliothèque de voix de Jimy (Fish Audio).
  *
  * Trois voix prédéfinies (« Le narrateur » par défaut), plus celles que
  * l'utilisateur ajoute depuis le catalogue public de Fish Audio. Une voix
@@ -9,8 +9,8 @@
 import { api, type VoiceInfo } from "../api";
 import { attempt, guard, h, mount, toast } from "../ui";
 
-/** Phrase lue pour un essai : courte, avec le nom de Jimmy. */
-const PREVIEW_TEXT = "Bonjour, je suis Jimmy. Voici ma voix, pour lire tes réponses.";
+/** Phrase lue pour un essai : courte, avec le nom de Jimy. */
+const PREVIEW_TEXT = "Bonjour, je suis Jimy. Voici ma voix, pour lire tes réponses.";
 
 export interface VoicesPanelHooks {
   /**
@@ -70,7 +70,7 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
     if (!isPreset(voice.id) && !library.some((v) => v.id === voice.id)) library = [...library, voice];
     hooks.onApplied(current, library);
     render();
-    toast(`Voix de Jimmy : ${voice.label}`);
+    toast(`Voix de Jimy : ${voice.label}`);
   }
 
   async function remove(voice: VoiceInfo) {
@@ -107,7 +107,7 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
           "strong",
           {},
           voice.label,
-          active ? h("span", { class: "badge main", title: "Voix utilisée par Jimmy" }, "actuelle") : null,
+          active ? h("span", { class: "badge main", title: "Voix utilisée par Jimy" }, "actuelle") : null,
           isPreset(voice.id) ? h("span", { class: "badge", title: "Voix proposée par défaut" }, "prédéfinie") : null,
           voice.uses ? h("span", { class: "row-meta", title: "Utilisations sur Fish Audio" }, `${formatUses(voice.uses)} lectures`) : null,
         ),

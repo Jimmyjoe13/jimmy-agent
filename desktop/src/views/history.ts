@@ -124,7 +124,7 @@ export function historyView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("p", { class: "note" }, "Tout est stocké sur cette machine, dans la base locale de Jimmy. Ctrl+K pour revenir ici à tout moment."),
+      h("p", { class: "note" }, "Tout est stocké sur cette machine, dans la base locale de Jimy. Ctrl+K pour revenir ici à tout moment."),
       search,
       h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
     ),

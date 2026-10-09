@@ -1,4 +1,4 @@
-﻿# Crée le raccourci « Jimmy » sur le Bureau.
+﻿# Crée le raccourci « Jimy » sur le Bureau.
 #
 #   .\scripts\shortcut.ps1            # crée ou met à jour le raccourci
 #   .\scripts\shortcut.ps1 -Remove    # supprime le raccourci
@@ -37,7 +37,7 @@ function New-JimmyRaccourci([string]$dossier, [string]$nom) {
     # le lanceur n'a pas besoin d'être dans la politique d'exécution.
     $raccourci.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
     $raccourci.WorkingDirectory = $root
-    $raccourci.Description = 'Jimmy — assistant IA personnel sur le bureau'
+    $raccourci.Description = 'Jimy — assistant IA personnel sur le bureau'
     if (Test-Path $icon) {
         $raccourci.IconLocation = "$icon,0"
     }
@@ -45,8 +45,21 @@ function New-JimmyRaccourci([string]$dossier, [string]$nom) {
     return $chemin
 }
 
+# Ancien nom (« Jimmy », avant le 9 octobre 2026) : retiré seulement s'il
+# pointe sur ce lanceur, pour ne pas laisser deux raccourcis.
+foreach ($dossier in $desktop, $startup) {
+    $ancien = Join-Path $dossier 'Jimmy.lnk'
+    if (Test-Path $ancien) {
+        $cible = (New-Object -ComObject WScript.Shell).CreateShortcut($ancien).Arguments
+        if ($cible -like "*$launcher*") {
+            Remove-Item $ancien -Force
+            Write-Host "Ancien raccourci retiré : $ancien" -ForegroundColor Yellow
+        }
+    }
+}
+
 if ($Remove) {
-    $lnk = Join-Path $desktop 'Jimmy.lnk'
+    $lnk = Join-Path $desktop 'Jimy.lnk'
     if (Test-Path $lnk) {
         Remove-Item $lnk -Force
         Write-Host "Raccourci supprimé : $lnk" -ForegroundColor Yellow
@@ -56,18 +69,18 @@ if ($Remove) {
     exit 0
 }
 
-$cree = New-JimmyRaccourci $desktop 'Jimmy'
+$cree = New-JimmyRaccourci $desktop 'Jimy'
 Write-Host "Raccourci créé : $cree" -ForegroundColor Green
 
 if ($Autostart) {
     if (-not (Test-Path $startup)) {
         New-Item -ItemType Directory -Force -Path $startup | Out-Null
     }
-    $lnk = New-JimmyRaccourci $startup 'Jimmy'
+    $lnk = New-JimmyRaccourci $startup 'Jimy'
     Write-Host "Démarrage avec Windows activé : $lnk" -ForegroundColor Green
 } else {
     Write-Host "Pour démarrer avec Windows : .\scripts\shortcut.ps1 -Autostart"
 }
 
 Write-Host ''
-Write-Host 'Un double-clic sur « Jimmy » lance l''application.' -ForegroundColor Cyan
+Write-Host 'Un double-clic sur « Jimy » lance l''application.' -ForegroundColor Cyan

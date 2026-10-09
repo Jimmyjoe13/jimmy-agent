@@ -1,5 +1,5 @@
 /**
- * Point d'entrée de l'interface de Jimmy.
+ * Point d'entrée de l'interface de Jimy.
  *
  * Une fenêtre, une barre latérale, huit vues. Le routeur tient dans un
  * dictionnaire : ajouter une vue est une entrée, pas une refonte.
@@ -8,7 +8,7 @@
  * - une seule vue montée à la fois : `mount` remplace, il n'empile pas ;
  * - un seul écouteur d'événements agent, redistribué aux vues ; les
  *   abonnements d'une vue sont libérés quand on la quitte ;
- * - l'état de Jimmy est visible sur toutes les pages, dans la barre du haut.
+ * - l'état de Jimy est visible sur toutes les pages, dans la barre du haut.
  */
 import { api, onAgentEvent, type AgentEvent } from "./api";
 import type { AppContext, Route } from "./context";
@@ -22,11 +22,11 @@ import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, icon, mount, t
 import "./styles.css";
 
 const ROUTES: { id: Route; label: string; icon: IconName; subtitle: string }[] = [
-  { id: "chat", label: "Chat", icon: "chat", subtitle: "Parle à Jimmy, ou écris-lui." },
+  { id: "chat", label: "Chat", icon: "chat", subtitle: "Parle à Jimy, ou écris-lui." },
   { id: "voice", label: "Voix", icon: "voice", subtitle: "Écoute permanente, reconnaissance et synthèse vocale." },
   { id: "history", label: "Historique", icon: "history", subtitle: "Les sessions enregistrées sur cette machine." },
-  { id: "memory", label: "Mémoire", icon: "memory", subtitle: "Ce que Jimmy a retenu de toi." },
-  { id: "skills", label: "Skills", icon: "skills", subtitle: "Les procédures réutilisables de Jimmy." },
+  { id: "memory", label: "Mémoire", icon: "memory", subtitle: "Ce que Jimy a retenu de toi." },
+  { id: "skills", label: "Skills", icon: "skills", subtitle: "Les procédures réutilisables de Jimy." },
   { id: "skin", label: "Skin", icon: "skin", subtitle: "Apparence et qualité de l'avatar." },
   { id: "settings", label: "Paramètres", icon: "settings", subtitle: "Modèle, voix, écoute, avatar, permissions." },
   { id: "diagnostic", label: "Diagnostic", icon: "diagnostic", subtitle: "Vérifier que tout est en place." },
@@ -41,7 +41,7 @@ async function main() {
 
   const bootstrap = await guard(() => api.bootstrap(), "démarrage");
   if (!bootstrap) {
-    mount(root, h("div", { class: "fatal" }, "Impossible de démarrer Jimmy. Voir data/logs/jimmy.log."));
+    mount(root, h("div", { class: "fatal" }, "Impossible de démarrer Jimy. Voir data/logs/jimmy.log."));
     return;
   }
 
@@ -96,7 +96,7 @@ async function main() {
   const sidebar = h("aside", { class: "sidebar" });
   const header = h("header", { class: "topbar" });
   const content = h("main", { class: "content" });
-  const stateChip = h("span", { class: "chip state-idle", title: "État de Jimmy" }, STATE_LABEL.idle);
+  const stateChip = h("span", { class: "chip state-idle", title: "État de Jimy" }, STATE_LABEL.idle);
 
   // Compte à rebours de « à toi » : le temps qu'il reste pour parler.
   let countdown = 0;
@@ -148,13 +148,13 @@ async function main() {
     // Conversation vocale : le Chat l'adopte, même si l'utilisateur est sur
     // un autre onglet à ce moment-là.
     if (event.type === "spoken" && event.sessionId) ctx.lastSessionId = event.sessionId;
-    // Demande d'autorisation (fichier sensible) : Jimmy est bloqué tant que
+    // Demande d'autorisation (fichier sensible) : Jimy est bloqué tant que
     // l'utilisateur n'a pas répondu. Hors du Chat, on le prévient et on montre
     // la fenêtre (souvent masquée derrière l'avatar).
     if (event.type === "approval" && event.id) {
       ctx.approvals.set(event.id, event);
       if (route !== "chat") {
-        toast("Jimmy attend ton autorisation dans le Chat (fichier sensible).", "info");
+        toast("Jimy attend ton autorisation dans le Chat (fichier sensible).", "info");
         void api.showMain().catch(() => undefined);
       }
     }
@@ -164,7 +164,7 @@ async function main() {
     if (event.type === "final" || event.type === "failed") {
       for (const [id, pending] of ctx.approvals) if (!pending.taskId) ctx.approvals.delete(id);
     }
-    // Tâche passée en arrière-plan : Jimmy est de nouveau disponible.
+    // Tâche passée en arrière-plan : Jimy est de nouveau disponible.
     if (event.type === "detached") {
       setState("idle");
       if (event.taskId) ctx.taskTitles.set(event.taskId, event.title ?? "");
@@ -202,11 +202,11 @@ async function main() {
         { class: "brand" },
         // Logo officiel (monogramme « AJ » détouré), posé en fond CSS pour
         // que Vite l'embarque comme les polices.
-        h("div", { class: "brand-mark", role: "img", "aria-label": "Agent Jimmy" }),
+        h("div", { class: "brand-mark", role: "img", "aria-label": "Agent Jimy" }),
         h(
           "div",
           { class: "brand-text" },
-          h("strong", {}, "Jimmy"),
+          h("strong", {}, "Jimy"),
           h("span", { class: "brand-sub" }, `v${info.version} · ${info.dev ? "dépôt local" : "local"}`),
         ),
       ),
@@ -311,7 +311,7 @@ async function main() {
     renderSidebar();
     mount(
       header,
-      h("div", {}, h("h1", {}, entry?.label ?? "Jimmy"), h("p", { class: "subtitle" }, entry?.subtitle ?? "")),
+      h("div", {}, h("h1", {}, entry?.label ?? "Jimy"), h("p", { class: "subtitle" }, entry?.subtitle ?? "")),
       h(
         "div",
         { class: "topbar-actions" },
@@ -348,7 +348,7 @@ async function main() {
           toast("Onboarding terminé. Bonne conversation.");
           mount(root, sidebar, h("section", { class: "main" }, header, content));
           // L'onboarding est le moment du consentement : on enchaîne sur
-          // l'écoute, sinon Jimmy reste muet jusqu'au passage par la vue Voix.
+          // l'écoute, sinon Jimy reste muet jusqu'au passage par la vue Voix.
           if (await attempt(() => api.voiceStart(), "écoute")) {
             toast(`Écoute active — dis « ${capitalize(ctx.status.stt.wake_word)} ».`, "info");
           }

@@ -345,7 +345,7 @@ func _setup_bubble() -> void:
 	box.add_child(_bubble_text)
 
 	_bubble_hint = Label.new()
-	_bubble_hint.text = "Clic pour ouvrir l'interface  ·  glissez pour déplacer Jimmy"
+	_bubble_hint.text = "Clic pour ouvrir l'interface  ·  glissez pour déplacer Jimy"
 	_bubble_hint.add_theme_font_size_override("font_size", 11)
 	_bubble_hint.add_theme_color_override("font_color", Color(0.55, 0.58, 0.65))
 	box.add_child(_bubble_hint)

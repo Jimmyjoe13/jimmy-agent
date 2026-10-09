@@ -54,7 +54,7 @@ fn check_read(state: &AppState, path: &Path) -> Result<(), String> {
         .check(Capability::Read, &path.to_string_lossy())
         .map_err(|_| {
             format!(
-                "Jimmy n'a pas la permission de lire « {} » (Paramètres → Permissions).",
+                "Jimy n'a pas la permission de lire « {} » (Paramètres → Permissions).",
                 path.display()
             )
         })

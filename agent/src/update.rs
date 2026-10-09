@@ -339,7 +339,7 @@ async fn binary_older_than_head(app_dir: &Path) -> bool {
 /// `git` absent, échec ou dépassement.
 async fn git_run(app_dir: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     if !app_dir.join(".git").exists() {
-        return Err("ce Jimmy ne tourne pas depuis un clone git (zip ou installeur) : \
+        return Err("ce Jimy ne tourne pas depuis un clone git (zip ou installeur) : \
             passe par un clone pour les mises à jour automatiques"
             .to_string());
     }
@@ -424,7 +424,7 @@ pub async fn apply(
             Error::Tool(
                 "Ton dépôt local a des modifications : range-les avant /update.".to_string(),
             )
-        } else if detail.starts_with("ce Jimmy") {
+        } else if detail.starts_with("ce Jimy") {
             Error::Tool(detail)
         } else {
             Error::Tool(format!(
@@ -461,7 +461,7 @@ pub async fn apply(
     let exe = app.paths.app.join(RELEASE_EXE);
     let aside = ExeAside::new(&exe).map_err(|e| {
         Error::Tool(format!(
-            "Binaire actuel impossible à écarter avant compilation ({e}). Le Jimmy actuel tourne toujours."
+            "Binaire actuel impossible à écarter avant compilation ({e}). Le Jimy actuel tourne toujours."
         ))
     })?;
 
@@ -504,7 +504,7 @@ pub async fn apply(
                 if build_start.elapsed().unwrap_or_default() > BUILD_TIMEOUT {
                     let _ = child.kill().await;
                     return Err(Error::Tool(
-                        "Compilation trop longue (20 min), arrêtée. Le Jimmy actuel tourne toujours."
+                        "Compilation trop longue (20 min), arrêtée. Le Jimy actuel tourne toujours."
                             .to_string(),
                     ));
                 }
@@ -536,7 +536,7 @@ pub async fn apply(
             .unwrap_or_default();
         log::warn!("[update] compilation ratée, journal : {}", build_log.display());
         return Err(Error::Tool(format!(
-            "Compilation impossible : {}. Le Jimmy actuel tourne toujours ; \
+            "Compilation impossible : {}. Le Jimy actuel tourne toujours ; \
              retape /update après correction (journal : data/logs/update-build.log).",
             build_error_summary(&log, 300)
         )));
@@ -643,7 +643,7 @@ fn short_sha(sha: &str) -> String {
 
 fn announce_text(local: Option<&str>, remote: &str) -> String {
     format!(
-        "Une mise à jour de Jimmy est disponible (local {} → distant {}). \
+        "Une mise à jour de Jimy est disponible (local {} → distant {}). \
          Tape /update dans le Chat pour l'appliquer : \
          je récupère, recompile et redémarre tout seul.",
         local.map(short_sha).unwrap_or_else(|| "?".to_string()),
@@ -687,7 +687,7 @@ pub async fn notify_if_pending(app: &crate::App) {
         }
     }
     if app.is_busy() {
-        log::debug!("[update] bulle sautée : Jimmy est occupé");
+        log::debug!("[update] bulle sautée : Jimy est occupé");
         return;
     }
     let settings = app.settings();

@@ -1762,6 +1762,35 @@ Rust, les six autres onglets extrapolés.
   de Windows 11 au survol d'« Agrandir » (Win+flèches et bords d'écran
   restent). Étape test-ui « Fenêtre : barre de titre intégrée ».
 
+### Décisions prises (9 octobre 2026 — l'agent s'appelle « Jimy »)
+
+Demande de l'utilisateur : l'agent devient **« Jimy » (« Agent Jimy »)** ;
+l'utilisateur, lui, reste Jimmy. Périmètre choisi : **le nom affiché
+seulement**.
+- Renommé : textes de l'interface (`desktop/src`, bulle « jimy »), titre de
+  la fenêtre (`tauri.conf.json` `title`, `index.html`), messages Rust envoyés
+  à l'interface ou au modèle (`update.rs`, descriptions d'outils, prompts de
+  `growth.rs` / `learn.rs` / `memory`), identité du prompt (« Tu es Jimy »,
+  nom à un seul « m », ne pas le confondre avec celui de l'utilisateur),
+  bulle d'aide et nom du projet Godot, lanceur, raccourci (`Jimy.lnk` ;
+  `shortcut.ps1` retire l'ancien `Jimmy.lnk` s'il pointe sur le lanceur),
+  README.
+- **Inchangé, volontairement** : `productName` (risque, non vérifié : Tauri v2
+  peut nommer l'exécutable d'après lui, or `jimmy.exe` est attendu par
+  `update.rs`, `launcher.ps1`, `test-ui.ps1`), identifiant `com.jimmy.desktop` (dossier
+  de données, instance unique, démarrage auto), crates `jimmy-agent` /
+  `jimmy_agent`, dépôt, `%APPDATA%\Jimmy`, vault `C:\Obsidian\Jimmy` et
+  dossier `0_Inbox/Jimmy` (chemins réels), `user_name: "Jimmy"` (le prénom
+  de l'utilisateur), commentaires du code Rust, JOURNAL et anciens pièges
+  (historique). Le texte « AGENT JIMMY » du logo d'origine n'est pas repris
+  dans l'interface (seul le monogramme « AJ » l'est).
+- **Mot d'éveil** : défaut `jimy`. Whisper écrit presque toujours « Jimmy » ;
+  la détection compare la prononciation (`voice::phonetic` : « jimmy » et
+  « jimy » donnent la même clé « jimi »), donc les deux orthographes
+  déclenchent, dans les deux sens (test `jimy_et_jimmy_se_valent`). Une
+  config existante garde sa valeur (`jimmy`) tant que l'utilisateur ne la
+  change pas dans Voix → Mot d'activation (piège 62 : pas d'écrasement).
+
 ### Ensuite (au 7 octobre, par priorité)
 
 1. **Essais réels** de ce qui n'est vérifié que par tests : navigateur
