@@ -17,6 +17,7 @@ import { historyView } from "./views/history";
 import { diagnosticView, memoryView, skillsView, skinView } from "./views/panels";
 import { onboardingView, voiceView } from "./views/voice";
 import { settingsView } from "./views/settings";
+import { mountTitlebar } from "./titlebar";
 import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, icon, mount, toast, type IconName } from "./ui";
 import "./styles.css";
 
@@ -34,6 +35,9 @@ const ROUTES: { id: Route; label: string; icon: IconName; subtitle: string }[] =
 async function main() {
   const root = document.getElementById("app");
   if (!root) throw new Error("#app introuvable");
+  // Avant tout : la fenêtre n'a plus de barre native, ses boutons doivent
+  // exister même si le démarrage échoue.
+  mountTitlebar();
 
   const bootstrap = await guard(() => api.bootstrap(), "démarrage");
   if (!bootstrap) {

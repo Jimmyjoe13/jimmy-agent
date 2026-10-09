@@ -86,6 +86,24 @@ let stepPage = null;
     return "8 vues";
   });
 
+  await step("Fenêtre : barre de titre intégrée (agrandir puis restaurer)", async () => {
+    // La barre native est retirée : nos trois boutons doivent la remplacer.
+    const labels = await p.$$eval(".titlebar .win-btn", (els) => els.map((e) => e.getAttribute("aria-label")));
+    const ok = ["Réduire,Agrandir,Fermer", "Réduire,Restaurer,Fermer"].includes(labels.join(","));
+    expect(ok, `boutons : ${labels.join(", ")}`);
+    const drag = await p.$(".titlebar[data-tauri-drag-region]");
+    expect(drag, "bande de déplacement absente");
+    // Agrandir puis restaurer : le libellé suit l'état réel de la fenêtre.
+    const btn = p.locator(".titlebar .win-btn").nth(1);
+    const avant = await btn.getAttribute("aria-label");
+    const apres = avant === "Agrandir" ? "Restaurer" : "Agrandir";
+    await btn.click();
+    await p.waitForFunction((l) => document.querySelectorAll(".titlebar .win-btn")[1]?.getAttribute("aria-label") === l, apres, { timeout: 5000 });
+    await btn.click();
+    await p.waitForFunction((l) => document.querySelectorAll(".titlebar .win-btn")[1]?.getAttribute("aria-label") === l, avant, { timeout: 5000 });
+    return `${labels.join(", ")} · ${avant} → ${apres} → ${avant}`;
+  });
+
   await step("Chat : envoi, attente visible, réponse", async () => {
     await nav("Chat");
     await p.locator("button", { hasText: "Nouvelle session" }).click();

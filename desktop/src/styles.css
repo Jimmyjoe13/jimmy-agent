@@ -111,6 +111,64 @@ body {
   color: var(--ko);
 }
 
+/* ── Barre de titre (remplace la barre native, voir titlebar.ts) ───────────── */
+
+/* Bande transparente au-dessus de tout : la barre latérale et la zone
+   principale montent jusqu'en haut de la fenêtre. Elle sert de poignée de
+   déplacement ; seuls ses boutons captent les clics. */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  display: flex;
+  justify-content: flex-end;
+  z-index: 300;
+  user-select: none;
+}
+
+.win-controls {
+  display: flex;
+  height: 100%;
+}
+
+/* Boutons de fenêtre : icônes au trait, voile argent au survol comme les
+   autres boutons ; seul « Fermer » passe au rouge. */
+.win-btn {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.win-btn:hover {
+  background: rgba(199, 204, 211, 0.08);
+  color: var(--title);
+}
+
+.win-btn:active {
+  background: rgba(199, 204, 211, 0.14);
+}
+
+.win-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.win-close:active {
+  background: #a3261a;
+  color: #fff;
+}
+
 /* ── Barre latérale ───────────────────────────────────────────────────────── */
 
 .sidebar {
@@ -118,16 +176,21 @@ body {
   border-right: 1px solid rgba(199, 204, 211, 0.09);
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 22px 14px 16px;
+  /* Bande de titre (36 px) au-dessus, la marque juste dessous ; écarts
+     resserrés pour ne pas ajouter d'ascenseur à hauteur égale. */
+  gap: 18px;
+  padding: 36px 14px 16px;
   overflow: hidden auto;
+  /* Ascenseur discret quand la fenêtre est basse. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(199, 204, 211, 0.12) transparent;
 }
 
 .brand {
   display: flex;
   gap: 14px;
   align-items: center;
-  padding: 2px 8px;
+  padding: 0 8px;
 }
 
 /* Logo officiel : monogramme « AJ » détouré (fond transparent), avec un léger
@@ -328,7 +391,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px 36px 20px;
+  /* Haut à 44 px : les boutons de la fenêtre (36 px) ne chevauchent pas
+     la pastille d'état ni « Actualiser ». */
+  padding: 44px 36px 20px;
   border-bottom: 1px solid rgba(199, 204, 211, 0.09);
 }
 

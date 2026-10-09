@@ -1733,6 +1733,18 @@ Rust, les six autres onglets extrapolés.
   par `scripts/make-icons.ps1` (System.Drawing, part de `logo-mark.png` ;
   ICO multi-tailles 16 à 256 px, favicon compris). Nouveau logo = refaire
   `logo-mark.png` (détourage) puis relancer le script.
+- **Raccourci bureau** (`scripts/shortcut.ps1`) : `IconLocation` sur
+  `icon.ico` (un PNG s'y affiche mal et reste dans le cache d'icônes).
+- **Barre de titre intégrée** (`desktop/src/titlebar.ts`) : fenêtre sans
+  décoration native (`decorations: false`), bande transparente de 36 px en
+  `position: fixed` (glisser = déplacer, double-clic = agrandir) et trois
+  boutons au trait ; « Fermer » appelle `close()` → `CloseRequested` cache
+  la fenêtre comme avant. Montée **avant** `bootstrap` pour que la fenêtre
+  reste fermable si le démarrage échoue. Permissions ajoutées :
+  `toggle-maximize`, `internal-toggle-maximize`, `is-maximized`. Barre
+  latérale et `.topbar` décalées sous la bande. Perdu : le menu Snap Layouts
+  de Windows 11 au survol d'« Agrandir » (Win+flèches et bords d'écran
+  restent). Étape test-ui « Fenêtre : barre de titre intégrée ».
 
 ### Ensuite (au 7 octobre, par priorité)
 

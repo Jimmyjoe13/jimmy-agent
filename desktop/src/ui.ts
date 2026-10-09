@@ -56,7 +56,12 @@ export function mount(container: HTMLElement, ...children: Child[]) {
  * Design. Des chaînes constantes : `html` ne reçoit jamais de donnée externe.
  */
 const ICONS = {
-  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  // Boutons de la barre de titre (réduire, agrandir, restaurer, fermer).
+  winMinimize: '<path d="M5 12h14"/>',
+  winMaximize: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+  winRestore: '<rect x="5" y="8" width="11" height="11" rx="2"/><path d="M9 5h8a2 2 0 0 1 2 2v8"/>',
+  winClose: '<path d="M6 6l12 12M18 6L6 18"/>',
+  chat:'<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
   voice: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>',
   history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   memory: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
