@@ -1,95 +1,125 @@
-﻿# Génère les icônes de l'application (PNG 32/128 + ICO Windows).
+﻿# Génère les icônes de l'application (PNG 32/128/256/512, ICO Windows
+# multi-tailles, favicon) à partir du logo officiel : le monogramme « AJ »
+# détouré (`desktop/src/assets/logo-mark.png`, tiré de `logo-agent-jimmy.jpg`)
+# posé sur une tuile marine arrondie, lisible jusqu'en 16 px.
 # Sans dépendance : System.Drawing de Windows suffit et le résultat est
 # versionné, donc reproductible sur n'importe quelle machine.
 param(
-    [string]$OutputDir = (Join-Path $PSScriptRoot '..\desktop\src-tauri\icons')
+    [string]$OutputDir = (Join-Path $PSScriptRoot '..\desktop\src-tauri\icons'),
+    [string]$Mark = (Join-Path $PSScriptRoot '..\desktop\src\assets\logo-mark.png'),
+    [string]$Favicon = (Join-Path $PSScriptRoot '..\desktop\public\icons\32x32.png')
 )
 
 Add-Type -AssemblyName System.Drawing
 
-function New-FoxIcon([int]$Size) {
-    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
+if (-not (Test-Path $Mark)) { throw "Monogramme introuvable : $Mark" }
+$markImage = [System.Drawing.Image]::FromFile((Resolve-Path $Mark))
+
+# Fond marine du logo officiel.
+$tileColor = [System.Drawing.Color]::FromArgb(255, 23, 30, 44)
+
+function New-LogoIcon([int]$Size) {
+    # Dessin en 4x puis réduction : les bords de la tuile restent nets en 16-32 px.
+    $big = $Size * 4
+    $canvas = New-Object System.Drawing.Bitmap($big, $big)
+    $g = [System.Drawing.Graphics]::FromImage($canvas)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
     $g.Clear([System.Drawing.Color]::Transparent)
 
-    $u = $Size / 128.0
-    $fur = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 214, 122, 46))
-    $furDark = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 168, 78, 20))
-    $cream = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 245, 233, 214))
-    $dark = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 30, 22, 18))
+    # Tuile arrondie (rayon 22 % du côté).
+    $d = [int]($big * 0.44)
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddArc(0, 0, $d, $d, 180, 90)
+    $path.AddArc($big - $d - 1, 0, $d, $d, 270, 90)
+    $path.AddArc($big - $d - 1, $big - $d - 1, $d, $d, 0, 90)
+    $path.AddArc(0, $big - $d - 1, $d, $d, 90, 90)
+    $path.CloseFigure()
+    $brush = New-Object System.Drawing.SolidBrush($tileColor)
+    $g.FillPath($brush, $path)
 
-    # Oreilles
-    $g.FillPolygon($fur, @(
-        (New-Object System.Drawing.Point([int](34 * $u), [int](46 * $u))),
-        (New-Object System.Drawing.Point([int](20 * $u), [int](10 * $u))),
-        (New-Object System.Drawing.Point([int](56 * $u), [int](30 * $u)))))
-    $g.FillPolygon($fur, @(
-        (New-Object System.Drawing.Point([int](94 * $u), [int](46 * $u))),
-        (New-Object System.Drawing.Point([int](108 * $u), [int](10 * $u))),
-        (New-Object System.Drawing.Point([int](72 * $u), [int](30 * $u)))))
+    # Monogramme centré, 80 % du côté.
+    $inner = [int]($big * 0.80)
+    $offset = [int](($big - $inner) / 2)
+    $g.DrawImage($markImage, $offset, $offset, $inner, $inner)
 
-    # Crâne
-    $g.FillEllipse($fur, [int](24 * $u), [int](28 * $u), [int](80 * $u), [int](84 * $u))
-    # Muzzle
-    $g.FillEllipse($cream, [int](40 * $u), [int](70 * $u), [int](48 * $u), [int](38 * $u))
-    # Nez
-    $g.FillEllipse($dark, [int](57 * $u), [int](74 * $u), [int](14 * $u), [int](10 * $u))
-    # Yeux
-    $g.FillEllipse($dark, [int](42 * $u), [int](52 * $u), [int](12 * $u), [int](15 * $u))
-    $g.FillEllipse($dark, [int](74 * $u), [int](52 * $u), [int](12 * $u), [int](15 * $u))
-    # Écharpe
-    $g.FillRectangle($furDark, [int](30 * $u), [int](104 * $u), [int](68 * $u), [int](10 * $u))
+    $brush.Dispose(); $path.Dispose(); $g.Dispose()
 
-    $g.Dispose()
+    # Réduction à la taille finale.
+    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)
+    $g2 = [System.Drawing.Graphics]::FromImage($bmp)
+    $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g2.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g2.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $g2.Clear([System.Drawing.Color]::Transparent)
+    $g2.DrawImage($canvas, 0, 0, $Size, $Size)
+    $g2.Dispose(); $canvas.Dispose()
     return $bmp
+}
+
+function Get-PngBytes($Bitmap) {
+    $ms = New-Object System.IO.MemoryStream
+    $Bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bytes = $ms.ToArray()
+    $ms.Dispose()
+    return , $bytes
 }
 
 function Save-Png($Bitmap, [string]$Path) {
     $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
 }
 
-function Save-Ico($Bitmap, [string]$Path) {
-    # Un .ico moderne accepte une image PNG encodée telle quelle.
-    $ms = New-Object System.IO.MemoryStream
-    $Bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-    $png = $ms.ToArray()
-    $ms.Dispose()
+function Save-Ico([int[]]$Sizes, [string]$Path) {
+    # .ico moderne multi-tailles : chaque image est un PNG encodé tel quel.
+    $images = foreach ($s in $Sizes) {
+        $bmp = New-LogoIcon $s
+        , (Get-PngBytes $bmp)
+        $bmp.Dispose()
+    }
 
     $out = New-Object System.IO.MemoryStream
     $bw = New-Object System.IO.BinaryWriter($out)
-    $size = [int]$Bitmap.Width
-    $bw.Write([uint16]0)              # reserved
+    $bw.Write([uint16]0)              # réservé
     $bw.Write([uint16]1)              # type : icône
-    $bw.Write([uint16]1)              # une image
-    $bw.Write([byte]($(if ($size -ge 256) { 0 } else { $size })))
-    $bw.Write([byte]($(if ($size -ge 256) { 0 } else { $size })))
-    $bw.Write([byte]0)                # palette
-    $bw.Write([byte]0)                # réservé
-    $bw.Write([uint16]1)              # plans
-    $bw.Write([uint16]32)             # bits par pixel
-    $bw.Write([uint32]$png.Length)
-    $bw.Write([uint32]22)             # décalage de l'image
-    $bw.Write($png)
+    $bw.Write([uint16]$Sizes.Count)   # nombre d'images
+
+    # Répertoire : 16 octets par image, données à la suite.
+    $dataOffset = 6 + 16 * $Sizes.Count
+    for ($i = 0; $i -lt $Sizes.Count; $i++) {
+        $s = $Sizes[$i]
+        $png = $images[$i]
+        $dim = $(if ($s -ge 256) { 0 } else { $s })  # 0 = 256 px
+        $bw.Write([byte]$dim)
+        $bw.Write([byte]$dim)
+        $bw.Write([byte]0)            # palette
+        $bw.Write([byte]0)            # réservé
+        $bw.Write([uint16]1)          # plans
+        $bw.Write([uint16]32)         # bits par pixel
+        $bw.Write([uint32]$png.Length)
+        $bw.Write([uint32]$dataOffset)
+        $dataOffset += $png.Length
+    }
+    foreach ($png in $images) { $bw.Write($png) }
     $bw.Flush()
 
     [System.IO.File]::WriteAllBytes($Path, $out.ToArray())
-    $out.Dispose()
     $bw.Dispose()
+    $out.Dispose()
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-$bmp32 = New-FoxIcon 32
-Save-Png $bmp32 (Join-Path $OutputDir '32x32.png')
-Save-Ico $bmp32 (Join-Path $OutputDir 'icon.ico')
-$bmp32.Dispose()
-
-foreach ($size in 128, 256, 512) {
-    $bmp = New-FoxIcon $size
+foreach ($size in 32, 128, 256, 512) {
+    $bmp = New-LogoIcon $size
     Save-Png $bmp (Join-Path $OutputDir ("{0}x{0}.png" -f $size))
+    # Le favicon de l'interface est l'icône 32 px.
+    if ($size -eq 32) { Save-Png $bmp $Favicon }
     $bmp.Dispose()
 }
+Save-Ico @(16, 24, 32, 48, 64, 128, 256) (Join-Path $OutputDir 'icon.ico')
 
-Write-Host "Icônes écrites dans $OutputDir"
+$markImage.Dispose()
+
+Write-Host "Icônes écrites dans $OutputDir (+ favicon $Favicon)"
 Get-ChildItem $OutputDir | Select-Object Name, Length

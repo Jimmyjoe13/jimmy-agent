@@ -1729,9 +1729,10 @@ Rust, les six autres onglets extrapolés.
   supprimée). Le nom « Jimmy » de la barre latérale prend le corail du logo
   (`#fe6f51`).
 - **Icônes de l'appli** (`desktop/src-tauri/icons/*`, `desktop/public/icons/32x32.png`) :
-  le monogramme sur une tuile marine arrondie (lisible en 16-32 px).
-  `scripts/make-icons.ps1` dessine encore l'**ancien renard** : ne pas le
-  relancer, il écraserait le logo.
+  le monogramme sur une tuile marine arrondie (lisible en 16-32 px), générés
+  par `scripts/make-icons.ps1` (System.Drawing, part de `logo-mark.png` ;
+  ICO multi-tailles 16 à 256 px, favicon compris). Nouveau logo = refaire
+  `logo-mark.png` (détourage) puis relancer le script.
 
 ### Ensuite (au 7 octobre, par priorité)
 
