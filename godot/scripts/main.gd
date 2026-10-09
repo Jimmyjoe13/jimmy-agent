@@ -10,7 +10,14 @@ extends Node
 ## Aucune logique d'agent ici : Godot ne sait rien du LLM, de la mémoire ou des
 ## outils. Il ne fait qu'exécuter des ordres d'animation.
 
-const SKIN_DEFAULT := Jimmy.SKIN_DEFAULT
+## `preload` plutôt que les `class_name` globaux : une installation fraîche
+## n'a pas le cache de l'éditeur (`.godot/`, non versionné) et la scène
+## mourait à l'analyse, sans serveur HTTP (piège 86). Même principe que le
+## lapin plus bas.
+const JimmyFox := preload("res://scripts/jimmy.gd")
+const JimmyHttp := preload("res://scripts/http_server.gd")
+
+const SKIN_DEFAULT := JimmyFox.SKIN_DEFAULT
 
 ## Profils graphiques. La fenêtre fait 560×620 : le rendu à pleine résolution
 ## coûte peu, d'où `scale_3d = 1.0` dès `medium` (0,85 rendait l'avatar flou).
@@ -33,11 +40,11 @@ var port: int = 8787
 var bridge_host: String = "127.0.0.1"
 var bridge_port: int = 8790
 
-var _jimmy: Jimmy
+var _jimmy: Node3D
 ## Lapin assistant des tâches de fond (`helper_rabbit.gd`, route `/helper`).
 var _helper: Node3D
 var _camera: Camera3D
-var _http: JimmyHttpServer
+var _http: Node
 var _bubble: PanelContainer
 var _bubble_text: Label
 var _bubble_hint: Label
@@ -190,7 +197,7 @@ func _build_scene() -> void:
 	add_child(camera)
 	_camera = camera
 
-	_jimmy = Jimmy.new()
+	_jimmy = JimmyFox.new()
 	_jimmy.name = "Jimmy"
 	if not _jimmy.set_skin(skin):
 		push_warning("[godot/main] skin inconnu : %s (repli sur %s)" % [skin, SKIN_DEFAULT])
@@ -347,11 +354,11 @@ func _setup_bubble() -> void:
 
 
 func _start_http() -> void:
-	_http = JimmyHttpServer.new()
+	_http = JimmyHttp.new()
 	_http.name = "HttpServer"
 	_http.request_received.connect(_on_http_request)
 	add_child(_http)
-	var err := _http.start(port)
+	var err: int = _http.start(port)
 	if err != OK:
 		push_error("[godot/main] serveur HTTP indisponible sur le port %d" % port)
 
@@ -373,7 +380,7 @@ func _on_http_request(method: String, path: String, body: Dictionary) -> void:
 		"/say":
 			var text := str(body.get("text", ""))
 			var duration := float(body.get("duration_ms", 0)) / 1000.0
-			var seconds := _jimmy.speak_for(duration if duration > 0.0 else _estimate_speech(text))
+			var seconds: float = _jimmy.speak_for(duration if duration > 0.0 else _estimate_speech(text))
 			_show_bubble(text, seconds)
 		"/quality":
 			_apply_quality(str(body.get("level", "medium")).to_lower())

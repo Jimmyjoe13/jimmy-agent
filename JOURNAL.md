@@ -1282,6 +1282,34 @@ Poussé le soir même : `main` = `49a2b95` des deux côtés (3 commits).
 Suite le 9 au matin : clone + build au travail, commit déclencheur ici,
 bulle et `/update` là-bas (voir « Reprise » du HANDOFF).
 
+## 3terdécies. Seconde machine — l'avatar muet du clone frais (8-9 octobre)
+
+Première installation sur le PC du travail (Node et WebView2 présents ;
+Rust, Build Tools C++, Godot, whisper et clés à installer). Tout s'installe
+par `install.ps1`, compilation release OK, raccourci Bureau OK.
+
+Premier lancement : accueil affiché, mais l'étape du prénom paraît gelée
+(saisie et clics sans effet) et l'avatar ne s'affiche jamais. Le journal ne
+montre aucune erreur du moteur : la question n'arrive jamais au backend.
+
+Cause unique, prouvée en lançant Godot à la main : `main.gd` utilisait les
+`class_name` globaux (`Jimmy`, `JimmyHttpServer`), qui n'existent que dans
+le cache de l'éditeur (`.godot/`, non versionné, absent d'un clone frais).
+La scène meurt à l'analyse, aucun serveur HTTP, avatar invisible — et sa
+fenêtre morte mange les clics. Le GPU et Vulkan étaient hors de cause.
+
+Correction proposée en PR #1 depuis le PC du travail (fork), intégrée le 9
+au matin sur ce PC (la PR était en conflit sur la doc, piège renuméroté
+96) : `preload` dans `main.gd` (`JimmyFox`, `JimmyHttp`, comme le lapin) +
+types explicites. Régression couverte par `agent/tests/avatar_scripts.rs`
+(démarrage `headless` sans cache). Le test lui-même a été corrigé à
+l'intégration : il vérifiait la restauration du cache avant que le
+`Drop` ne la fasse (invisible au travail, où il n'y avait pas de cache
+à déplacer) et le renommage échouait si Godot avait recréé un
+`.godot` neuf. Ici : rouge sur l'ancien `main.gd` (`Identifier "Jimmy"
+not declared`, pas de serveur en 240 s), vert après (serveur en 0,8 s,
+cache intact), `build.ps1 -Release` OK, avatar relancé (`/state` OK).
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 9 octobre (soir)** : l'abonnement Claude sert Jimmy comme moteur
