@@ -503,16 +503,56 @@ fn browser_action_needs_approval(tool: &str, args: &serde_json::Value) -> Option
             target("touche Entrée (peut valider un formulaire)")
         }
         "browser_file_upload" => target("envoi d'un fichier depuis le PC"),
-        "browser_run_code" | "browser_run_code_unsafe" => target("script exécuté dans la page"),
+        // Scripts : jugés sur ce qu'ils font, pas sur leur seule existence
+        // (9 octobre : une carte par lecture de page rendait le navigateur
+        // inutilisable).
+        "browser_run_code" | "browser_run_code_unsafe" => {
+            script_needs_approval(args.get("code").and_then(|v| v.as_str()).unwrap_or("")).and_then(|why| target(why))
+        }
         "browser_evaluate" => {
-            let code = args.get("function").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-            ["click(", "submit", "dispatchevent", "fetch("]
-                .iter()
-                .any(|m| code.contains(m))
-                .then(|| format!("{BROWSER_TARGET}script qui agit dans la page"))
+            script_needs_approval(args.get("function").and_then(|v| v.as_str()).unwrap_or("")).and_then(|why| target(why))
         }
         _ => None,
     }
+}
+
+/// Un script de page (`browser_run_code`, `browser_evaluate`) engage-t-il
+/// l'utilisateur ? Lire, faire défiler, naviguer, capturer, fermer une
+/// fenêtre restent libres ; demandent l'accord : envoyer un fichier du PC,
+/// une requête qui écrit, valider un formulaire, saisir un mot de passe,
+/// cliquer ou appuyer sur Entrée là où ça engage (mêmes mots que les clics).
+fn script_needs_approval(code: &str) -> Option<&'static str> {
+    let lower = code.to_lowercase();
+    // Sans espaces : « method : 'POST' » et « method:'post' » se valent.
+    let compact: String = lower.chars().filter(|c| !c.is_whitespace()).collect();
+    let has = |marks: &[&str]| marks.iter().any(|m| lower.contains(m));
+
+    if has(&["setinputfiles", "filechooser"]) {
+        return Some("envoi d'un fichier depuis le PC");
+    }
+    let writes = ["post", "put", "patch", "delete"].iter().any(|verb| {
+        ["'", "\"", "`", ""].iter().any(|q| compact.contains(&format!("method:{q}{verb}")))
+            || compact.contains(&format!("request.{verb}("))
+    });
+    if writes || lower.contains("sendbeacon") {
+        return Some("requête qui envoie des données");
+    }
+    if has(&[".submit(", "requestsubmit("]) {
+        return Some("validation d'un formulaire");
+    }
+    let types = has(&["fill(", "type(", "presssequentially(", ".value="]) || compact.contains(".value=");
+    if types && has(&["password", "mot de passe", "passwd"]) {
+        return Some("saisie d'un mot de passe ou d'un identifiant");
+    }
+    let presses_enter = lower.contains("enter") && has(&["press(", "keyboardevent", "dispatchevent"]);
+    if presses_enter && !SEARCH_WORDS.iter().any(|w| lower.contains(w)) {
+        return Some("touche Entrée envoyée par script (peut valider un message)");
+    }
+    let acts = has(&["click(", ".tap(", "dispatchevent"]);
+    if acts && COMMITTING_WORDS.iter().any(|w| lower.contains(w)) {
+        return Some("clic par script sur un élément qui engage");
+    }
+    None
 }
 
 /// L'appel d'outil modifie-t-il un fichier sensible ? Renvoie le fichier en
@@ -823,6 +863,64 @@ mod tests {
         }
         // Outil enregistré directement : même règle.
         assert!(needs_approval("mcp_navigateur__browser_click", &json!({ "element": "Send", "ref": "e1" })).is_some());
+    }
+
+    /// Scripts de page (9 octobre) : 64 cartes en deux jours pour des scripts
+    /// qui ne faisaient que lire. Seul un script qui engage demande l'accord.
+    #[test]
+    fn les_scripts_du_navigateur_ne_demandent_que_s_ils_engagent() {
+        let run = |code: &str| {
+            needs_approval(
+                "mcp_call",
+                &json!({ "server": "navigateur", "tool": "browser_run_code_unsafe", "arguments": { "code": code } }),
+            )
+        };
+        let eval = |function: &str| {
+            needs_approval(
+                "mcp_call",
+                &json!({ "server": "navigateur", "tool": "browser_evaluate", "arguments": { "function": function } }),
+            )
+        };
+        // Libres : scripts réels du journal (lecture, capture, navigation,
+        // fermeture d'un tiroir) et défilement.
+        for code in [
+            "async (page) => { const html = await page.content(); return html.slice(0, 15000); }",
+            "async (page) => { await page.screenshot({fullPage: false}); return 'screenshot taken, url='+page.url(); }",
+            "async (page) => { await page.goto('https://www.linkedin.com/feed/'); return await page.title(); }",
+            "async (page) => { await page.mouse.wheel(0, 2000); await page.waitForTimeout(1000); return page.url(); }",
+            "async (page) => { await page.getByRole('button', { name: 'Fermer' }).click(); }",
+            "async (page) => { const r = await fetch('/api/items'); return await r.json(); }",
+        ] {
+            assert_eq!(run(code), None, "{code} doit rester libre");
+        }
+        for function in [
+            "() => { return document.body.innerText.slice(0,8000); }",
+            "() => { document.querySelector('#joy-drawer--close')?.click(); return 'closed'; }",
+            "() => { window.scrollBy(0, 1500); return document.title; }",
+        ] {
+            assert_eq!(eval(function), None, "{function} doit rester libre");
+        }
+        // Demandent : clic qui engage, Entrée qui envoie, formulaire validé,
+        // requête qui écrit, fichier envoyé, mot de passe saisi.
+        for code in [
+            "async (page) => { await page.getByRole('button', { name: 'Envoyer' }).click(); }",
+            "async (page) => { await page.locator('text=Publier').click(); }",
+            "async (page) => { await page.fill('#message', 'Salut'); await page.keyboard.press('Enter'); }",
+            "async (page) => { await page.locator('form').evaluate(f => f.requestSubmit()); }",
+            "async (page) => { await page.setInputFiles('input[type=file]', 'C:\\\\Users\\\\user\\\\cv.pdf'); }",
+            "async (page) => { await fetch('/api/posts', { method: 'POST', body: '{}' }); }",
+            "async (page) => { await page.fill('input[type=password]', 'x'); }",
+        ] {
+            let target = run(code).unwrap_or_else(|| panic!("{code} doit demander"));
+            assert!(target.starts_with(BROWSER_TARGET), "{target}");
+        }
+        for function in [
+            "() => document.querySelector('button.send').click()",
+            "() => document.forms[0].submit()",
+            "() => fetch('/api/delete', { method: 'DELETE' })",
+        ] {
+            assert!(eval(function).is_some(), "{function} doit demander");
+        }
     }
 
     /// Commandes réelles du 7 octobre (inspection SSH), et leurs contraires.

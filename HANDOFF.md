@@ -1508,6 +1508,24 @@ plus large ou facturation validée — surveiller les 400/429 au journal.
   inchangé. Leçon : une règle qui décrit un contrôle fait **par
   l'application** doit dire au modèle d'agir, pas décrire le contrôle.
 
+  **99. Une carte par script de page rendait le navigateur inutilisable.**
+  `browser_action_needs_approval` demandait l'accord pour **tout**
+  `browser_run_code(_unsafe)` et pour tout `browser_evaluate` contenant
+  `click(`/`fetch(`/`submit` : 64 cartes au journal (48 + 16), dont 15 en
+  deux minutes le 9 octobre au soir, pour des scripts qui lisaient la page
+  (`innerText`, `page.content()`, `page.title()`), capturaient l'écran ou
+  fermaient un tiroir. Plainte de l'utilisateur : « il me demande tout le
+  temps ». `script_needs_approval` juge désormais **ce que fait** le
+  script : demandent l'accord l'envoi d'un fichier (`setInputFiles`,
+  sélecteur de fichier), une requête qui écrit (`method` POST/PUT/PATCH/
+  DELETE, `request.post(`…, `sendBeacon`), un formulaire validé (`.submit(`,
+  `requestSubmit(`), un mot de passe saisi, Entrée envoyée par script hors
+  recherche, un clic par script sur un élément qui engage (`COMMITTING_WORDS`,
+  comme les clics). Tout le reste est libre. Test
+  `les_scripts_du_navigateur_ne_demandent_que_s_ils_engagent` (scripts réels
+  du journal). Limite : analyse par motifs, un script obscurci y échappe —
+  même limite que les commandes (point « Ensuite » 3).
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée
