@@ -20,7 +20,9 @@ $root = Split-Path -Parent $PSScriptRoot
 $launcher = Join-Path $root 'scripts\launcher.ps1'
 $desktop = [Environment]::GetFolderPath('Desktop')
 $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
-$icon = Join-Path $root 'desktop\src-tauri\icons\128x128.png'
+# ICO multi-tailles (logo officiel) : un PNG en IconLocation s'affiche mal
+# et Windows le garde en cache.
+$icon = Join-Path $root 'desktop\src-tauri\icons\icon.ico'
 
 if (-not (Test-Path $launcher)) {
     throw "Lanceur introuvable : $launcher"
