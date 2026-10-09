@@ -1345,6 +1345,33 @@ l'intégration : il vérifiait la restauration du cache avant que le
 not declared`, pas de serveur en 240 s), vert après (serveur en 0,8 s,
 cache intact), `build.ps1 -Release` OK, avatar relancé (`/state` OK).
 
+## 3quaterdécies. Premier `/update` réel : six défauts en chaîne (9 octobre)
+
+Push de la refonte, puis essai au travail : la bulle et la pastille
+arrivent, `/update` tire bien le code… et s'arrête sur « tâche de fond en
+échec : compilation impossible : > jimmy-desktop… ». Reproduit ici en
+recompilant pendant que Jimmy tourne : `failed to remove file
+…\target\release\jimmy.exe — Accès refusé. (os error 5)`. Jimmy ne peut
+pas écraser son propre exécutable ; Windows accepte en revanche de le
+renommer. Le message, lui, montrait le début du journal (l'en-tête npm) et
+non l'erreur ; et le pull ayant réussi, un second `/update` aurait répondu
+« Déjà à jour » avec l'ancien binaire.
+
+Une fois la compilation réparée (exe écarté en `.old`, remis en place si
+elle échoue, alerte maintenue tant que le code tiré n'est pas compilé), le
+premier `/update` complet a compilé… et Jimmy n'est jamais revenu. Godot
+restait orphelin (`exit` saute les `Drop`), et le lanceur PowerShell ne
+s'exécutait pas du tout. Un job Windows était suspecté (Jimmy en hérite
+quand il est lancé depuis Claude Code ou le Planificateur), mais un
+programme graphique minimal a tranché : PowerShell lancé en
+`DETACHED_PROCESS` meurt sans exécuter une ligne, en `CREATE_NO_WINDOW` il
+tourne. S'y ajoutent l'arrêt propre des enfants avant de quitter et
+l'attente de la sortie de l'ancien processus (`-WaitPid`) avant de relancer.
+
+Leçon : le mécanisme de mise à jour avait été livré testé par morceaux
+(détection, pull), jamais de bout en bout ; il a fallu un vrai `/update`
+dans la vraie application pour voir les six défauts. Piège 97.
+
 ## 8. Reste à faire et questions ouvertes
 
 0. **État au 9 octobre (soir)** : l'abonnement Claude sert Jimmy comme moteur

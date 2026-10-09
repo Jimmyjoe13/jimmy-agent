@@ -1462,6 +1462,36 @@ plus large ou facturation validée — surveiller les 400/429 au journal.
   `headless` sans cache, serveur attendu). Arrivé par la PR #1 (fork du PC
   du travail), intégré le 9 octobre.
 
+  **97. `/update` ne pouvait pas recompiler le Jimmy qui tourne.** Premier
+  essai réel au travail (9 octobre) : pull OK, puis `build.ps1 -Release`
+  échoue sur `failed to remove file …\target\release\jimmy.exe — Accès
+  refusé. (os error 5)` : Windows refuse d'écraser un exécutable en cours,
+  et c'est lui qui lance la compilation. Trois défauts liés : (1) le message
+  affichait le **début** du journal (l'en-tête npm `> jimmy-desktop…`) au
+  lieu de l'erreur, en fin de journal ; (2) le pull ayant réussi, Jimmy se
+  croyait à jour : retaper `/update` répondait « Déjà à jour » avec l'ancien
+  binaire ; (3) stdout/stderr en tubes jamais lus pendant la compilation
+  (risque de blocage sur un gros build). Corrigé dans `update.rs` :
+  `ExeAside` renomme l'exe en cours en `jimmy.exe.old` (Windows l'autorise),
+  le remet en place au `Drop` si la compilation échoue ou est abandonnée
+  (STOP, délai), l'efface au cycle suivant ; `unbuilt` (état persisté) garde
+  l'alerte levée tant que le code tiré n'est pas compilé ; `/update`
+  recompile aussi si le binaire est plus ancien que `HEAD` ; journal complet
+  dans `data/logs/update-build.log`, résumé par `build_error_summary`.
+  Le redémarrage, jamais exercé avant, cassait aussi : (4) PowerShell lancé
+  en `DETACHED_PROCESS` depuis une appli graphique meurt avant d'exécuter
+  le lanceur (reproduit avec un programme GUI minimal : 0x08 → rien,
+  `CREATE_NO_WINDOW` 0x08000000 → OK) : Jimmy quittait et ne revenait
+  jamais ; (5) `std::process::exit` saute les `Drop` : Godot restait
+  orphelin sur 8787 → `App::shutdown_children` avant de quitter ; (6) le
+  lanceur relançait sans attendre la sortie de l'ancien (instance unique
+  Tauri) → `launcher.ps1 -WaitPid`, trace dans `data/logs/launcher.log`.
+  Test de bout en bout : Jimmy lancé avec CDP, `unbuilt` = `HEAD` dans
+  `data/update_state.json`, `/update` tapé dans le Chat (Playwright).
+  **Un PC qui tourne sur un binaire d'avant ce correctif doit être
+  recompilé une fois à la main** (arrêter Jimmy, `git pull`,
+  `build.ps1 -Release`) : c'est l'ancien code qui exécute `/update`.
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée

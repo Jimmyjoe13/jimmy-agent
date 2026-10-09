@@ -9,8 +9,25 @@
 #   • sinon                    -> bascule sur le mode développement
 #                                 (scripts\dev.ps1), qui compile au lancement.
 
+param(
+    # Redémarrage après /update : PID de l'ancien Jimmy, à attendre avant de
+    # relancer (sinon l'instance unique ferme le nouveau aussitôt).
+    [int]$WaitPid = 0
+)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+
+if ($WaitPid -gt 0) {
+    # 60 s max : au-delà, on tente quand même plutôt que de rester muet.
+    Wait-Process -Id $WaitPid -Timeout 60 -ErrorAction SilentlyContinue
+    # Trace du redémarrage, lisible même si le nouveau Jimmy ne démarre pas.
+    $trace = Join-Path $root 'data\logs\launcher.log'
+    try {
+        Add-Content -Path $trace -Encoding UTF8 -Value ("{0} relance après /update (ancien PID {1} sorti : {2})" -f `
+            (Get-Date -Format s), $WaitPid, -not (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue))
+    } catch {}
+}
 
 $release = Join-Path $root 'target\release\jimmy.exe'
 

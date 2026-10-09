@@ -95,6 +95,10 @@ pub struct UpdateState {
     /// session ne se réécrit pas à chaque cycle, seule la bulle revient.
     #[serde(default)]
     pub notified: Option<String>,
+    /// SHA tiré par `/update` mais pas encore compilé (compilation ratée ou
+    /// abandonnée) : l'alerte reste levée et `/update` recompile.
+    #[serde(default)]
+    pub unbuilt: Option<String>,
 }
 
 pub fn state_file(data_dir: &Path) -> PathBuf {
@@ -127,7 +131,9 @@ pub async fn check(app: &crate::App) -> UpdateState {
     state.last_check = Some(chrono::Utc::now().to_rfc3339());
     state.local = local.clone();
     state.remote = remote.clone();
-    state.pending = next_pending(state.pending, local.as_deref(), remote.as_deref());
+    // Code tiré mais jamais compilé : les SHA se rejoignent, le binaire non.
+    state.pending = next_pending(state.pending, local.as_deref(), remote.as_deref())
+        || still_unbuilt(state.unbuilt.as_deref(), local.as_deref());
     save_state(&app.paths.data, &state);
     let short = |s: Option<&String>| {
         s.map(|sha| sha.chars().take(7).collect::<String>())
@@ -158,6 +164,7 @@ pub async fn update_loop(app: std::sync::Arc<crate::App>) {
             CHECK_EVERY
         })
         .await;
+        remove_old_exe(&app.paths.app);
         check(&app).await;
         notify_if_pending(&app).await;
     }
@@ -211,6 +218,121 @@ fn short_log(text: &str, max: usize) -> String {
         return flat;
     }
     format!("{}…", flat.chars().take(max).collect::<String>())
+}
+
+/// Résumé d'un journal de compilation raté : la première ligne d'erreur et
+/// les deux suivantes (cargo met la cause sous `error:`). À défaut, la FIN
+/// du journal : son début n'est que l'en-tête npm (`> jimmy-desktop…`).
+fn build_error_summary(log: &str, max: usize) -> String {
+    let lines: Vec<&str> = log.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let first_error = lines.iter().position(|l| {
+        let lower = l.to_lowercase();
+        lower.starts_with("error") || lower.contains("error:") || lower.contains("error[")
+    });
+    if let Some(i) = first_error {
+        let end = (i + 3).min(lines.len());
+        return short_log(&lines[i..end].join(" "), max);
+    }
+    let flat: String = log.split_whitespace().collect::<Vec<_>>().join(" ");
+    let count = flat.chars().count();
+    if count <= max {
+        return flat;
+    }
+    format!("…{}", flat.chars().skip(count - max).collect::<String>())
+}
+
+/// `true` si le code tiré par un `/update` précédent n'a jamais été compilé
+/// (compilation ratée ou abandonnée) et que le dépôt n'a pas bougé depuis.
+pub fn still_unbuilt(unbuilt: Option<&str>, local: Option<&str>) -> bool {
+    matches!((unbuilt, local), (Some(u), Some(l)) if u == l)
+}
+
+/// Binaire lancé par le raccourci et relancé après mise à jour.
+const RELEASE_EXE: &str = "target/release/jimmy.exe";
+
+/// Où l'exécutable en cours est écarté pendant la recompilation.
+pub fn old_exe(exe: &Path) -> PathBuf {
+    exe.with_extension("exe.old")
+}
+
+/// Écarte l'exécutable en cours (`jimmy.exe` → `jimmy.exe.old`) le temps de
+/// la recompilation : Windows refuse de l'écraser (`os error 5`), mais
+/// accepte de le renommer. Tant que `keep` n'est pas appelé, il revient à sa
+/// place au `Drop` — compilation ratée, délai dépassé ou « STOP » (la future
+/// abandonnée), le raccourci Bureau retrouve toujours un binaire.
+pub struct ExeAside {
+    exe: PathBuf,
+    old: PathBuf,
+    armed: bool,
+}
+
+impl ExeAside {
+    pub fn new(exe: &Path) -> std::io::Result<Self> {
+        let old = old_exe(exe);
+        let armed = exe.exists();
+        if armed {
+            // Reste d'une mise à jour précédente (plus en cours d'exécution).
+            if old.exists() {
+                std::fs::remove_file(&old)?;
+            }
+            std::fs::rename(exe, &old)?;
+        }
+        Ok(Self {
+            exe: exe.to_path_buf(),
+            old,
+            armed,
+        })
+    }
+
+    /// Compilation réussie : le neuf reste, l'ancien attend le prochain
+    /// démarrage pour être effacé (`remove_old_exe`).
+    pub fn keep(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ExeAside {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // Un binaire partiel d'une compilation interrompue ne doit pas rester.
+        if self.exe.exists() {
+            let _ = std::fs::remove_file(&self.exe);
+        }
+        if let Err(error) = std::fs::rename(&self.old, &self.exe) {
+            log::warn!("[update] binaire actuel non restauré : {error}");
+        }
+    }
+}
+
+/// Efface l'exécutable écarté par la dernière mise à jour. Silencieux s'il
+/// tourne encore (ancien processus pas tout à fait sorti) : le prochain
+/// démarrage réessaiera.
+fn remove_old_exe(app_dir: &Path) {
+    let old = old_exe(&app_dir.join(RELEASE_EXE));
+    if old.exists() && std::fs::remove_file(&old).is_ok() {
+        log::info!("[update] ancien binaire effacé");
+    }
+}
+
+/// Le binaire est-il plus ancien que le dernier commit ? Cas d'un pull fait
+/// sans compilation (échec d'un ancien `/update`, ou `git pull` à la main).
+async fn binary_older_than_head(app_dir: &Path) -> bool {
+    let Some(head_secs) = git_output(app_dir, &["log", "-1", "--format=%ct"], LOCAL_TIMEOUT)
+        .await
+        .and_then(|out| out.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    let Ok(modified) = app_dir.join(RELEASE_EXE).metadata().and_then(|m| m.modified()) else {
+        return false;
+    };
+    let exe_secs = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    exe_secs < head_secs
 }
 
 /// Exécute `git` dans le dépôt, borné dans le temps. `Err` = pas de dépôt,
@@ -310,13 +432,38 @@ pub async fn apply(
             ))
         }
     })?;
-    if classify_pull(&pull_log) == PullOutcome::UpToDate {
-        return Ok(answer("Déjà à jour : rien à appliquer.".to_string()));
-    }
     let after = local_head(&app.paths.app).await;
-    if before.is_some() && after == before {
-        return Ok(answer("Déjà à jour : rien à appliquer.".to_string()));
+    let pulled_nothing =
+        classify_pull(&pull_log) == PullOutcome::UpToDate || (before.is_some() && after == before);
+    if pulled_nothing {
+        // Code à jour, mais le binaire l'est-il ? (compilation précédente
+        // ratée, ou `git pull` fait à la main sans recompiler.)
+        let unbuilt = still_unbuilt(load_state(&app.paths.data).unbuilt.as_deref(), after.as_deref());
+        if !unbuilt && !binary_older_than_head(&app.paths.app).await {
+            return Ok(answer("Déjà à jour : rien à appliquer.".to_string()));
+        }
+        let _ = tx
+            .send(AgentEvent::Progress {
+                text: "Code déjà à jour, mais pas le binaire : je recompile.".to_string(),
+            })
+            .await;
     }
+
+    // Noté AVANT la compilation : un échec, un délai dépassé ou un « STOP »
+    // laissent l'alerte levée, et le prochain `/update` recompilera.
+    let mut state = load_state(&app.paths.data);
+    state.unbuilt = after.clone();
+    state.pending = true;
+    save_state(&app.paths.data, &state);
+
+    // Windows refuse d'écraser l'exécutable en cours : on l'écarte, il
+    // revient tout seul si la compilation n'aboutit pas (piège 97).
+    let exe = app.paths.app.join(RELEASE_EXE);
+    let aside = ExeAside::new(&exe).map_err(|e| {
+        Error::Tool(format!(
+            "Binaire actuel impossible à écarter avant compilation ({e}). Le Jimmy actuel tourne toujours."
+        ))
+    })?;
 
     let _ = tx
         .send(AgentEvent::ToolStart {
@@ -326,12 +473,24 @@ pub async fn apply(
         })
         .await;
     let build_start = std::time::SystemTime::now();
+    // Journal complet dans un fichier : des tubes jamais lus pendant la
+    // compilation pourraient se remplir et la bloquer, et le détail reste
+    // consultable après coup.
+    let build_log = app.paths.data.join("logs").join("update-build.log");
+    let open_log = || {
+        std::fs::File::create(&build_log)
+            .map_err(|e| Error::Tool(format!("journal de compilation impossible : {e}")))
+    };
+    let log_out = open_log()?;
+    let log_err = log_out
+        .try_clone()
+        .map_err(|e| Error::Tool(format!("journal de compilation impossible : {e}")))?;
     let mut child = tokio::process::Command::new("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/build.ps1", "-Release"])
         .current_dir(&app.paths.app)
         .kill_on_drop(true)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(log_out))
+        .stderr(std::process::Stdio::from(log_err))
         .spawn()
         .map_err(|e| Error::Tool(format!("compilation non lancée : {e}")))?;
     let mut last_progress = std::time::Instant::now();
@@ -362,10 +521,6 @@ pub async fn apply(
             }
         }
     };
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| Error::Tool(format!("compilation illisible : {e}")))?;
     let _ = tx
         .send(AgentEvent::ToolEnd {
             call_id: "update-build".to_string(),
@@ -376,21 +531,18 @@ pub async fn apply(
         })
         .await;
     if !status.success() {
-        let log = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let log = std::fs::read(&build_log)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+        log::warn!("[update] compilation ratée, journal : {}", build_log.display());
         return Err(Error::Tool(format!(
-            "Compilation impossible : {}. Le Jimmy actuel tourne toujours.",
-            short_log(&log, 300)
+            "Compilation impossible : {}. Le Jimmy actuel tourne toujours ; \
+             retape /update après correction (journal : data/logs/update-build.log).",
+            build_error_summary(&log, 300)
         )));
     }
     // Le binaire vient-il de ce build ? Sinon, on ne redémarre surtout pas.
-    let fresh = app
-        .paths
-        .app
-        .join("target/release/jimmy.exe")
+    let fresh = exe
         .metadata()
         .and_then(|m| m.modified())
         .map(|modified| modified >= build_start)
@@ -403,9 +555,11 @@ pub async fn apply(
 
     // L'alerte retombe maintenant : au redémarrage, local et distant se
     // rejoignent et aucun rappel ne repart.
+    aside.keep();
     let mut state = load_state(&app.paths.data);
     state.local = after.clone();
     state.pending = false;
+    state.unbuilt = None;
     save_state(&app.paths.data, &state);
 
     schedule_restart(app);
@@ -432,24 +586,45 @@ pub fn schedule_restart(app: std::sync::Arc<crate::App>) {
             return;
         }
         log::info!("[update] redémarrage après mise à jour");
+        app.shutdown_children().await;
         relaunch(&app.paths.app);
         std::process::exit(0);
     });
 }
 
 /// Relance Jimmy détaché (le lanceur du raccourci Bureau) : le nouveau
-/// processus survit à la sortie de celui-ci.
+/// processus survit à la sortie de celui-ci. `-WaitPid` : le lanceur attend
+/// que CE processus soit sorti, sinon l'instance unique de Tauri voit encore
+/// l'ancien Jimmy et ferme le nouveau aussitôt (piège 97).
+///
+/// `CREATE_NO_WINDOW` et surtout PAS `DETACHED_PROCESS` : lancé sans console
+/// depuis une appli graphique comme Jimmy, PowerShell 5.1 meurt avant
+/// d'exécuter la moindre ligne (reproduit le 9 octobre avec un programme GUI
+/// minimal : 0x08 → rien, 0x08000000 → script exécuté). Sortie du job tentée
+/// d'abord (un job « tuer à la fermeture » emporterait le lanceur avec
+/// Jimmy), sans elle si le job l'interdit.
 #[cfg(windows)]
 fn relaunch(app_dir: &Path) {
     use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x00000008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
     let script = app_dir.join("scripts/launcher.ps1");
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(&script)
-        .current_dir(app_dir)
-        .creation_flags(DETACHED_PROCESS)
-        .spawn();
+    let spawn = |flags: u32| {
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script)
+            .args(["-WaitPid", &std::process::id().to_string()])
+            .current_dir(app_dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+    };
+    let spawned = spawn(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(CREATE_NO_WINDOW));
+    if let Err(error) = spawned {
+        log::warn!("[update] lanceur non démarré : {error}");
+    }
 }
 
 /// Hors Windows : pas de redémarrage automatique (Jimmy est Windows).
@@ -622,6 +797,79 @@ mod tests {
         let long = "x".repeat(500);
         assert!(short_log(&long, 200).len() <= 210);
         assert!(short_log(&long, 200).ends_with('…'));
+    }
+
+    /// Échec réel du 9 octobre au travail : le message montrait l'en-tête
+    /// npm (`> jimmy-desktop…`) au lieu de l'erreur, qui est en fin de journal.
+    #[test]
+    fn erreur_de_compilation_lisible() {
+        let log = "\n> jimmy-desktop@0.1.0 build\n> tsc && vite build\n\n\
+            vite v5.4.0 building for production...\n✓ built in 1.94s\n   \
+            Compiling jimmy-desktop v0.1.0 (C:\\x\\desktop\\src-tauri)\n\
+            error: failed to remove file `C:\\x\\target\\release\\jimmy.exe`\n  \
+            Accès refusé. (os error 5)\nfailed to build app: failed to build app\n       \
+            Error failed to build app: failed to build app\n";
+        let resume = build_error_summary(log, 300);
+        assert!(resume.contains("failed to remove file"), "{resume}");
+        assert!(resume.contains("Accès refusé"), "{resume}");
+        assert!(!resume.contains("jimmy-desktop@"), "{resume}");
+        // Sans ligne d'erreur : la fin du journal, pas son début.
+        let sans = format!("{}fin utile", "début ".repeat(100));
+        let resume = build_error_summary(&sans, 50);
+        assert!(resume.contains("fin utile"), "{resume}");
+    }
+
+    /// Pull réussi mais compilation ratée : le code est à jour, le binaire
+    /// non. L'alerte doit rester, et `/update` doit recompiler.
+    #[test]
+    fn code_tire_mais_pas_compile_reste_a_appliquer() {
+        let a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        assert!(still_unbuilt(Some(a), Some(a)));
+        assert!(!still_unbuilt(None, Some(a)));
+        // Le dépôt a bougé depuis (pull à la main) : plus le même cas.
+        assert!(!still_unbuilt(Some(a), Some(b)));
+        assert!(!still_unbuilt(Some(a), None));
+    }
+
+    /// Le bug du 9 octobre : `/update` recompile pendant que Jimmy tourne, et
+    /// Windows refuse d'écraser un exécutable en cours (`os error 5`). Un
+    /// exécutable en cours peut en revanche être renommé : on l'écarte en
+    /// `.old`, et il revient si la compilation échoue ou est abandonnée.
+    #[cfg(windows)]
+    #[test]
+    fn binaire_en_cours_ecarte_puis_restaure() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!("jimmy-exe-aside-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("jimmy.exe");
+        fs::copy(r"C:\Windows\System32\PING.EXE", &exe).unwrap();
+        let mut child = std::process::Command::new(&exe)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        // Ce que fait cargo, et ce qui échouait : supprimer le binaire en cours.
+        assert!(fs::remove_file(&exe).is_err(), "l'OS devrait verrouiller l'exécutable");
+
+        // Compilation réussie : le neuf prend la place, l'ancien reste en `.old`.
+        let aside = ExeAside::new(&exe).expect("un exécutable en cours se renomme");
+        fs::write(&exe, b"neuf").expect("place libre après écartement");
+        aside.keep();
+        assert_eq!(fs::read(&exe).unwrap(), b"neuf");
+        assert!(old_exe(&exe).exists());
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        // Compilation ratée ou STOP : l'actuel revient à sa place.
+        {
+            let _aside = ExeAside::new(&exe).unwrap();
+            assert!(!exe.exists());
+        }
+        assert_eq!(fs::read(&exe).unwrap(), b"neuf");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Vérification réelle sur ce dépôt : les deux bouts se lisent et sont

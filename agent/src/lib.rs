@@ -900,6 +900,20 @@ impl App {
         }
     }
 
+    /// Arrête les processus enfants (Godot, serveurs MCP, whisper) avant une
+    /// sortie par `std::process::exit`, qui saute les `Drop` et donc les
+    /// `kill_on_drop` : sans ça, le redémarrage après `/update` laissait un
+    /// Godot orphelin sur le port de l'avatar (piège 97).
+    pub async fn shutdown_children(&self) {
+        self.stop_avatar().await;
+        self.mcp.shutdown().await;
+        for stt in [&self.stt, &self.stt_command] {
+            if let Some(mut server) = stt.lock().await.take() {
+                server.shutdown().await;
+            }
+        }
+    }
+
     /// Démarre whisper.cpp et la capture microphone.
     /// Démarre les serveurs de reconnaissance (si besoin) puis le micro.
     ///
