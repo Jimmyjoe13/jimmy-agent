@@ -130,24 +130,14 @@ body {
   padding: 2px 8px;
 }
 
-/* Cadre métal : dégradé conique sur 1,5 px, l'intérieur cuivre par-dessus. */
+/* Logo officiel : monogramme « AJ » détouré (fond transparent), avec un léger
+   halo violet/corail repris de ses couleurs pour le détacher du fond. */
 .brand-mark {
   flex: none;
-  width: 44px;
-  height: 44px;
-  padding: 1.5px;
-  border-radius: 14px;
-  background: conic-gradient(from 210deg, #e9ecef, #5c626b, #c7ccd3, #4a4f57, #e9ecef);
-}
-
-.brand-core {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  border-radius: 12.5px;
-  color: var(--on-accent);
-  background: radial-gradient(circle at 32% 26%, var(--accent-hi), var(--accent) 45%, #2a0f05 100%);
+  width: 48px;
+  height: 48px;
+  background: url("./assets/logo-mark.png") center / contain no-repeat;
+  filter: drop-shadow(0 2px 10px rgba(124, 77, 255, 0.28)) drop-shadow(0 0 6px rgba(254, 111, 81, 0.12));
 }
 
 .brand-text {
@@ -161,7 +151,8 @@ body {
   display: block;
   font: 400 26px/1 var(--serif);
   letter-spacing: 0.01em;
-  color: var(--title);
+  /* Corail du mot « JIMMY » dans le logo officiel. */
+  color: #fe6f51;
 }
 
 .brand-sub {

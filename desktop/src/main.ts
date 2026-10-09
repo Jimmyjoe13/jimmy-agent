@@ -196,9 +196,9 @@ async function main() {
       h(
         "div",
         { class: "brand" },
-        // Pastille cuivre cerclée de métal (maquette) : le cadre est un
-        // dégradé conique, l'intérieur un dégradé radial de l'accent.
-        h("div", { class: "brand-mark" }, h("div", { class: "brand-core" }, icon("logo", 22, 2.2))),
+        // Logo officiel (monogramme « AJ » détouré), posé en fond CSS pour
+        // que Vite l'embarque comme les polices.
+        h("div", { class: "brand-mark", role: "img", "aria-label": "Agent Jimmy" }),
         h(
           "div",
           { class: "brand-text" },

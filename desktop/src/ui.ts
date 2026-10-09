@@ -72,7 +72,6 @@ const ICONS = {
   at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
-  logo: '<path d="M9 4v10a4 4 0 0 1-4 4"/><path d="M15 4v6"/><path d="M15 14v.01"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;

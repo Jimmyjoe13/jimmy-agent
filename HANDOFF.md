@@ -1719,6 +1719,20 @@ Rust, les six autres onglets extrapolés.
 - Les trois petites cartes de la maquette Voix (écoute, voix, avatar) ne
   sont pas reprises : elles doublaient les réglages existants.
 
+### Décisions prises (9 octobre 2026 — logo officiel)
+
+- **Logo officiel « Agent Jimmy »** (monogramme « AJ » à lunettes) : source
+  `logo-agent-jimmy.jpg` à la racine. Le monogramme est détouré (fond marine
+  rendu transparent par distance de couleur, Pillow) dans
+  `desktop/src/assets/logo-mark.png` (256 px) et posé en fond CSS de
+  `.brand-mark` (remplace la pastille cuivre et l'icône `logo` de `ui.ts`,
+  supprimée). Le nom « Jimmy » de la barre latérale prend le corail du logo
+  (`#fe6f51`).
+- **Icônes de l'appli** (`desktop/src-tauri/icons/*`, `desktop/public/icons/32x32.png`) :
+  le monogramme sur une tuile marine arrondie (lisible en 16-32 px).
+  `scripts/make-icons.ps1` dessine encore l'**ancien renard** : ne pas le
+  relancer, il écraserait le logo.
+
 ### Ensuite (au 7 octobre, par priorité)
 
 1. **Essais réels** de ce qui n'est vérifié que par tests : navigateur
