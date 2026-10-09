@@ -1492,6 +1492,22 @@ plus large ou facturation validée — surveiller les 400/429 au journal.
   recompilé une fois à la main** (arrêter Jimmy, `git pull`,
   `build.ps1 -Release`) : c'est l'ancien code qui exécute `/update`.
 
+  **98. « Demande l'accord » dans le prompt = le modèle demande l'accord en
+  texte.** Parcours « fichier sensible » en échec intermittent depuis le
+  6 octobre (environ une suite sur deux, 25 dernières suites). Rejeu
+  (`agent/tests/replay.rs`, base copiée, `JIMMY_REPLAY_SHOW=1` affiche
+  texte et outils) : en session neuve, `write_file` 8/8 ; avec le **fil de
+  la suite** (5 tours avant), 3 à 6 réponses sur 10 sans outil : « Dis-moi
+  oui et je le crée », « Confirmes-tu que je peux continuer ». La règle 8
+  du prompt (« modifier l'un d'eux demande l'accord de l'utilisateur ») se
+  lisait comme une consigne de demander soi-même. Les souvenirs
+  « validation explicite » n'y sont pour rien (sans eux : 6/10 sans outil).
+  Règle reformulée : « appelle directement l'outil, c'est l'application qui
+  demande l'accord ; ne demande pas en texte » → 12/12 avec outil
+  (10 `write_file`, 2 consultent d'abord les skills). Mécanisme de carte
+  inchangé. Leçon : une règle qui décrit un contrôle fait **par
+  l'application** doit dire au modèle d'agir, pas décrire le contrôle.
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée
@@ -1753,12 +1769,9 @@ Rust, les six autres onglets extrapolés.
    ton nom » sur un envoi) ; tâches de fond **à la voix** (« je m'en occupe »,
    retour à l'écoute, annonce de fin, « arrête tout ») ; vision à la voix
    (« Jimmy, regarde mon écran ») ; lapin pendant une vraie tâche de fond.
-2. **Muse Spark et le parcours « fichier sensible »** : 4 suites d'interface
-   de suite en échec depuis qu'il est le modèle principal (0 outil, réponse
-   en texte au lieu de `write_file` sur un `.env`), alors que MiMo et GLM
-   passaient. Rejouer la demande (`agent/tests/replay.rs`) pour savoir s'il
-   refuse par principe d'écrire un `.env` : si oui, c'est le parcours qu'il
-   faut adapter (cible moins « secrète »), pas le garde-fou.
+2. ~~**Muse Spark et le parcours « fichier sensible »**~~ — **résolu le
+   9 octobre** (piège 98) : pas un refus de principe, la règle 8 du prompt
+   lui faisait demander l'accord en texte ; reformulée, 12/12 au rejeu.
 3. **Secrets dans le journal (code fait le 8 octobre, reste l'humain)** : les arguments d'outils et extraits bruts sont masqués (`sensitive::mask_json` / `mask_text`). Reste à **régénérer les deux clés déjà exposées** (`aggregate`, SynaptiQ) : les anciennes restent lisibles dans l'historique du journal.
 4. **Lapin et chien de garde** : si Godot redémarre pendant une tâche de fond,
    le lapin ne revient qu'à la tâche suivante ; renvoyer `/helper working`

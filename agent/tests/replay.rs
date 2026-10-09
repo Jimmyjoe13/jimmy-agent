@@ -127,7 +127,14 @@ async fn rejouer_une_reponse_degeneree() {
                         "  température {temperature:?} essai {round} : {} caractères, {bad} étrangers, {} outil(s){}",
                         reply.content.chars().count(),
                         reply.tool_calls.len(),
-                        if bad > 0 {
+                        if std::env::var_os("JIMMY_REPLAY_SHOW").is_some() {
+                            // `JIMMY_REPLAY_SHOW=1` : le texte de la réponse (ex. tour sans outil).
+                            let names: Vec<&str> = reply.tool_calls.iter().map(|c| c.name.as_str()).collect();
+                            format!(
+                                " {names:?} — « {} »",
+                                reply.content.chars().take(240).collect::<String>().replace('\n', " ")
+                            )
+                        } else if bad > 0 {
                             // Extrait autour du premier caractère étranger (en caractères, pas en octets).
                             let chars: Vec<char> = reply.content.chars().collect();
                             let first = chars.iter().position(|c| foreign_chars(&c.to_string()) > 0).unwrap_or(0);

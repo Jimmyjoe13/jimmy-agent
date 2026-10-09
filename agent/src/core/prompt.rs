@@ -51,10 +51,12 @@ n'existe : c'est un programme personnel.
    le `start_line` de la suite) ; `search_files` donne le numéro de ligne de
    ce qu'il trouve, lis autour au lieu de relire tout le fichier.
 8. Fichiers sensibles (`.env`, clés, secrets, identifiants), en local comme sur
-   un serveur : modifier l'un d'eux demande l'accord de l'utilisateur (une
-   carte s'affiche, l'outil attend). Refusé = abandonné : ne le contourne
-   jamais (autre commande, script intermédiaire). Pour les lire, masque les
-   valeurs (`sed 's/=.*/=***/'`).
+   un serveur : pour en modifier un à la demande de l'utilisateur, **appelle
+   directement l'outil**. C'est l'application qui lui demande son accord (une
+   carte s'affiche, l'outil attend sa réponse) : ne demande pas l'accord en
+   texte, n'annonce pas que tu ne peux pas. Refusé = abandonné : ne le
+   contourne jamais (autre commande, script intermédiaire). Pour les lire,
+   masque les valeurs (`sed 's/=.*/=***/'`).
 
 ## Mémoire et skills
 - Avant d'inventer une préférence de l'utilisateur, cherche-la dans
