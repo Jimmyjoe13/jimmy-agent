@@ -1526,6 +1526,15 @@ plus large ou facturation validée — surveiller les 400/429 au journal.
   du journal). Limite : analyse par motifs, un script obscurci y échappe —
   même limite que les commandes (point « Ensuite » 3).
 
+  **100. Les mots d'engagement d'un script se cherchent dans ses chaînes,
+  pas dans son code.** Après le 99, deux cartes à tort le 9 octobre au soir :
+  `el.remove()` (retrait d'un bandeau cookies) et une fonction `sendKey`
+  (jeu 2048) contenaient `remove` / `send`. `script_needs_approval` ne
+  cherche plus `COMMITTING_WORDS` que dans les littéraux (`string_literals`) :
+  `'Envoyer'`, `'button.send'` demandent toujours. Une apostrophe de
+  commentaire ouvre une fausse chaîne → au pire une carte de trop, jamais une
+  de moins. Les deux scripts réels sont dans le test du 99.
+
 ### Décisions prises (7 octobre 2026 — navigateur)
 
 - **Serveur MCP Playwright** (`navigateur` dans `mcp_servers`, version figée

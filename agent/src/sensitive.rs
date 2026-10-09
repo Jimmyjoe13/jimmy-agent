@@ -548,11 +548,43 @@ fn script_needs_approval(code: &str) -> Option<&'static str> {
     if presses_enter && !SEARCH_WORDS.iter().any(|w| lower.contains(w)) {
         return Some("touche Entrée envoyée par script (peut valider un message)");
     }
+    // Le mot d'engagement se cherche dans les chaînes du script (sélecteur,
+    // texte du bouton : `'Envoyer'`, `'button.send'`), jamais dans le code :
+    // `el.remove()` ou une fonction `sendKey` ne sont pas des boutons
+    // (9 octobre au soir : deux cartes à tort, bandeau cookies et jeu 2048).
     let acts = has(&["click(", ".tap(", "dispatchevent"]);
-    if acts && COMMITTING_WORDS.iter().any(|w| lower.contains(w)) {
+    let literals = string_literals(&lower);
+    if acts && COMMITTING_WORDS.iter().any(|w| literals.contains(w)) {
         return Some("clic par script sur un élément qui engage");
     }
     None
+}
+
+/// Contenu des chaînes d'un script JS (`'…'`, `"…"`, `` `…` ``), mis bout à
+/// bout et séparés par un saut de ligne. Une apostrophe isolée (commentaire en
+/// français) ouvre une fausse chaîne : on demande alors un peu plus, jamais
+/// moins — le bon côté de l'erreur.
+fn string_literals(code: &str) -> String {
+    let mut out = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for c in code.chars() {
+        match quote {
+            None if matches!(c, '\'' | '"' | '`') => quote = Some(c),
+            None => {}
+            Some(_) if escaped => {
+                escaped = false;
+                out.push(c);
+            }
+            Some(_) if c == '\\' => escaped = true,
+            Some(q) if c == q => {
+                quote = None;
+                out.push('\n');
+            }
+            Some(_) => out.push(c),
+        }
+    }
+    out
 }
 
 /// L'appel d'outil modifie-t-il un fichier sensible ? Renvoie le fichier en
@@ -890,6 +922,10 @@ mod tests {
             "async (page) => { await page.mouse.wheel(0, 2000); await page.waitForTimeout(1000); return page.url(); }",
             "async (page) => { await page.getByRole('button', { name: 'Fermer' }).click(); }",
             "async (page) => { const r = await fetch('/api/items'); return await r.json(); }",
+            // Scripts réels du 9 octobre au soir : le mot d'engagement est un
+            // identifiant JS (`el.remove()`, `sendKey`), pas un bouton.
+            "async (page) => { await page.evaluate(() => { document.querySelectorAll('#cmpwrapper, div[role=\"dialog\"]').forEach(el => { el.remove(); }); }); try { await page.getByRole('button').nth(3).click({timeout:2000}); } catch(e){} }",
+            "async (page) => { await page.evaluate(async () => { function sendKey(k){ const e1=new KeyboardEvent('keydown',{key:k,bubbles:true}); document.dispatchEvent(e1); } sendKey('ArrowLeft'); }); }",
         ] {
             assert_eq!(run(code), None, "{code} doit rester libre");
         }
