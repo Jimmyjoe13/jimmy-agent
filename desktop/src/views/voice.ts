@@ -51,6 +51,28 @@ export function voiceView(ctx: AppContext): HTMLElement {
     }
     phaseText.textContent = labels[phase] ?? phase;
   }
+  // Forme d'onde du héros (maquette) : 56 barres dont la hauteur suit le
+  // niveau du micro ; au repos (écoute coupée), une ligne basse et grise.
+  const BAR_COUNT = 56;
+  const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
+    const env = Math.sin((Math.PI * i) / (BAR_COUNT - 1));
+    // Le centre de l'onde prend l'accent, les bords restent argent.
+    return h("span", { class: `wave-bar${env > 0.55 ? " hot" : ""}`, style: `opacity: ${(0.35 + 0.65 * env).toFixed(2)}` });
+  });
+  const wave = h("div", { class: "voice-wave", "aria-hidden": "true" }, ...bars);
+  let wavePhase = 0;
+  function drawWave(level: number) {
+    wavePhase += 0.9;
+    bars.forEach((bar, i) => {
+      const env = Math.sin((Math.PI * i) / (BAR_COUNT - 1));
+      const shape = 0.55 + 0.45 * Math.sin(i * 1.7 + wavePhase) * Math.cos(i * 0.6 - wavePhase * 0.7);
+      // Plancher visible même en silence, amplitude pleine à la voix.
+      const amp = 0.18 + 0.82 * level;
+      bar.style.height = `${Math.max(4, Math.round(6 + 100 * env * Math.abs(shape) * amp))}px`;
+    });
+  }
+  drawWave(0);
+
   // Vumètre de l'écoute permanente : la preuve que le micro capte.
   const liveMeter = h("div", { class: "meter active", title: "Niveau du micro" }, h("div", { class: "meter-fill" }));
   const livePoll = window.setInterval(async () => {
@@ -60,6 +82,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
     // Échelle perceptive : la parole à distance tourne autour de 0,005-0,02.
     const level = Math.min(1, Math.sqrt(status.level / 0.05));
     (liveMeter.firstElementChild as HTMLElement).style.width = `${level * 100}%`;
+    drawWave(level);
   }, 300);
   ctx.onCleanup(() => {
     window.clearInterval(phaseTimer);
@@ -75,9 +98,11 @@ export function voiceView(ctx: AppContext): HTMLElement {
     listenState.textContent = running ? "active" : "arrêtée";
     listenState.className = `listen-state ${running ? "on" : "off"}`;
     listenButton.textContent = running ? "Couper l'écoute" : "Activer l'écoute";
-    listenButton.className = running ? "ghost" : "primary";
+    listenButton.className = `${running ? "ghost" : "primary"} voice-listen`;
     listenButton.removeAttribute("disabled");
     liveMeter.style.display = running ? "" : "none";
+    wave.classList.toggle("off", !running);
+    if (!running) drawWave(0);
     banner.style.display = running ? "" : "none";
     if (running && banner.classList.contains("idle")) showPhase("idle");
     if (!voice) {
@@ -313,16 +338,24 @@ export function voiceView(ctx: AppContext): HTMLElement {
   return h(
     "section",
     { class: "view" },
-    card(
-      "Écoute permanente",
+    h(
+      "div",
+      { class: "card voice-hero" },
       h(
-        "p",
-        { class: "note" },
-        "Jimmy garde le micro ouvert et attend « ",
-        h("strong", {}, capitalize(ctx.status.stt.wake_word)),
-        " ». La reconnaissance tourne en local : rien n'est envoyé sur le réseau. Si tu la laisses active, l'écoute reprend toute seule au prochain lancement.",
+        "div",
+        { class: "voice-hero-head" },
+        h("h3", { class: "kicker" }, "Écoute permanente · mot d'éveil"),
+        h("h2", { class: "voice-hero-word" }, "« ", h("em", {}, capitalize(ctx.status.stt.wake_word)), " »"),
+        h(
+          "p",
+          { class: "note" },
+          "Jimmy garde le micro ouvert et attend « ",
+          h("strong", {}, capitalize(ctx.status.stt.wake_word)),
+          " ». La reconnaissance tourne en local : rien n'est envoyé sur le réseau. Si tu la laisses active, l'écoute reprend toute seule au prochain lancement.",
+        ),
       ),
-      h("div", { class: "row" }, listenButton, listenState),
+      wave,
+      h("div", { class: "voice-hero-actions" }, listenButton, listenState),
       banner,
       liveMeter,
       servers,

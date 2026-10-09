@@ -17,18 +17,18 @@ import { historyView } from "./views/history";
 import { diagnosticView, memoryView, skillsView, skinView } from "./views/panels";
 import { onboardingView, voiceView } from "./views/voice";
 import { settingsView } from "./views/settings";
-import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, mount, toast } from "./ui";
+import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, icon, mount, toast, type IconName } from "./ui";
 import "./styles.css";
 
-const ROUTES: { id: Route; label: string; icon: string; subtitle: string }[] = [
-  { id: "chat", label: "Chat", icon: "◉", subtitle: "Parle à Jimmy, ou écris-lui." },
-  { id: "voice", label: "Voix", icon: "◍", subtitle: "Écoute permanente, reconnaissance et synthèse vocale." },
-  { id: "history", label: "Historique", icon: "◷", subtitle: "Les sessions enregistrées sur cette machine." },
-  { id: "memory", label: "Mémoire", icon: "❋", subtitle: "Ce que Jimmy a retenu de toi." },
-  { id: "skills", label: "Skills", icon: "◆", subtitle: "Les procédures réutilisables de Jimmy." },
-  { id: "skin", label: "Skin", icon: "☻", subtitle: "Apparence et qualité de l'avatar." },
-  { id: "settings", label: "Paramètres", icon: "⚙", subtitle: "Modèle, voix, écoute, avatar, permissions." },
-  { id: "diagnostic", label: "Diagnostic", icon: "✚", subtitle: "Vérifier que tout est en place." },
+const ROUTES: { id: Route; label: string; icon: IconName; subtitle: string }[] = [
+  { id: "chat", label: "Chat", icon: "chat", subtitle: "Parle à Jimmy, ou écris-lui." },
+  { id: "voice", label: "Voix", icon: "voice", subtitle: "Écoute permanente, reconnaissance et synthèse vocale." },
+  { id: "history", label: "Historique", icon: "history", subtitle: "Les sessions enregistrées sur cette machine." },
+  { id: "memory", label: "Mémoire", icon: "memory", subtitle: "Ce que Jimmy a retenu de toi." },
+  { id: "skills", label: "Skills", icon: "skills", subtitle: "Les procédures réutilisables de Jimmy." },
+  { id: "skin", label: "Skin", icon: "skin", subtitle: "Apparence et qualité de l'avatar." },
+  { id: "settings", label: "Paramètres", icon: "settings", subtitle: "Modèle, voix, écoute, avatar, permissions." },
+  { id: "diagnostic", label: "Diagnostic", icon: "diagnostic", subtitle: "Vérifier que tout est en place." },
 ];
 
 async function main() {
@@ -196,25 +196,14 @@ async function main() {
       h(
         "div",
         { class: "brand" },
-        h("div", { class: "brand-mark" }, "☻"),
+        // Pastille cuivre cerclée de métal (maquette) : le cadre est un
+        // dégradé conique, l'intérieur un dégradé radial de l'accent.
+        h("div", { class: "brand-mark" }, h("div", { class: "brand-core" }, icon("logo", 22, 2.2))),
         h(
           "div",
-          {},
+          { class: "brand-text" },
           h("strong", {}, "Jimmy"),
-          h("span", { class: "brand-sub" }, `v${info.version}${info.dev ? " · dépôt local" : ""}`),
-          ...(info.update.pending
-            ? [
-                h(
-                  "button",
-                  {
-                    class: "update-badge",
-                    title: "Mise à jour disponible : tape /update dans le Chat",
-                    onclick: () => ctx.navigate("history"),
-                  },
-                  "mise à jour",
-                ),
-              ]
-            : []),
+          h("span", { class: "brand-sub" }, `v${info.version} · ${info.dev ? "dépôt local" : "local"}`),
         ),
       ),
       h(
@@ -227,7 +216,7 @@ async function main() {
               class: `nav-item ${route === entry.id ? "active" : ""}`,
               onclick: () => ctx.navigate(entry.id),
             },
-            h("span", { class: "nav-icon" }, entry.icon),
+            h("span", { class: "nav-icon" }, icon(entry.icon, 20, 1.6)),
             entry.label,
           ),
         ),
@@ -235,6 +224,24 @@ async function main() {
       h(
         "div",
         { class: "sidebar-status" },
+        // En-tête de la carte « Système » : la pastille de mise à jour y vit
+        // (cliquable vers l'Historique), sinon un simple « à jour ».
+        h(
+          "div",
+          { class: "sidebar-status-head" },
+          h("span", { class: "kicker" }, "Système"),
+          info.update.pending
+            ? h(
+                "button",
+                {
+                  class: "update-badge",
+                  title: "Mise à jour disponible : tape /update dans le Chat",
+                  onclick: () => ctx.navigate("history"),
+                },
+                "mise à jour",
+              )
+            : h("span", { class: "uptodate-badge" }, "à jour"),
+        ),
         statusLine("Modèle", info.llm.model, info.llm.has_key),
         statusLine("Voix", voiceLabel, info.tts.has_key),
         statusLine(
@@ -315,6 +322,7 @@ async function main() {
               render();
             },
           },
+          icon("refresh", 16, 1.8),
           "Actualiser",
         ),
       ),

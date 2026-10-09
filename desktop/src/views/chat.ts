@@ -6,7 +6,7 @@
  * permet d'y naviguer sans quitter le chat.
  */
 import { api, type AgentEvent, type ChatMessage, type MentionEntry, type ProjectInfo, type ScreenCapture, type TaskInfo } from "../api";
-import { attempt, capitalize, guard, h, mount, toast } from "../ui";
+import { attempt, capitalize, guard, h, icon, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { explorerPanel } from "./explorer";
 
@@ -74,7 +74,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     },
     h("span", { class: "project-kicker" }, "Projet"),
     projectLabel,
-    h("span", { class: "project-caret" }, "▾"),
+    h("span", { class: "project-caret" }, icon("caret", 14, 2)),
   );
   const filesButton = h(
     "button",
@@ -88,6 +88,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         saveFilesOpen(filesOpen);
       },
     },
+    icon("folder", 16),
     "Fichiers",
   );
 
@@ -179,7 +180,13 @@ export function chatView(ctx: AppContext): HTMLElement {
     placeholder: "Dis à Jimmy ce qu'il doit faire…",
     "aria-label": "Message pour Jimmy",
   }) as HTMLTextAreaElement;
-  const sendButton = h("button", { class: "primary", onclick: () => void submit() }, "Envoyer");
+  const sendLabel = h("span", { class: "send-label" }, "Envoyer");
+  const sendButton = h(
+    "button",
+    { class: "primary send-button", onclick: () => void submit() },
+    icon("send", 17, 2.2),
+    sendLabel,
+  );
   // Arrêt d'urgence, visible pendant que Jimmy travaille (équivaut à « STOP »).
   const stopButton = h(
     "button",
@@ -288,7 +295,42 @@ export function chatView(ctx: AppContext): HTMLElement {
     "Joindre ma fenêtre",
   );
 
-  const hint = h("span", { class: "composer-hint" }, "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · @ pour citer un fichier");
+  const hint = h(
+    "span",
+    { class: "composer-hint" },
+    h("kbd", {}, "Entrée"),
+    " pour envoyer · ",
+    h("kbd", {}, "Maj"),
+    " + ",
+    h("kbd", {}, "Entrée"),
+    " pour un retour à la ligne · ",
+    h("kbd", {}, "@"),
+    " pour citer un fichier",
+  );
+
+  // Bouton « @ » du compositeur : insère le caractère au curseur et relance
+  // la détection des mentions (même chemin que la frappe au clavier).
+  const mentionButton = h(
+    "button",
+    {
+      class: "composer-icon",
+      type: "button",
+      title: "Citer un fichier du projet",
+      "aria-label": "Citer un fichier",
+      onclick: () => {
+        const at = input.selectionStart ?? input.value.length;
+        const before = input.value.slice(0, at);
+        // Un « @ » se colle à un mot précédent : on ajoute une espace avant.
+        const glue = before && !/\s$/.test(before) ? " " : "";
+        input.value = `${before}${glue}@${input.value.slice(input.selectionEnd ?? at)}`;
+        const caret = at + glue.length + 1;
+        input.setSelectionRange(caret, caret);
+        input.focus();
+        input.dispatchEvent(new Event("input"));
+      },
+    },
+    icon("at", 19),
+  );
 
   // ── Mentions « @ » (façon Codex) ───────────────────────────────────────────
   // « @ » ouvre un menu des fichiers du projet ; les suivants du jeton
@@ -402,10 +444,10 @@ export function chatView(ctx: AppContext): HTMLElement {
     stopButton.hidden = !busy;
     if (busy) {
       sendButton.setAttribute("disabled", "");
-      sendButton.textContent = "Jimmy travaille…";
+      sendLabel.textContent = "Jimmy travaille…";
     } else {
       sendButton.removeAttribute("disabled");
-      sendButton.textContent = "Envoyer";
+      sendLabel.textContent = "Envoyer";
       window.clearTimeout(safety);
       safetyOn = false;
     }
@@ -1018,13 +1060,43 @@ export function chatView(ctx: AppContext): HTMLElement {
   });
 
   function emptyState() {
+    const suggest = (label: string, prompt: string) =>
+      h(
+        "button",
+        {
+          class: "chat-suggestion",
+          type: "button",
+          onclick: () => {
+            input.value = prompt;
+            autosize();
+            input.focus();
+          },
+        },
+        label,
+      );
+    const title = h("h2", { class: "chat-empty-title" }, "Dis « ");
+    title.append(h("em", {}, capitalize(ctx.status.stt.wake_word)), " » pour lancer une commande, ou écris ici.");
     mount(
       stream,
       h(
         "div",
-        { class: "empty" },
-        h("p", {}, `Dis « ${capitalize(ctx.status.stt.wake_word)} » pour lancer une commande, ou écris ici.`),
-        h("p", { class: "hint" }, "Exemple : « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »"),
+        { class: "empty chat-empty" },
+        h(
+          "div",
+          { class: "chat-orb", "aria-hidden": "true" },
+          h("div", { class: "chat-orb-ring" }),
+          h("div", { class: "chat-orb-ring inner" }),
+          h("div", { class: "chat-orb-shell" }, h("div", { class: "chat-orb-core" })),
+        ),
+        title,
+        h("p", { class: "chat-empty-example" }, "Exemple : « Jimmy, analyse ce dossier et explique-moi ce que tu trouves. »"),
+        h(
+          "div",
+          { class: "chat-suggestions" },
+          suggest("Analyser un dossier", "Analyse ce dossier et explique-moi ce que tu trouves."),
+          suggest("Chercher dans mon vault", "Cherche dans mon vault Obsidian : "),
+          suggest("Résumer ma journée", "Résume ce que nous avons fait aujourd'hui."),
+        ),
       ),
     );
   }
@@ -1119,7 +1191,19 @@ export function chatView(ctx: AppContext): HTMLElement {
       h(
         "div",
         { class: "composer-actions" },
-        hint,
+        mentionButton,
+        h("span", { class: "composer-spacer" }),
+        stopButton,
+        sendButton,
+      ),
+    ),
+    h(
+      "div",
+      { class: "composer-foot" },
+      hint,
+      h(
+        "div",
+        { class: "composer-foot-actions" },
         h(
           "button",
           {
@@ -1137,8 +1221,6 @@ export function chatView(ctx: AppContext): HTMLElement {
           "Nouvelle session",
         ),
         captureButton,
-        stopButton,
-        sendButton,
       ),
     ),
       ),

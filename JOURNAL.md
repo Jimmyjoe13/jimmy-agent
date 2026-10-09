@@ -1282,6 +1282,41 @@ Poussé le soir même : `main` = `49a2b95` des deux côtés (3 commits).
 Suite le 9 au matin : clone + build au travail, commit déclencheur ici,
 bulle et `/update` là-bas (voir « Reprise » du HANDOFF).
 
+## 3duodécies. Session 13 — 9 octobre, matin : la refonte visuelle
+
+Demande de l'utilisateur : reprendre le design d'un export Claude Design
+(« Jimmy – Refonte interface.html »). L'export est un paquet compressé :
+deux maquettes 1440×900, Chat (écran vide) et Voix, en graphite et cuivre,
+Geist + Instrument Serif, icônes au trait. Elles reprennent exactement nos
+huit onglets et nos sous-titres : c'est un habillage, pas une refonte de
+structure. Reformulé, validé.
+
+**Livré en cinq lots** : tokens et polices embarquées ; coque (logo métal,
+navigation à icônes, carte « Système » avec la pastille de mise à jour,
+en-tête serif, pastille d'état à point pulsé) ; Chat (orbe, accroche,
+suggestions, compositeur en boîte, raccourcis en `<kbd>`, bulles) ; Voix
+(carte héros, onde branchée sur le niveau réel du micro, gros bouton
+d'écoute) ; composants partagés pour les six autres onglets (cartes,
+listes, sous-onglets, interrupteurs, chiffres en serif, toasts).
+
+**Méthode.** Itération sur un banc d'aperçu hors de Jimmy (bundle Vite servi
+localement, Edge headless, fausse couche `__TAURI_INTERNALS__`), pour ne pas
+recompiler ni redémarrer Jimmy à chaque retouche ; la vraie application
+n'est vérifiée qu'à la fin.
+
+**Payé en route.** Le nouveau bouton de base (`inline-flex`, centré) centrait
+les onglets de la navigation et coupait l'ellipse des puces de chemin ;
+corrigé par `justify-content` et `inline-block`, et par un survol de base en
+`:where()` qui ne vole plus le survol des composants. Première suite
+interrompue : le PC s'est mis en veille pendant le parcours tâche de fond,
+bilan perdu (piège 95).
+
+Vérifié : `npm run build` (TypeScript strict), `build.ps1 -Release` code 0,
+**suite d'interface 31/31, 0 erreur JS** (dont la tâche de fond, enfin verte
+à 47 s), captures réelles conformes à la maquette. Aucune ligne de Rust
+touchée (tests Rust non relancés). Jimmy relancé par la suite, une instance,
+sans débogage.
+
 ## 3terdécies. Seconde machine — l'avatar muet du clone frais (8-9 octobre)
 
 Première installation sur le PC du travail (Node et WebView2 présents ;

@@ -1434,6 +1434,17 @@ plus large ou facturation validée — surveiller les 400/429 au journal.
   échoue, le Jimmy actuel continue (le redémarrage est programmé seulement
   après `target/release/jimmy.exe` plus récent que le début du build).
 
+  **95. Une veille du PC pendant `test-ui.ps1` fait perdre tout le bilan.**
+  `suite.js` n'imprime ses résultats qu'à la fin (`console.log(results)`) :
+  si Windows passe en veille moderne pendant la suite (9 octobre, 08:35 →
+  08:53 et → 09:08, Kernel-Power 506/507), la page CDP se ferme
+  (`Target page, context or browser has been closed`), le parcours en cours
+  rapporte une durée absurde au journal (`run_command` « timeout » après
+  1 049 s, DeepSeek et le dépôt injoignables au réveil) et **aucun** parcours
+  passé n'est affiché. Ce n'est pas un bug du code : vérifier les
+  événements Kernel-Power avant d'enquêter, puis relancer la suite PC
+  éveillé.
+
 
   **96. Sur une installation fraîche, l'avatar reste muet : le cache de
   l'éditeur manque.** `main.gd` utilisait les `class_name` globaux (`Jimmy`,
@@ -1641,6 +1652,42 @@ journal comme véhicule du test.
   valeur au mot suivant (`X-API-Key: <clé>`), `sk-…`, identifiants d'URL.
   Reste à l'utilisateur : **régénérer les deux clés exposées**
   (`aggregate`, SynaptiQ) — aucun code ne le fait à sa place.
+
+### Décisions prises (9 octobre 2026 — refonte visuelle de l'interface)
+
+Demande de l'utilisateur : appliquer à l'interface desktop la maquette
+Claude Design « Jimmy – Refonte interface » (deux écrans, Chat et Voix),
+reformulée puis validée avant le code. Points tranchés par défaut (« ok top
+go » sans réponse explicite) : accent de la maquette, rien de nouveau côté
+Rust, les six autres onglets extrapolés.
+
+- **Habillage seulement** : mêmes vues, mêmes classes, mêmes libellés —
+  les sélecteurs de `scripts/ui-test` (textes de boutons, `.card` « Écoute
+  permanente » et l'ordre de ses `.note`, `.composer button.primary` =
+  « Envoyer », `.topbar .chip` = « prêt ») sont restés valables sans
+  modification.
+- **Palette graphite + accent cuivre `#D9692C`** (au lieu de l'ambre) ;
+  tous les ambres codés en dur passent par `color-mix(... var(--accent) ...)`
+  et `--bg-input` / `--on-accent` : changer l'accent = une ligne de `:root`.
+- **Polices embarquées** (Geist, Geist Mono, Instrument Serif, sous-ensembles
+  latins woff2, OFL, `desktop/src/assets/fonts/`) : l'interface reste hors
+  ligne, rien n'est chargé depuis Google Fonts.
+- **Icônes au trait** dans `ui.ts` (`icon(name)`, chaînes SVG constantes)
+  à la place des glyphes Unicode de la navigation.
+- **Bouton de base stylé** (voile argent) : son survol est en
+  `button:where(:hover…)` pour que les survols propres aux composants
+  (nav, sous-onglets, listes) gardent la main ; `.msg-path` / `.work-file`
+  repassent en `inline-block` pour garder l'ellipse.
+- **Voix** : la carte « Écoute permanente » devient le héros de la maquette ;
+  l'onde (56 barres) suit **le vrai niveau du micro** déjà relevé par
+  `livePoll` (aucune commande ajoutée) ; « Parler à Jimmy » = le bouton
+  existant activer / couper l'écoute (pas de push-to-talk).
+- **Chat** : état vide (orbe, accroche serif, trois suggestions qui
+  préremplissent sans envoyer), compositeur en boîte avec bouton « @ » qui
+  réutilise le chemin des mentions (événement `input`). Pas de bouton dictée
+  (aucune fonction derrière). Orbe statique (respiration CSS).
+- Les trois petites cartes de la maquette Voix (écoute, voix, avatar) ne
+  sont pas reprises : elles doublaient les réglages existants.
 
 ### Ensuite (au 7 octobre, par priorité)
 
