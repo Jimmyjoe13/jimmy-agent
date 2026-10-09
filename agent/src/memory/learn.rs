@@ -28,12 +28,15 @@ use crate::providers::llm::LlmClient;
 const EXTRACTOR: &str = r#"Tu extrais ce qui mérite d'être retenu d'un échange, pour un assistant personnel.
 
 Réponds uniquement par un tableau JSON. Un élément par souvenir :
-{"kind": "semantic|procedural|episodic|lesson", "content": "une phrase à la troisième personne"}
+{"kind": "semantic|procedural|episodic|lesson", "content": "une ou deux phrases à la troisième personne"}
 
 Règles :
+- Chaque souvenir se comprend seul, sans l'échange : qui, quoi, sur quel projet
+  ou quel sujet, et pourquoi si c'est une décision.
 - "semantic" : un fait ou une préférence stable de l'utilisateur.
 - "procedural" : une règle, une façon de travailler.
-- "episodic" : ce qui vient d'être fait et qui sert d'exemple.
+- "episodic" : ce qui vient d'être fait et servira d'exemple plus tard ; jamais
+  un test, un essai ou une vérification ponctuelle.
 - "lesson" : SEULEMENT si des échecs figurent dans « Outils en échec »
   ci-dessous : l'échec observé et la façon validée de s'y prendre la
   prochaine fois. Au plus deux leçons, généralisées sans rien inventer
@@ -99,7 +102,7 @@ pub async fn learn(
         // `max_tokens` : 400 coupait un JSON bien formaté d'un ```fence``` en
         // pleine trajectoire incidente (observé à l'usage, 12:50) — la tâche
         // est de fond, 800 ne retardent jamais une réponse.
-        match llm.complete(&settings.llm.model, &messages, 800, Some(0.0)).await {
+        match llm.complete(settings.memory_model(), &messages, 800, Some(0.0)).await {
             Ok(raw) => {
                 if extract_json_array(&raw).is_some() {
                     return parse(&raw);
@@ -162,7 +165,9 @@ fn parse(raw: &str) -> Vec<(MemoryKind, &'static str, String)> {
         .into_iter()
         .filter_map(|item| {
             let content = item.content.trim().to_string();
-            if content.len() < 12 || content.len() > 400 {
+            // 600 octets : deux phrases complètes, accents compris. Le bruit
+            // des tests d'interface n'est jamais un souvenir.
+            if content.len() < 12 || content.len() > 600 || crate::memory::sort::is_test_noise(&content) {
                 return None;
             }
             let (kind, source) = match item.kind.as_str() {

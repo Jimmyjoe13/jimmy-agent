@@ -282,7 +282,8 @@ impl App {
         let avatar = AvatarClient::new(&settings.avatar.host, settings.avatar.port)?;
 
         let vault = if settings.memory.enabled && settings.memory.vault_enabled {
-            memory::vault::Vault::open(&settings.memory.vault_path, &settings.memory.vault_folder)
+            // Chemin vide = automatique : vault d'Obsidian, sinon vault propre.
+            memory::vault::Vault::locate(&settings.memory.vault_path, &paths.data, &settings.memory.vault_folder)
                 .map(Arc::new)
         } else {
             None
@@ -291,7 +292,12 @@ impl App {
         // absence doit se comprendre immédiatement.
         match &vault {
             Some(v) => {
-                log::info!("[vault] ouvert : {} ({} notes)", v.root().display(), v.count());
+                log::info!(
+                    "[vault] ouvert : {} ({} notes, {})",
+                    v.root().display(),
+                    v.count(),
+                    v.origin().as_str()
+                );
             }
             None => {
                 if settings.memory.enabled && !settings.memory.vault_path.trim().is_empty() {
@@ -1304,7 +1310,9 @@ impl App {
             },
             "vault": {
                 "enabled": settings.memory.enabled && settings.memory.vault_enabled && self.vault.is_some(),
-                "path": settings.memory.vault_path,
+                // Le chemin réellement ouvert (le réglage peut être vide = auto).
+                "path": self.vault.as_ref().map(|v| v.root().display().to_string()).unwrap_or_default(),
+                "origin": self.vault.as_ref().map(|v| v.origin().as_str()).unwrap_or(""),
                 "folder": settings.memory.vault_folder,
                 "notes": self.vault.as_ref().map(|v| v.count()).unwrap_or(0),
             },

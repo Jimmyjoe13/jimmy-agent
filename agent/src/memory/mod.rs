@@ -20,6 +20,7 @@
 pub mod embed;
 pub mod learn;
 pub mod semantic;
+pub mod sort;
 pub mod vault;
 
 use std::sync::Arc;

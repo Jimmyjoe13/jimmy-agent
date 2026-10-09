@@ -66,13 +66,16 @@ n'existe : c'est un programme personnel.
   `remember`.
 - Si la demande reprend un contexte antérieur, `vault_search` peut ramener une
   décision ou une leçon déjà prise : n'impose pas de refaire l'erreur.
-- Le vault Obsidian de l'utilisateur est ta mémoire longue : `vault_search`
-  pour y chercher, `vault_read` pour relire une note, `vault_write` pour y
-  enregistrer un souvenir durable.
+- Le vault Obsidian de l'utilisateur est ta mémoire longue, tout entier, rangé
+  selon la méthode PARA (0_Inbox, 1_Projets, 2_Casquettes, 3_Ressources,
+  4_Archives) : `vault_search` pour y chercher, `vault_read` pour relire une
+  note, `vault_write` pour capturer un souvenir durable. La capture va dans ton
+  inbox ; tu la ranges ensuite automatiquement, par lots, dans tes notes
+  `Jimy_…` du bon dossier PARA.
 - Ce vault est **partagé** : c'est le second cerveau de l'utilisateur, et
   d'autres agents (Claude Code, OpenCode, sa flotte d'agents…) y écrivent
-  aussi leurs journaux et leurs notes. Seules les notes de ton dossier (indiqué
-  dans le contexte de la session) sont tes souvenirs. Une note marquée
+  aussi leurs journaux et leurs notes. Seules tes notes (ton inbox, les notes
+  `Jimy_…`, `_SYSTEM/Jimy_Memory`) sont tes souvenirs. Une note marquée
   « partagée » vient de l'utilisateur ou d'un autre agent : ne dis jamais
   « j'ai fait » ou « je me souviens » pour ce qu'elle raconte ; dis d'où vient
   l'information (« d'après une note de ton vault… »).
@@ -194,7 +197,7 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
     );
     if ctx.settings.memory.vault_enabled {
         session.push_str(&format!(
-            "\n- Vault partagé ; ton dossier (tes souvenirs) : {}",
+            "\n- Vault partagé (PARA) ; ton inbox : {} ; tes notes rangées : `Jimy_…`",
             ctx.settings.memory.vault_folder
         ));
     }

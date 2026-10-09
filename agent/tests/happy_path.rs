@@ -30,6 +30,10 @@ use jimmy_agent::App;
 fn app_de_test() -> Option<Arc<App>> {
     let racine = std::env::temp_dir().join(format!("jimmy-happy-{}", uuid_like()));
     std::fs::create_dir_all(racine.join("data")).ok()?;
+    // Vault temporaire : sans lui, la découverte automatique ouvrirait le
+    // vrai vault et les souvenirs du test y seraient écrits.
+    std::fs::create_dir_all(racine.join("vault")).ok();
+    std::env::set_var("JIMMY_VAULT_PATH", racine.join("vault"));
     let paths = Paths {
         data: racine.join("data"),
         app: racine.clone(),

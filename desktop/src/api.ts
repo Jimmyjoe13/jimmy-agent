@@ -145,7 +145,7 @@ export interface Status {
     running: boolean;
   };
   memory: { enabled: boolean; count: number; has_fts: boolean; semantic_model: string | null };
-  vault: { enabled: boolean; path: string; folder: string; notes: number };
+  vault: { enabled: boolean; path: string; origin: string; folder: string; notes: number };
   permissions: { capability: string; granted: boolean }[];
   tools: string[];
   skills: number;
@@ -374,6 +374,8 @@ export interface MemorySettings {
   vault_enabled: boolean;
   vault_folder: string;
   vault_min_request_chars: number;
+  /** Modèle des tâches de mémoire ; vide = modèle principal. */
+  model: string;
 }
 
 export interface UiSettings {

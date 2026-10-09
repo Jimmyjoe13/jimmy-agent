@@ -155,8 +155,7 @@ jimmy-agent-personnel/
 │   └── scenes/
 ├── data/                   données locales (SQLite, audio, composants)
 ├── scripts/                outils de développement et d'installation
-├── .env.example
-└── PLAN.md
+└── .env.example
 ```
 
 ---
@@ -426,7 +425,6 @@ nu), par exemple les trois formats d'API des modèles :
 | [`docs/architecture.md`](docs/architecture.md) | architecture détaillée, décisions et justifications |
 | [`docs/development.md`](docs/development.md) | mise en route, commandes, conventions |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | pannes courantes et solutions |
-| [`HANDOFF.md`](HANDOFF.md) | état d'avancement et prochaines étapes |
 
 ---
 

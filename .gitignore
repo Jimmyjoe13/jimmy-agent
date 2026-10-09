@@ -53,3 +53,8 @@ desktop.ini
 # ecrits ou ameliores par Jimmy restent locaux : jamais dans l'historique.
 /data/
 /agent/skills/
+
+# ── Docs de suivi du projet (locales, jamais versionnées) ─────────────────
+/HANDOFF.md
+/JOURNAL.md
+/PLAN.md

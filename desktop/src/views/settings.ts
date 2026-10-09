@@ -27,6 +27,11 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const vaultPathInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const vaultFolderInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const vaultEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const memoryModelInput = h("input", {
+    class: "field",
+    type: "text",
+    placeholder: "Vide = modèle principal",
+  }) as HTMLInputElement;
 
   async function load() {
     const loaded = await guard(() => api.getSettings(), "paramètres");
@@ -60,8 +65,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
     startupSelect.value = settings.startup;
 
     vaultPathInput.value = settings.memory.vault_path;
+    // Vide = automatique : on montre le vault réellement ouvert.
+    const origin: Record<string, string> = { obsidian: "vault d'Obsidian", own: "vault propre de Jimy" };
+    const detected = ctx.status.vault.path;
+    vaultPathInput.placeholder = detected
+      ? `Automatique — ${detected} (${origin[ctx.status.vault.origin] ?? "réglé"})`
+      : "Automatique (vault d'Obsidian, sinon vault propre de Jimy)";
     vaultFolderInput.value = settings.memory.vault_folder;
     vaultEnabled.checked = settings.memory.vault_enabled;
+    memoryModelInput.value = settings.memory.model ?? "";
 
     render();
   }
@@ -115,6 +127,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.memory.vault_path = vaultPathInput.value.trim();
     settings.memory.vault_folder = vaultFolderInput.value.trim() || "0_Inbox/Jimmy";
     settings.memory.vault_enabled = vaultEnabled.checked;
+    settings.memory.model = memoryModelInput.value.trim();
 
     if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
     await ctx.refreshStatus();
@@ -225,11 +238,12 @@ export function settingsView(ctx: AppContext): HTMLElement {
         h(
           "p",
           { class: "note" },
-          "Mémoire persistante de Jimy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimy lit tout le vault et écrit dans son dossier.",
+          "Mémoire persistante de Jimy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimy lit tout le vault et écrit dans son dossier. Chemin vide = automatique (le vault d'Obsidian de la machine, sinon le sien, rangé en PARA).",
         ),
         toggle("Connecter le vault Obsidian", vaultEnabled),
         field("Chemin du vault", vaultPathInput),
         field("Dossier des souvenirs de Jimy", vaultFolderInput),
+        field("Modèle de la mémoire (apprentissage et tri du vault)", memoryModelInput),
       ),
       card(
         "Permissions",

@@ -214,14 +214,14 @@ let stepPage = null;
   // Entrée insère le chemin relatif SANS envoyer le message.
   await step("Chat : « @ » cite un fichier du projet", async () => {
     const input = p.locator(".composer-input");
-    await input.fill("@HAND");
+    await input.fill("@READ");
     await p.waitForSelector(".mention-menu:not([hidden]) .mention-item", { timeout: 5000 });
     const items = await p.$$eval(".mention-menu .mention-name", (els) => els.map((e) => e.textContent));
-    expect(items.some((n) => n === "HANDOFF.md"), `menu « @ » : ${items.join(", ")}`);
+    expect(items.some((n) => n === "README.md"), `menu « @ » : ${items.join(", ")}`);
     await p.keyboard.press("ArrowDown"); // changement d'item (Index 0 → 1 puis retour si un seul item)
     await p.keyboard.press("Enter");
     const value = await input.inputValue();
-    expect(value.startsWith("@HANDOFF.md "), `inséré après Entrée : « ${value} »`);
+    expect(value.startsWith("@README.md "), `inséré après Entrée : « ${value} »`);
     expect((await p.locator(".bubble.pending").count()) === 0, "Entrée a soumis au lieu d'insérer");
     // Échap ferme le menu sans agir ; la composition continue.
     await input.press("Escape");
@@ -233,7 +233,7 @@ let stepPage = null;
   // Chemin cliquable (façon Codex) : un chemin absolu dans une réponse devient
   // une puce ; son clic ouvre l'aperçu (avec saut de ligne quand « :n »).
   await step("Chat : un chemin dans la réponse s'ouvre en aperçu", async () => {
-    const target = `${path.resolve(__dirname, "..", "..", "HANDOFF.md")}:3`;
+    const target = `${path.resolve(__dirname, "..", "..", "README.md")}:3`;
     const input = p.locator(".composer-input");
     // L'attente après l'envoi : une seule demande, une réponse pilote.
     await input.fill(`Réponds UNIQUEMENT par ce chemin, copié exactement, sans phrase : ${target}`);
@@ -246,7 +246,7 @@ let stepPage = null;
     await p.locator(".bubble.assistant .msg-path").first().click();
     await p.waitForSelector(".file-modal-card", { timeout: 5000 });
     const head = (await p.locator(".file-modal-head strong").textContent()) ?? "";
-    expect(head.includes("HANDOFF.md"), `aperçu ouvert dans : « ${head} »`);
+    expect(head.includes("README.md"), `aperçu ouvert dans : « ${head} »`);
     await p.waitForSelector(".file-modal-line.target", { timeout: 5000 });
     await p.keyboard.press("Escape");
     await p.waitForSelector(".file-modal", { state: "detached", timeout: 5000 });

@@ -27,7 +27,51 @@ pub struct Vault {
     root: PathBuf,
     /// Sous-dossier où Jimmy écrit ses souvenirs, ex. `0_Inbox/Jimmy`.
     folder: PathBuf,
+    /// D'où vient ce vault (chemin réglé, registre d'Obsidian, vault propre).
+    origin: VaultOrigin,
+    /// Sérialise les écritures dans l'inbox : captures concurrentes (tâches
+    /// de fond) et mise de côté des fichiers par le tri (`memory::sort`).
+    pub(crate) inbox_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
+
+/// Archive des captures déjà triées (relisibles, mais hors recherche : leur
+/// contenu est déjà dans les notes `Jimy_…`).
+pub const INBOX_ARCHIVE: &str = "4_Archives/Jimy/Inbox";
+
+/// Provenance du vault ouvert, affichée dans l'interface et le journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultOrigin {
+    /// Chemin choisi dans les Paramètres (ou `JIMMY_VAULT_PATH`).
+    Configured,
+    /// Trouvé dans le registre d'Obsidian de la machine.
+    Obsidian,
+    /// Aucun vault sur la machine : vault propre créé dans le dossier de Jimy.
+    Own,
+}
+
+impl VaultOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VaultOrigin::Configured => "configured",
+            VaultOrigin::Obsidian => "obsidian",
+            VaultOrigin::Own => "own",
+        }
+    }
+}
+
+/// Architecture PARA, la même que le vault de l'utilisateur : capture dans
+/// l'Inbox, puis Projets, Casquettes (responsabilités continues), Ressources,
+/// Archives ; `_SYSTEM` pour les modèles. `.obsidian` fait reconnaître le
+/// dossier comme un vault par Obsidian.
+pub const PARA_FOLDERS: &[&str] = &[
+    "0_Inbox",
+    "1_Projets",
+    "2_Casquettes",
+    "3_Ressources",
+    "4_Archives",
+    "_SYSTEM/Templates",
+    ".obsidian",
+];
 
 #[derive(Debug, Clone)]
 pub struct VaultHit {
@@ -45,22 +89,48 @@ impl Vault {
         if root.as_os_str().is_empty() || !root.is_dir() {
             return None;
         }
-        let dossier = folder.trim();
-        let folder = if dossier.is_empty() {
-            root.join("0_Inbox").join("Jimmy")
-        } else {
-            // Les réglages acceptent `/` ou `\` comme séparateurs.
-            let mut acc = root.clone();
-            for part in Path::new(dossier) {
-                acc.push(part);
+        let folder = join_folder(&root, folder);
+        Some(Vault {
+            root,
+            folder,
+            origin: VaultOrigin::Configured,
+            inbox_lock: Default::default(),
+        })
+    }
+
+    /// Trouve et ouvre le vault. Chemin réglé (non vide) : pris tel quel,
+    /// `None` s'il n'existe pas. Vide = automatique : le vault d'Obsidian de
+    /// la machine (registre `obsidian.json`), sinon un vault propre à Jimy
+    /// dans son dossier de données (`<data>\vault`), créé avec le squelette
+    /// PARA. Rien n'est enregistré dans la config : un `config.json`
+    /// illisible retombe aux défauts (piège 91), le sauver ici l'écraserait.
+    pub fn locate(configured: &str, data_dir: &Path, folder: &str) -> Option<Self> {
+        if !configured.trim().is_empty() {
+            return Vault::open(configured, folder);
+        }
+        let registered = obsidian_registry().and_then(|raw| pick_registered_vault(&raw));
+        let (root, origin) = match registered {
+            Some(root) => (root, VaultOrigin::Obsidian),
+            None => {
+                let own = data_dir.join("vault");
+                if let Err(error) = create_para_vault(&own, folder) {
+                    log::warn!("[vault] création du vault propre impossible ({}) : {error}", own.display());
+                    return None;
+                }
+                (own, VaultOrigin::Own)
             }
-            acc
         };
-        Some(Vault { root, folder })
+        let mut vault = Vault::open(&root.to_string_lossy(), folder)?;
+        vault.origin = origin;
+        Some(vault)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn origin(&self) -> VaultOrigin {
+        self.origin
     }
 
     /// Recherche plein texte dans tout le vault. Les mots de la requête sont
@@ -80,6 +150,9 @@ impl Vault {
 
         let mut chemins = Vec::new();
         collecter_notes(&self.root, &mut chemins);
+        // Les captures archivées doublonnent les notes triées : hors recherche.
+        let archive = join_folder(&self.root, INBOX_ARCHIVE);
+        chemins.retain(|c| !c.starts_with(&archive));
         let mut hits: Vec<VaultHit> = Vec::new();
         for chemin in chemins {
             let Ok(contenu) = tokio::fs::read_to_string(&chemin).await else {
@@ -114,6 +187,8 @@ impl Vault {
                     .unwrap_or(&chemin)
                     .display()
                     .to_string();
+                // PARA : un projet actif passe avant une archive.
+                let score = score * poids_para(&relatif);
                 hits.push(VaultHit {
                     path: relatif,
                     title: titre,
@@ -142,27 +217,47 @@ impl Vault {
         Ok(couper(&contenu, MAX_OUTPUT_CHARS))
     }
 
-    /// Écrit un souvenir dans le dossier de Jimmy : une note par souvenir,
-    /// datée, avec un frontmatter minimal que l'utilisateur relit comme une
-    /// note ordinaire (et peut trier, lier, archiver).
+    /// Capture un souvenir dans l'inbox de Jimy : **une puce** dans le fichier
+    /// du jour (`0_Inbox/Jimmy/AAAA-MM-JJ.md`), pas un fichier par souvenir
+    /// (141 notes d'une phrase en six jours avant le 9 octobre). Aucune
+    /// décision de rangement ici : le tri (`memory::sort`) les range en PARA.
+    /// Un souvenir déjà capturé le même jour n'est pas répété.
     pub async fn remember(&self, kind: &str, content: &str) -> Result<PathBuf> {
+        let _garde = self.inbox_lock.lock().await;
         tokio::fs::create_dir_all(&self.folder)
             .await
             .map_err(|e| Error::Tool(format!("dossier du vault inaccessible : {e}")))?;
         let horodatage = horodatage_local();
-        let chemin = self.folder.join(format!(
-            "{}-{}.md",
-            horodatage,
-            slug(content, 6)
-        ));
-        let note = format!(
-            "---\ntype: {kind}\nsource: jimmy\ndate: {date}\n---\n\n{content}\n",
-            date = horodatage.split('T').next().unwrap_or_default(),
-        );
+        let (jour, heure) = horodatage.split_once('T').unwrap_or((&horodatage, ""));
+        let heure = heure.get(..5).unwrap_or_default().replace('-', ":");
+        let chemin = self.folder.join(format!("{jour}.md"));
+        // Une capture tient sur une ligne.
+        let texte = content.split_whitespace().collect::<Vec<_>>().join(" ");
+        let existant = tokio::fs::read_to_string(&chemin).await.unwrap_or_default();
+        if existant.lines().filter_map(parse_capture).any(|(_, t)| t == texte) {
+            return Ok(chemin);
+        }
+        let mut note = if existant.trim().is_empty() {
+            format!(
+                "---\ntype: inbox\nsource: jimy\ndate: {jour}\n---\n\n# Captures du {jour}\n\n\
+                 Souvenirs à trier : Jimy les range dans ses notes du vault (PARA).\n\n"
+            )
+        } else {
+            existant
+        };
+        if !note.ends_with('\n') {
+            note.push('\n');
+        }
+        note.push_str(&format!("- {heure} [{kind}] {texte}\n"));
         tokio::fs::write(&chemin, note)
             .await
             .map_err(|e| Error::Tool(format!("écriture impossible : {e}")))?;
         Ok(chemin)
+    }
+
+    /// Dossier de capture (absolu), lu par le tri.
+    pub fn inbox(&self) -> &Path {
+        &self.folder
     }
 
     /// Nombre de notes du vault (statistique de l'interface).
@@ -178,8 +273,9 @@ impl Vault {
     }
 
     /// La note (chemin relatif au vault) est-elle une note de Jimmy ? Le
-    /// vault est partagé avec l'utilisateur et d'autres agents : seules les
-    /// notes de son dossier sont ses souvenirs.
+    /// vault est partagé avec l'utilisateur et d'autres agents : ses
+    /// souvenirs sont son inbox et ses notes rangées (`Jimy_…`,
+    /// `_SYSTEM/Jimy_Memory`, archive de l'inbox).
     pub fn is_own(&self, relative: &str) -> bool {
         // `folder` est absolu (racine + sous-dossier) : on compare le relatif.
         let own = self.folder.strip_prefix(&self.root).unwrap_or(&self.folder);
@@ -187,16 +283,108 @@ impl Vault {
     }
 }
 
-/// `relative` est-il dans `folder` ? Séparateurs et casse ignorés
-/// (`0_Inbox\Jimmy\x.md` comme `0_inbox/jimmy/x.md`).
+/// Dossier des notes de Jimy qui ne relèvent d'aucun sujet PARA (profil,
+/// méthodes, leçons).
+pub const OWN_MEMORY_DIR: &str = "_SYSTEM/Jimy_Memory";
+/// Préfixe des notes de Jimy rangées dans les dossiers PARA.
+pub const OWN_NOTE_PREFIX: &str = "Jimy_";
+
+/// Note de Jimy ? Dans son inbox (`folder`), nommée `Jimy_…`, dans
+/// `_SYSTEM/Jimy_Memory` ou dans l'archive de son inbox. Séparateurs et casse
+/// ignorés (`0_Inbox\Jimmy\x.md` comme `0_inbox/jimmy/x.md`).
 pub fn is_own_note(relative: &str, folder: &str) -> bool {
     let norm = |s: &str| s.replace('\\', "/").trim_matches('/').to_lowercase();
-    let folder = norm(folder);
+    let dans = |path: &str, dossier: &str| {
+        !dossier.is_empty() && (path == dossier || path.starts_with(&format!("{dossier}/")))
+    };
     let path = norm(relative);
-    !folder.is_empty() && (path == folder || path.starts_with(&format!("{folder}/")))
+    let nom = path.rsplit('/').next().unwrap_or_default();
+    dans(&path, &norm(folder))
+        || nom.starts_with(&OWN_NOTE_PREFIX.to_lowercase())
+        || dans(&path, &norm(OWN_MEMORY_DIR))
+        || dans(&path, &norm(INBOX_ARCHIVE))
+}
+
+/// Une ligne de capture de l'inbox (`- HH:MM [genre] texte`) → (genre, texte).
+pub fn parse_capture(line: &str) -> Option<(String, String)> {
+    let reste = line.trim().strip_prefix("- ")?;
+    let ouvre = reste.find('[')?;
+    let ferme = reste[ouvre..].find(']')? + ouvre;
+    let texte = reste[ferme + 1..].trim();
+    (!texte.is_empty()).then(|| (reste[ouvre + 1..ferme].trim().to_string(), texte.to_string()))
+}
+
+// ── Découverte du vault ──────────────────────────────────────────────────────
+
+/// Contenu du registre des vaults d'Obsidian (`%APPDATA%\obsidian\obsidian.json`),
+/// `None` si Obsidian n'a jamais été lancé sur la machine.
+fn obsidian_registry() -> Option<String> {
+    let appdata = std::env::var_os("APPDATA")?;
+    std::fs::read_to_string(PathBuf::from(appdata).join("obsidian").join("obsidian.json")).ok()
+}
+
+/// Parmi les vaults du registre d'Obsidian qui existent encore sur le disque :
+/// celui ouvert (`open`), sinon le plus récemment utilisé (`ts`).
+pub fn pick_registered_vault(raw: &str) -> Option<PathBuf> {
+    let json: serde_json::Value = serde_json::from_str(raw).ok()?;
+    json.get("vaults")?
+        .as_object()?
+        .values()
+        .filter_map(|entry| {
+            let path = PathBuf::from(entry.get("path")?.as_str()?);
+            let open = entry.get("open").and_then(|v| v.as_bool()).unwrap_or(false);
+            let ts = entry.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+            path.is_dir().then_some((open, ts, path))
+        })
+        .max_by_key(|(open, ts, _)| (*open, *ts))
+        .map(|(_, _, path)| path)
+}
+
+/// Crée (ou complète) un vault à l'architecture PARA, plus le dossier de
+/// capture de Jimy. Idempotent : ne touche à aucune note existante.
+pub fn create_para_vault(root: &Path, folder: &str) -> std::io::Result<()> {
+    for dossier in PARA_FOLDERS {
+        std::fs::create_dir_all(join_folder(root, dossier))?;
+    }
+    std::fs::create_dir_all(join_folder(root, folder))
+}
+
+/// Poids d'une note selon sa place dans PARA : projets actifs > casquettes >
+/// ressources > le reste > archives (terminé ou inactif).
+fn poids_para(relatif: &str) -> f32 {
+    let racine = relatif.split(['/', '\\']).next().unwrap_or_default().to_lowercase();
+    match racine.as_str() {
+        "1_projets" => 1.3,
+        "2_casquettes" => 1.15,
+        "3_ressources" => 1.1,
+        "4_archives" => 0.6,
+        _ => 1.0,
+    }
+}
+
+/// Noms de toutes les notes du vault (minuscules, sans extension) : sert à
+/// vérifier qu'un lien `[[…]]` pointe vers une note qui existe.
+pub(crate) fn note_names(root: &Path) -> std::collections::HashSet<String> {
+    let mut chemins = Vec::new();
+    collecter_notes(root, &mut chemins);
+    chemins.iter().map(|c| titre_note(c).to_lowercase()).collect()
 }
 
 // ── Aides ────────────────────────────────────────────────────────────────────
+
+/// Sous-dossier du vault ; les réglages acceptent `/` ou `\` comme
+/// séparateurs. Vide = `0_Inbox/Jimmy`.
+pub(crate) fn join_folder(root: &Path, folder: &str) -> PathBuf {
+    let dossier = folder.trim();
+    if dossier.is_empty() {
+        return root.join("0_Inbox").join("Jimmy");
+    }
+    let mut acc = root.to_path_buf();
+    for part in dossier.split(['/', '\\']).filter(|p| !p.is_empty()) {
+        acc.push(part);
+    }
+    acc
+}
 
 /// Collecte récursive des notes Markdown, hors dossiers système (`.obsidian`,
 /// `.trash`, `.claude`…) et notes trop grosses.
@@ -236,7 +424,7 @@ fn titre_note(chemin: &Path) -> String {
 /// Minuscules et accents retirés, **caractère par caractère** : la longueur en
 /// caractères est conservée, donc un index de caractère dans la version
 /// normalisée reste valable dans l'original.
-fn normaliser(texte: &str) -> String {
+pub(crate) fn normaliser(texte: &str) -> String {
     texte
         .chars()
         .map(|c| {
@@ -308,7 +496,7 @@ fn extrait(contenu: &str, position: Option<usize>) -> String {
 /// heures de changement d'heure — suffisant pour ordonner des souvenirs.
 const DÉCALAGE_PARIS: u64 = 2 * 60 * 60; // heure d'été (CEST)
 
-fn horodatage_local() -> String {
+pub(crate) fn horodatage_local() -> String {
     let durée = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -332,18 +520,6 @@ fn civil(secondes: u64) -> String {
     let mois = if mp < 10 { mp + 3 } else { mp - 9 };
     let année = if mois <= 2 { y + 1 } else { y };
     format!("{année:04}-{mois:02}-{d:02}T{h:02}-{m:02}-{s:02}")
-}
-
-/// Slug d'un texte : premiers mots significatifs, accents retirés, séparés
-/// par des tirets. Pour un nom de fichier.
-fn slug(texte: &str, mots_max: usize) -> String {
-    normaliser(texte)
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|m| !m.is_empty() && m.chars().count() > 1)
-        .take(mots_max)
-        .collect::<Vec<_>>()
-        .join("-")
-        .to_lowercase()
 }
 
 /// Coupe un texte proprement à une limite de caractères.
@@ -418,6 +594,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&racine);
     }
 
+    /// Registre d'Obsidian : le vault ouvert gagne, puis le plus récent ; un
+    /// vault disparu du disque est ignoré.
+    #[test]
+    fn le_registre_d_obsidian_designe_le_bon_vault() {
+        let base = std::env::temp_dir().join(format!("jimmy-registre-{}", std::process::id()));
+        let (ancien, recent) = (base.join("ancien"), base.join("recent"));
+        std::fs::create_dir_all(&ancien).unwrap();
+        std::fs::create_dir_all(&recent).unwrap();
+        let disparu = base.join("disparu");
+        let registre = |open_ancien: bool| {
+            serde_json::json!({ "vaults": {
+                "a": { "path": ancien, "ts": 100, "open": open_ancien },
+                "b": { "path": recent, "ts": 200 },
+                "c": { "path": disparu, "ts": 999, "open": true },
+            }})
+            .to_string()
+        };
+        assert_eq!(pick_registered_vault(&registre(true)), Some(ancien.clone()));
+        assert_eq!(pick_registered_vault(&registre(false)), Some(recent.clone()));
+        assert_eq!(pick_registered_vault(r#"{"vaults":{}}"#), None);
+        assert_eq!(pick_registered_vault("pas du json"), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Sans Obsidian : le vault propre reprend l'architecture PARA et le
+    /// dossier de capture ; refaire la création ne casse rien.
+    #[test]
+    fn le_vault_propre_suit_l_architecture_para() {
+        let racine = std::env::temp_dir().join(format!("jimmy-para-{}", std::process::id()));
+        create_para_vault(&racine, "0_Inbox/Jimmy").unwrap();
+        std::fs::write(racine.join("1_Projets").join("note.md"), "garde-moi").unwrap();
+        create_para_vault(&racine, "0_Inbox/Jimmy").unwrap();
+        for dossier in PARA_FOLDERS.iter().chain(["0_Inbox/Jimmy"].iter()) {
+            assert!(join_folder(&racine, dossier).is_dir(), "{dossier} manquant");
+        }
+        assert_eq!(std::fs::read_to_string(racine.join("1_Projets").join("note.md")).unwrap(), "garde-moi");
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Un chemin réglé est pris tel quel, même s'il n'existe pas (pas de
+    /// repli silencieux sur un autre vault).
+    #[test]
+    fn un_chemin_regle_n_est_jamais_remplace() {
+        let racine = std::env::temp_dir().join(format!("jimmy-regle-{}", std::process::id()));
+        std::fs::create_dir_all(&racine).unwrap();
+        let vault = Vault::locate(&racine.to_string_lossy(), &racine, "0_Inbox/Jimmy").expect("vault");
+        assert_eq!(vault.origin(), VaultOrigin::Configured);
+        assert_eq!(vault.root(), racine.as_path());
+        assert!(Vault::locate(&racine.join("absent").to_string_lossy(), &racine, "").is_none());
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
     #[test]
     fn demande_courte_sans_marqueur_ne_declenche_pas() {
         assert_eq!(should_consult("quelle heure est-il", 180, false), Usefulness::No);
@@ -451,12 +679,53 @@ mod tests {
         assert_eq!(normaliser("ÉCOUTE À Montreal"), "ecoute a montreal");
     }
 
+    /// Capture : une puce par souvenir dans le fichier du jour, sans
+    /// doublon ; plus un fichier par souvenir.
+    #[tokio::test]
+    async fn la_capture_ajoute_une_puce_au_fichier_du_jour() {
+        let racine = std::env::temp_dir().join(format!("jimmy-capture-{}", std::process::id()));
+        std::fs::create_dir_all(&racine).unwrap();
+        let vault = Vault::open(&racine.to_string_lossy(), "0_Inbox/Jimmy").unwrap();
+        let a = vault.remember("semantic", "L'utilisateur préfère\nles réponses courtes.").await.unwrap();
+        let b = vault.remember("procedural", "Toujours compiler avec build.ps1.").await.unwrap();
+        vault.remember("semantic", "L'utilisateur préfère les réponses courtes.").await.unwrap();
+        assert_eq!(a, b, "un seul fichier par jour");
+        assert_eq!(std::fs::read_dir(vault.inbox()).unwrap().count(), 1);
+        let contenu = std::fs::read_to_string(&a).unwrap();
+        let captures: Vec<_> = contenu.lines().filter_map(parse_capture).collect();
+        assert_eq!(captures.len(), 2, "{contenu}");
+        assert_eq!(captures[0], ("semantic".into(), "L'utilisateur préfère les réponses courtes.".into()));
+        assert!(contenu.starts_with("---\ntype: inbox\nsource: jimy"), "{contenu}");
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// PARA : à texte égal, le projet actif passe devant l'archive.
+    #[tokio::test]
+    async fn la_recherche_favorise_les_projets_actifs() {
+        let racine = std::env::temp_dir().join(format!("jimmy-para-poids-{}", std::process::id()));
+        for (dossier, nom) in [("4_Archives/Vieux", "a.md"), ("1_Projets/Actif", "b.md"), ("3_Ressources/Theme", "c.md")] {
+            let d = join_folder(&racine, dossier);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(nom), "déploiement du serveur").unwrap();
+        }
+        let vault = Vault::open(&racine.to_string_lossy(), "").unwrap();
+        let ordre: Vec<String> = vault
+            .search("déploiement serveur", 5)
+            .await
+            .into_iter()
+            .map(|h| h.path.replace('\\', "/"))
+            .collect();
+        assert_eq!(ordre, ["1_Projets/Actif/b.md", "3_Ressources/Theme/c.md", "4_Archives/Vieux/a.md"]);
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
     #[test]
-    fn slug_lisible() {
-        assert_eq!(
-            slug("L'utilisateur préfère des réponses courtes !", 4),
-            "utilisateur-prefere-des-reponses"
-        );
+    fn les_notes_rangees_de_jimy_sont_les_siennes() {
+        assert!(is_own_note("1_Projets/CRM_Ultimate/Jimy_CRM_Ultimate.md", "0_Inbox/Jimmy"));
+        assert!(is_own_note("_SYSTEM\\Jimy_Memory\\Profil.md", "0_Inbox/Jimmy"));
+        assert!(is_own_note("4_Archives/Jimy/Inbox/2026-10-09.md", "0_Inbox/Jimmy"));
+        assert!(!is_own_note("1_Projets/CRM_Ultimate/README.md", "0_Inbox/Jimmy"));
+        assert!(!is_own_note("_SYSTEM/Journal_Agent/session.md", "0_Inbox/Jimmy"));
     }
 
     #[test]

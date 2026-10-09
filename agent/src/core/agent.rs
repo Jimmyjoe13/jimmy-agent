@@ -638,9 +638,9 @@ pub async fn run_with_images(
                     Ok(_) => {}
                     Err(error) => log::warn!("[memory] écriture impossible : {error}"),
                 }
-                // Même souvenir, côté vault Obsidian : une note datée que
-                // l'utilisateur relit. Le vault est un complément : son
-                // échec n'annule pas le souvenir en base.
+                // Même souvenir, côté vault Obsidian : une puce dans l'inbox
+                // du jour, rangée ensuite par le tri PARA. Le vault est un
+                // complément : son échec n'annule pas le souvenir en base.
                 if let Some(vault) = &vault {
                     if let Err(error) = vault.remember(kind.as_str(), &content).await {
                         log::warn!("[vault] écriture impossible : {error}");
@@ -717,6 +717,12 @@ pub async fn run_with_images(
                         Err(error) => log::warn!("[skills] capture non écrite : {error}"),
                     }
                 }
+            }
+            // Tri de l'inbox du vault par lots (PARA), en dernier : il peut
+            // enchaîner plusieurs appels au modèle et ne doit retarder ni
+            // l'apprentissage ni la capture de compétence.
+            if let Some(vault) = &vault {
+                crate::memory::sort::sort_if_needed(vault, &llm, settings.memory_model()).await;
             }
         });
     }

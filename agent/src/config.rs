@@ -470,7 +470,9 @@ pub struct MemorySettings {
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
     /// Racine du vault Obsidian : la mémoire persistante de Jimmy y est
-    /// écrite en notes Markdown. Vide ou inexistant = vault inutilisé.
+    /// écrite en notes Markdown. Vide = automatique (vault d'Obsidian de la
+    /// machine, sinon vault propre dans le dossier de données) ; un chemin
+    /// réglé qui n'existe pas = vault inutilisé.
     #[serde(default = "default_vault_path")]
     pub vault_path: String,
     /// Active la connexion au vault (indépendant de la mémoire SQLite).
@@ -484,6 +486,11 @@ pub struct MemorySettings {
     /// contexte, se contente de la mémoire locale (0 = jamais automatiquement).
     #[serde(default = "default_vault_min_request_chars")]
     pub vault_min_request_chars: u32,
+    /// Modèle des tâches de mémoire (apprentissage, tri du vault). Vide = le
+    /// modèle principal. Séparé pour qu'un essai de modèle principal instable
+    /// ne casse pas la mémoire (10 octobre : GLM chez NVIDIA, délais dépassés).
+    #[serde(default)]
+    pub model: String,
 }
 
 fn default_embedding_url() -> String {
@@ -494,8 +501,10 @@ fn default_embedding_model() -> String {
     "text-embedding-paraphrase-multilingual-minilm-l12-v2.gguf".into()
 }
 
+/// Vide = découverte automatique (`Vault::locate`) : aucun chemin d'une
+/// machine précise dans le code.
 fn default_vault_path() -> String {
-    r"C:\Obsidian\Jimmy".into()
+    String::new()
 }
 
 fn default_vault_folder() -> String {
@@ -520,6 +529,7 @@ impl Default for MemorySettings {
             vault_enabled: true,
             vault_folder: default_vault_folder(),
             vault_min_request_chars: default_vault_min_request_chars(),
+            model: String::new(),
         }
     }
 }
@@ -673,6 +683,14 @@ pub const DEFAULT_MAX_ITERATIONS: u32 = 25;
 pub const DEFAULT_MAX_TOKENS: u32 = 16_384;
 
 impl Settings {
+    /// Modèle des tâches de mémoire : `memory.model`, sinon le principal.
+    pub fn memory_model(&self) -> &str {
+        match self.memory.model.trim() {
+            "" => &self.llm.model,
+            model => model,
+        }
+    }
+
     pub fn load(paths: &Paths) -> Self {
         let path = paths.config_file();
         let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
@@ -814,6 +832,19 @@ pub fn require(value: &str, name: &str) -> Result<()> {
 #[cfg(test)]
 mod env_tests {
     use super::*;
+
+    /// La mémoire suit le modèle principal tant qu'aucun modèle dédié n'est
+    /// réglé ; une config sans le champ (antérieure au 10 octobre) se lit.
+    #[test]
+    fn le_modele_de_la_memoire_retombe_sur_le_principal() {
+        let mut s = Settings::default();
+        s.llm.model = "principal".into();
+        assert_eq!(s.memory_model(), "principal");
+        s.memory.model = " muse-spark-1.3-contributor ".into();
+        assert_eq!(s.memory_model(), "muse-spark-1.3-contributor");
+        let ancienne: MemorySettings = serde_json::from_str(r#"{"enabled":true,"recall_limit":6,"min_score":0.1,"auto_learn_every":4,"auto_learn":true}"#).unwrap();
+        assert_eq!(ancienne.model, "");
+    }
 
     fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         move |key| pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string())

@@ -199,7 +199,7 @@ impl Tool for VaultWrite {
         "vault_write"
     }
     fn description(&self) -> &str {
-        "Écrit un souvenir durable dans le dossier de Jimy, dans le vault Obsidian : une note datée que l'utilisateur relit comme les autres. À n'utiliser que si l'information est stable et utile plus tard."
+        "Capture un souvenir durable dans l'inbox de Jimy (vault Obsidian) ; il sera rangé automatiquement dans la bonne note PARA. Une ou deux phrases complètes, compréhensibles seules (qui, quoi, quel projet). À n'utiliser que si l'information est stable et utile plus tard."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
@@ -224,7 +224,7 @@ impl Tool for VaultWrite {
             let kind = memory_kind(args, MemoryKind::Semantic);
             ctx.check(Capability::Write, "vault obsidian")?;
             let chemin = vault.remember(kind.as_str(), &content).await?;
-            Ok(format!("mémorisé dans le vault : {}", chemin.display()))
+            Ok(format!("capturé dans l'inbox du vault : {}", chemin.display()))
         })
     }
 }

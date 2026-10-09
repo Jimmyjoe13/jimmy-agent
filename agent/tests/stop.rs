@@ -13,6 +13,10 @@ use jimmy_agent::{App, TaskOutcome};
 fn app_isolee() -> (Arc<App>, std::path::PathBuf) {
     let racine = std::env::temp_dir().join(format!("jimmy-stop-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(racine.join("data")).unwrap();
+    // Vault temporaire : sans lui, la découverte automatique ouvrirait le
+    // vrai vault et les souvenirs du test y seraient écrits.
+    std::fs::create_dir_all(racine.join("vault")).ok();
+    std::env::set_var("JIMMY_VAULT_PATH", racine.join("vault"));
     let paths = Paths { data: racine.join("data"), app: racine.clone(), dev: false };
     (App::new(paths, Secrets::default()).expect("app"), racine)
 }
