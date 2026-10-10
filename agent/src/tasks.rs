@@ -219,6 +219,12 @@ impl Tasks {
         entries.len()
     }
 
+    /// Titre de la tâche de fond en cours (sa demande), s'il y en a une :
+    /// sert à orienter le rappel mémoire d'une demande courte (« où ça en est ? »).
+    pub fn background_title(&self) -> Option<String> {
+        self.lock().iter().find(|e| e.background).map(|e| e.title.clone())
+    }
+
     /// Bloc du prompt système : la tâche de fond en cours, pour que Jimmy
     /// réponde en parallèle en le sachant (« où en es-tu ? »), sans refaire
     /// son travail. `None` sans tâche de fond : prompt inchangé.

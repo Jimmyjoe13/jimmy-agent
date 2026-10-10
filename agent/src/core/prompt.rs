@@ -290,6 +290,31 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
     parts
 }
 
+/// En dessous, une demande est trop pauvre pour guider seule le rappel
+/// (« et ensuite ? », « vas-y », « où ça en est ? »).
+const SHORT_REQUEST_WORDS: usize = 6;
+
+/// Requête du rappel mémoire (lot 3). Une demande longue se suffit. Une
+/// demande courte est complétée par ce qui dit de quoi on parle : le
+/// message précédent de l'utilisateur, le début du résumé de la
+/// conversation, la tâche de fond. Avant, « et ensuite ? » à la voix
+/// cherchait littéralement « et ensuite » et ne rappelait presque rien.
+pub fn recall_query(request: &str, previous: Option<&str>, summary: &str, task: Option<&str>) -> String {
+    if request.split_whitespace().count() >= SHORT_REQUEST_WORDS {
+        return request.to_string();
+    }
+    let clip = |text: &str, max: usize| -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()
+    };
+    let mut parts = vec![request.trim().to_string()];
+    for (text, max) in [(previous, 240), (Some(summary), 240), (task, 120)] {
+        if let Some(text) = text.filter(|t| !t.trim().is_empty()) {
+            parts.push(clip(text, max));
+        }
+    }
+    parts.join("\n")
+}
+
 /// Message utilisateur enrichi des souvenirs, quand le rappel doit être visible
 /// de l'agent plutôt que du contexte système.
 pub async fn recall_for(memory: &MemoryStore, settings: &Settings, request: &str) -> Option<String> {
@@ -471,6 +496,27 @@ mod tests {
         let memoire = parts.iter().find(|(l, _)| *l == "mémoire").unwrap().1.chars().count();
         assert!(report.contains(&format!("mémoire {memoire}")), "{report}");
         assert!(report.contains("identité ") && !report.contains("vault"), "{report}");
+    }
+
+    /// « Et ensuite ? » seul ne dit rien du sujet : la requête du rappel
+    /// reprend le message précédent, le résumé et la tâche de fond.
+    #[test]
+    fn une_demande_courte_rappelle_avec_le_sujet_en_cours() {
+        let query = recall_query(
+            "et ensuite ?",
+            Some("Prépare la refonte du site Elu Scraper"),
+            "On travaille sur le déploiement du VPS OVH.",
+            Some("migre la base Postgres"),
+        );
+        assert!(query.starts_with("et ensuite ?"), "{query}");
+        for sujet in ["Elu Scraper", "VPS OVH", "Postgres"] {
+            assert!(query.contains(sujet), "{sujet} absent : {query}");
+        }
+        // Une demande assez longue se suffit à elle-même.
+        let long = "rappelle-moi la configuration du serveur de mails de Media Start";
+        assert_eq!(recall_query(long, Some("autre sujet"), "résumé", None), long);
+        // Rien autour : la demande seule.
+        assert_eq!(recall_query("vas-y", None, "", None), "vas-y");
     }
 
     /// Gabarit de contexte réutilisé entre deux variantes d'un même test.

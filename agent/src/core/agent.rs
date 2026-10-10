@@ -132,7 +132,21 @@ pub async fn run_with_images(
 
     // 1. Contexte : mémoire locale puis, si la règle le justifie, le vault.
     let step = Instant::now();
-    let memory_block = prompt::recall_for(&deps.memory, &settings, &request).await;
+    // Lot 3 : une demande courte est rappelée avec le sujet en cours (message
+    // précédent, résumé de la conversation, tâche de fond).
+    let recap = deps.history.recap(&session_id).unwrap_or_default();
+    let previous = deps
+        .history
+        .conversation(&session_id, 2)
+        .ok()
+        .and_then(|list| list.into_iter().rev().find(|m| m.role == crate::core::types::Role::User))
+        .map(|m| m.content);
+    let recall_query =
+        prompt::recall_query(&request, previous.as_deref(), &recap.summary, deps.tasks.background_title().as_deref());
+    if recall_query != request {
+        log::info!("[contexte] rappel enrichi : « {} »", recall_query.replace('\n', " / ").chars().take(160).collect::<String>());
+    }
+    let memory_block = prompt::recall_for(&deps.memory, &settings, &recall_query).await;
     log::info!("[agent] mémoire consultée en {} ms", step.elapsed().as_millis());
     let step = Instant::now();
     let vault_block = prompt::vault_context(deps.vault.as_ref(), &settings, &request).await;
@@ -165,7 +179,7 @@ pub async fn run_with_images(
         recent_tools: deps.history.tool_digest(&session_id, 3, 1500).ok().flatten(),
         // Carnet de bord (lots 2 et 4) : le début de la conversation sorti de
         // la fenêtre, et les chantiers suivis d'une conversation à l'autre.
-        earlier: deps.history.recap(&session_id).ok().as_ref().and_then(crate::core::recap::summary_block),
+        earlier: crate::core::recap::summary_block(&recap),
         chantiers: deps
             .history
             .chantiers(crate::core::recap::CHANTIERS_SHOWN)
