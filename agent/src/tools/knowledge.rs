@@ -242,9 +242,12 @@ mod tests {
     fn contexte(vault: Option<Arc<crate::memory::vault::Vault>>) -> ToolContext {
         let db = Arc::new(Mutex::new(crate::db::Db::open_in_memory().expect("db")));
         let skills_dir = std::env::temp_dir().join(format!("knowledge-skills-{}", uuid::Uuid::new_v4()));
+        let mut perms = Permissions::default();
+        perms.write.granted = true;
+        perms.read.granted = true;
         ToolContext {
             workspace: std::env::temp_dir(),
-            permissions: Arc::new(RwLock::new(Permissions::default())),
+            permissions: Arc::new(RwLock::new(perms)),
             memory: Arc::new(crate::memory::MemoryStore::new(db)),
             skills: Arc::new(crate::skills::SkillStore::new(skills_dir).unwrap()),
             vault,

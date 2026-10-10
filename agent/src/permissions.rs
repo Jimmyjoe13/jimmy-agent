@@ -56,9 +56,9 @@ pub struct AccessRule {
 impl Default for AccessRule {
     fn default() -> Self {
         AccessRule {
-            granted: true,
-            allow_paths: vec!["C:\\Users\\**".into(), "C:\\Dev\\**".into()],
-            allow_commands: vec!["*".into()],
+            granted: false,
+            allow_paths: Vec::new(),
+            allow_commands: Vec::new(),
             deny_commands: vec![
                 "format".into(),
                 "diskpart".into(),
@@ -97,10 +97,17 @@ impl Default for Permissions {
             write: AccessRule::default(),
             execute: AccessRule::default(),
             network: AccessRule {
-                granted: true,
+                granted: false,
                 allow_paths: Vec::new(),
                 allow_commands: Vec::new(),
-                deny_commands: Vec::new(),
+                deny_commands: vec![
+                    "127.0.0.1:8787*".into(),
+                    "localhost:8787*".into(),
+                    "[::1]:8787*".into(),
+                    "127.0.0.1:8790*".into(),
+                    "localhost:8790*".into(),
+                    "[::1]:8790*".into(),
+                ],
             },
         }
     }
@@ -249,20 +256,25 @@ mod tests {
     #[test]
     fn lecture_bloquee_refuse() {
         let mut perms = Permissions::default();
+        perms.read.granted = true;
         perms.read.granted = false;
         assert!(perms.check(Capability::Read, "C:\\Users\\user\\notes.txt").is_err());
     }
 
     #[test]
     fn chemins_autorises_respectes() {
-        let perms = Permissions::default();
+        let mut perms = Permissions::default();
+        perms.read.granted = true;
+        perms.read.allow_paths = vec!["C:\\Users\\**".into()];
         assert!(perms.check(Capability::Read, r"C:\Users\user\Projet\a.rs").is_ok());
         assert!(perms.check(Capability::Read, r"C:\Windows\System32\config").is_err());
     }
 
     #[test]
     fn commandes_dangereuses_bloquees() {
-        let perms = Permissions::default();
+        let mut perms = Permissions::default();
+        perms.execute.granted = true;
+        perms.execute.allow_commands = vec!["git *".into()];
         assert!(perms.check(Capability::Execute, "git status").is_ok());
         assert!(perms.check(Capability::Execute, "diskpart").is_err());
     }

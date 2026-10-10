@@ -73,6 +73,22 @@ impl Tool for HttpRequest {
                 request = request.body(body);
             }
 
+            // Anti-secret : refuse d'exfiltrer une cle via http_request.
+            if let Some(b) = args.get("body").and_then(|v| v.as_str()) {
+                let low = b.to_lowercase();
+                let mut hit = low.contains("sk-or-") || low.contains("xoxb-");
+                if !hit {
+                    for name in ["OPENCODE_API_KEY","OPENROUTER_API_KEY","DEEPSEEK_API_KEY","QWEN_API_KEY","ANTHROPIC_API_KEY"] {
+                        if let Ok(v) = std::env::var(name) {
+                            let v = v.trim().to_string();
+                            if v.len() >= 8 && b.contains(&v) { hit = true; break; }
+                        }
+                    }
+                }
+                if hit {
+                    return Err(Error::Tool("envoi bloque : secret detecte dans le corps http".into()));
+                }
+            }
             let response = request.send().await.map_err(|e| Error::Tool(e.to_string()))?;
             let status = response.status();
             let content_type = response

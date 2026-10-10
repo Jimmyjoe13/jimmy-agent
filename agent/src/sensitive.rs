@@ -1398,3 +1398,31 @@ mod tests {
         assert!(approvals.always_list().is_empty());
     }
 }
+
+/// Garde anti-secret avant chaque envoi reseau : true si le corps contient
+/// une valeur secrete connue ou un motif evident de cle.
+pub fn body_contains_secret(body: &serde_json::Value, secrets: &[String]) -> bool {
+    if !secrets.is_empty() {
+        let text = body.to_string();
+        for sv in secrets {
+            let v = sv.trim();
+            if v.len() >= 8 && text.contains(v) { return true; }
+        }
+    }
+    let low = body.to_string().to_lowercase();
+    for pat in ["sk-or-", "xoxb-", "ghp_", "gsk_"] {
+        if low.contains(pat) { return true; }
+    }
+    false
+}
+
+/// Secrets connus depuis l'environnement (sans toucher a config::Secrets).
+pub fn env_secret_values() -> Vec<String> {
+    let mut out = Vec::new();
+    for name in ["OPENCODE_API_KEY","OPENROUTER_API_KEY","DEEPSEEK_API_KEY","QWEN_API_KEY","ANTHROPIC_API_KEY","JIMMY_TOKEN","SYNAPTIQ_KEY"] {
+        if let Ok(v) = std::env::var(name) {
+            if v.trim().len() >= 8 { out.push(v); }
+        }
+    }
+    out
+}

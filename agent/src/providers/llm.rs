@@ -418,7 +418,14 @@ impl LlmClient {
             // des latences. Sans cette variable, rien n'est écrit.
             if let Some(dir) = std::env::var_os("JIMMY_LLM_DUMP") {
                 let n = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
-                let _ = std::fs::write(std::path::Path::new(&dir).join(format!("requete-{n:02}.json")), body.to_string());
+                let _ = std::fs::write(std::path::Path::new(&dir).join(format!("requete-{n:02}.json")), crate::sensitive::mask_json(&body).to_string());
+            }
+            // Anti-secret : la cle ne voyage jamais dans le corps JSON.
+            if !provider.api_key.trim().is_empty() && body.to_string().contains(provider.api_key.trim()) {
+                return Err(Error::provider(&service, "envoi bloque : le corps contient la cle d'API"));
+            }
+            if crate::sensitive::body_contains_secret(&body, &crate::sensitive::env_secret_values()) {
+                return Err(Error::provider(&service, "envoi bloque : secret detecte dans le corps"));
             }
             // L'abonnement Claude peut rafraîchir son jeton ici : les en-têtes
             // s'obtiennent en async.
