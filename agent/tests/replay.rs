@@ -83,6 +83,7 @@ async fn rejouer_une_reponse_degeneree() {
         // `JIMMY_AMENDMENT` : teste un amendement candidat sur cette requête.
         amendments: std::env::var("JIMMY_AMENDMENT").ok().filter(|a| !a.trim().is_empty()),
         background_task: None,
+        situation: Vec::new(),
         voice: false,
     });
     let mut messages = vec![Message::system(system)];

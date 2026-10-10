@@ -127,8 +127,11 @@ pub struct PromptContext<'a> {
     /// `data/growth_amendments.md`. Absent ou vide : prompt inchangé.
     pub amendments: Option<String>,
     /// Tâche de fond en cours (`Tasks::prompt_block`) : Jimmy répond en
-    /// parallèle en le sachant. `None` : prompt inchangé.
+    /// parallèle en le sachant. Ligne du bloc « Maintenant ».
     pub background_task: Option<String>,
+    /// Autres lignes du bloc « Maintenant » (`core::situation`) : date et
+    /// canal, cartes d'accord en attente, navigateur, fenêtre regardée.
+    pub situation: Vec<String>,
     /// Échange vocal (voir [`VOICE_MODE`]).
     pub voice: bool,
 }
@@ -218,17 +221,24 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
         parts.push(("voix", VOICE_MODE.to_string()));
     }
 
-    let mut session = format!(
-        "## Contexte de la session\n- Dossier de travail par défaut : {}\n- Modèle : {}",
+    // Lot 5 : un seul bloc dit ce qui se passe au moment de la demande
+    // (projet, modèle, tâche de fond, cartes d'accord, navigateur, fenêtre,
+    // date et canal) au lieu de morceaux épars.
+    let mut now = format!(
+        "## Maintenant\n- Projet / dossier de travail : {}\n- Modèle : {}",
         ctx.settings.workspace, ctx.settings.llm.model
     );
     if ctx.settings.memory.vault_enabled {
-        session.push_str(&format!(
+        now.push_str(&format!(
             "\n- Vault partagé (PARA) ; ton inbox : {} ; tes notes rangées : `Jimy_…`",
             ctx.settings.memory.vault_folder
         ));
     }
-    parts.push(("session", session));
+    for line in ctx.background_task.iter().chain(&ctx.situation) {
+        now.push('\n');
+        now.push_str(line);
+    }
+    parts.push(("maintenant", now));
 
     if let Some(amendments) = &ctx.amendments {
         parts.push((
@@ -253,10 +263,6 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
 
     if let Some(block) = &ctx.recent_tools {
         parts.push(("outils récents", block.clone()));
-    }
-
-    if let Some(block) = &ctx.background_task {
-        parts.push(("tâche de fond", block.clone()));
     }
 
     // Plus de catalogue injecté : 3 noms suggérés + phrase d'orientation
@@ -424,6 +430,7 @@ mod tests {
             chantiers: None,
             amendments: None,
             background_task: None,
+            situation: Vec::new(),
             voice: false,
         });
         assert!(!system.contains("Atelier"), "{system}");
@@ -460,11 +467,15 @@ mod tests {
             chantiers: None,
             amendments: Some("Ne jamais reformuler la question avant de répondre.".into()),
             // La tâche de fond rejoint le prompt (réponse en parallèle).
-            background_task: Some("## Tâche en cours en arrière-plan
-- « écris notify.py »".into()),
+            background_task: Some("- Tâche en arrière-plan : « écris notify.py »".into()),
+            situation: vec!["- Carte d'accord en attente de la réponse de l'utilisateur : « .env »".into()],
             voice: false,
         });
-        assert!(system.contains("« écris notify.py »"), "{system}");
+        // Tâche de fond et carte d'accord : dans le bloc « Maintenant », pas
+        // dans des blocs à part.
+        let now = system.split("## Maintenant").nth(1).unwrap().split("\n\n").next().unwrap();
+        assert!(now.contains("« écris notify.py »") && now.contains("« .env »"), "{system}");
+        assert!(!system.contains("## Contexte de la session"), "{system}");
         assert!(system.contains("## Amendements"), "{system}");
         assert!(system.contains("Ne jamais reformuler"), "{system}");
         assert!(system.contains(".bak"), "{system}");
@@ -539,6 +550,7 @@ mod tests {
             chantiers: None,
             amendments: None,
             background_task: None,
+            situation: Vec::new(),
             voice: false,
         }
     }

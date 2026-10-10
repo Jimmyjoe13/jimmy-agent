@@ -84,11 +84,9 @@ pub fn encode_jpeg(rgba: &image::RgbaImage, max_width: u32) -> Result<(Vec<u8>, 
     Ok((bytes, width, height))
 }
 
-/// Capture la fenêtre active (bloquant : à appeler via `spawn_blocking`).
-pub fn capture_active_window(excluded_pids: &[u32]) -> Result<Capture> {
-    let fail = |what: &str, e: xcap::XCapError| Error::Tool(format!("capture d'écran ({what}) : {e}"));
-    let windows = xcap::Window::all().map_err(|e| fail("liste des fenêtres", e))?;
-    let candidates: Vec<Candidate> = windows
+/// Ce qu'on sait de chaque fenêtre ouverte, pour [`pick`].
+fn candidates_of(windows: &[xcap::Window]) -> Vec<Candidate> {
+    windows
         .iter()
         .map(|w| Candidate {
             pid: w.pid().unwrap_or(0),
@@ -100,7 +98,26 @@ pub fn capture_active_window(excluded_pids: &[u32]) -> Result<Capture> {
             width: w.width().unwrap_or(0),
             height: w.height().unwrap_or(0),
         })
-        .collect();
+        .collect()
+}
+
+/// Titre de la fenêtre que l'utilisateur regarde (même choix que la
+/// capture, sans image) : « titre — application ». Bloquant, à appeler via
+/// `spawn_blocking`. Ne part au modèle que si le réglage l'autorise
+/// (`memory.share_window_title`, désactivé par défaut).
+pub fn active_window_label(excluded_pids: &[u32]) -> Option<String> {
+    let windows = xcap::Window::all().ok()?;
+    let candidates = candidates_of(&windows);
+    let chosen = &candidates[pick(&candidates, excluded_pids)?];
+    let title = chosen.title.trim();
+    Some(if title.is_empty() { chosen.app.clone() } else { format!("{title} — {}", chosen.app) })
+}
+
+/// Capture la fenêtre active (bloquant : à appeler via `spawn_blocking`).
+pub fn capture_active_window(excluded_pids: &[u32]) -> Result<Capture> {
+    let fail = |what: &str, e: xcap::XCapError| Error::Tool(format!("capture d'écran ({what}) : {e}"));
+    let windows = xcap::Window::all().map_err(|e| fail("liste des fenêtres", e))?;
+    let candidates = candidates_of(&windows);
     let index = pick(&candidates, excluded_pids)
         .ok_or_else(|| Error::Tool("aucune fenêtre à capturer (tout est réduit ?)".into()))?;
     let chosen = &candidates[index];

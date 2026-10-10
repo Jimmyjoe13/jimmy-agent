@@ -689,6 +689,15 @@ impl Approvals {
         (id, rx)
     }
 
+    /// Portées des cartes d'accord encore sans réponse (bloc « Maintenant » :
+    /// une autre conversation sait qu'une action attend l'utilisateur).
+    pub fn pending_scopes(&self) -> Vec<String> {
+        let mut scopes: Vec<String> =
+            self.pending.lock().map(|p| p.values().map(|(_, key)| key.clone()).collect()).unwrap_or_default();
+        scopes.sort();
+        scopes
+    }
+
     /// Réponse de l'utilisateur. `always` (avec `approved`) retient la portée
     /// de la demande. `false` si la demande n'existe plus (expirée, tâche
     /// arrêtée) : rien n'est retenu non plus.

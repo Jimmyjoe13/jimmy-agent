@@ -27,6 +27,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const vaultPathInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const vaultFolderInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const vaultEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const shareWindowTitle = h("input", { type: "checkbox" }) as HTMLInputElement;
   const memoryModelInput = h("input", {
     class: "field",
     type: "text",
@@ -73,6 +74,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
       : "Automatique (vault d'Obsidian, sinon vault propre de Jimy)";
     vaultFolderInput.value = settings.memory.vault_folder;
     vaultEnabled.checked = settings.memory.vault_enabled;
+    shareWindowTitle.checked = settings.memory.share_window_title;
     memoryModelInput.value = settings.memory.model ?? "";
 
     render();
@@ -127,6 +129,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.memory.vault_path = vaultPathInput.value.trim();
     settings.memory.vault_folder = vaultFolderInput.value.trim() || "0_Inbox/Jimmy";
     settings.memory.vault_enabled = vaultEnabled.checked;
+    settings.memory.share_window_title = shareWindowTitle.checked;
     settings.memory.model = memoryModelInput.value.trim();
 
     if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
@@ -244,6 +247,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
         field("Chemin du vault", vaultPathInput),
         field("Dossier des souvenirs de Jimy", vaultFolderInput),
         field("Modèle de la mémoire (apprentissage et tri du vault)", memoryModelInput),
+      ),
+      card(
+        "Contexte",
+        h(
+          "p",
+          { class: "note" },
+          "À chaque demande, Jimy sait l'heure, le projet, sa tâche de fond, les accords en attente et la dernière page de son navigateur. Le titre de la fenêtre que tu regardes ne part au modèle que si tu l'autorises (jamais d'image sans ta demande).",
+        ),
+        toggle("Donner à Jimy le titre de la fenêtre que je regarde", shareWindowTitle),
       ),
       card(
         "Permissions",

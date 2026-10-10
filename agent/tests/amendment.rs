@@ -88,6 +88,7 @@ async fn l_amendement_ne_degrade_pas_les_reponses() {
             chantiers: None,
             amendments,
             background_task: None,
+            situation: Vec::new(),
             voice: false,
         };
         let messages = |system: String| {

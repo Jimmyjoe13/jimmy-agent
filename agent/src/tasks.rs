@@ -225,19 +225,18 @@ impl Tasks {
         self.lock().iter().find(|e| e.background).map(|e| e.title.clone())
     }
 
-    /// Bloc du prompt système : la tâche de fond en cours, pour que Jimmy
-    /// réponde en parallèle en le sachant (« où en es-tu ? »), sans refaire
-    /// son travail. `None` sans tâche de fond : prompt inchangé.
+    /// Ligne du bloc « Maintenant » (prompt système) : la tâche de fond en
+    /// cours, pour que Jimmy réponde en parallèle en le sachant (« où en
+    /// es-tu ? »), sans refaire son travail. `None` sans tâche de fond.
     pub fn prompt_block(&self, session_id: &str) -> Option<String> {
         let entries = self.lock();
         let task = entries.iter().find(|e| e.background)?;
         let place = if task.session_id == session_id { "dans cette conversation" } else { "dans une autre conversation" };
         let step = if task.step.is_empty() { "pas encore d'étape".to_string() } else { task.step.clone() };
         Some(format!(
-            "## Tâche en cours en arrière-plan\n\
-             - « {} » ({place}), lancée il y a {}, dernière étape : {step}.\n\
+            "- Tâche en arrière-plan : « {} » ({place}), lancée il y a {}, dernière étape : {step}. \
              Elle continue sans toi : réponds à la nouvelle demande normalement. Si on te demande où elle en est, \
-             réponds d'après ces lignes. Ne refais pas son travail et ne modifie pas les fichiers qu'elle touche. \
+             réponds d'après cette ligne. Ne refais pas son travail et ne modifie pas les fichiers qu'elle touche. \
              Pour l'arrêter : bouton « Arrêter » de la tâche dans le Chat, ou « arrête tout » à la voix.",
             task.title,
             human_duration(task.started.elapsed()),

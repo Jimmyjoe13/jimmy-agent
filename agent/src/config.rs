@@ -491,6 +491,11 @@ pub struct MemorySettings {
     /// ne casse pas la mémoire (10 octobre : GLM chez NVIDIA, délais dépassés).
     #[serde(default)]
     pub model: String,
+    /// Bloc « Maintenant » du contexte : le titre de la fenêtre que
+    /// l'utilisateur regarde part au modèle (« regarde ça »). Désactivé par
+    /// défaut : rien de l'écran ne part sans accord.
+    #[serde(default)]
+    pub share_window_title: bool,
 }
 
 fn default_embedding_url() -> String {
@@ -530,6 +535,7 @@ impl Default for MemorySettings {
             vault_folder: default_vault_folder(),
             vault_min_request_chars: default_vault_min_request_chars(),
             model: String::new(),
+            share_window_title: false,
         }
     }
 }

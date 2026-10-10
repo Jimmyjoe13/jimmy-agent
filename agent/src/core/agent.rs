@@ -166,6 +166,17 @@ pub async fn run_with_images(
         .await;
     }
 
+    // Bloc « Maintenant » (lot 5) : date et canal, cartes d'accord en attente,
+    // navigateur, fenêtre regardée (si le réglage l'autorise).
+    let situation: Vec<String> = [
+        Some(crate::core::situation::now_line(deps.voice)),
+        crate::core::situation::approvals_line(&deps.approvals.pending_scopes()),
+        crate::core::situation::browser_line(&deps.history),
+        crate::core::situation::window_line(settings.memory.share_window_title).await,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let system_parts = prompt::system_parts(&PromptContext {
         settings: &settings,
         memory: &deps.memory,
@@ -189,6 +200,7 @@ pub async fn run_with_images(
         // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
         amendments: crate::growth::read_amendments(&deps.data_dir),
         background_task: deps.tasks.prompt_block(&session_id),
+        situation,
         voice: deps.voice,
     });
     let mut messages = vec![Message::system(prompt::join_parts(&system_parts))];

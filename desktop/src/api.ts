@@ -378,6 +378,8 @@ export interface MemorySettings {
   vault_min_request_chars: number;
   /** Modèle des tâches de mémoire ; vide = modèle principal. */
   model: string;
+  /** Bloc « Maintenant » : titre de la fenêtre regardée envoyé au modèle. */
+  share_window_title: boolean;
 }
 
 export interface UiSettings {
