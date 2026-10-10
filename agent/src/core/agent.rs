@@ -152,7 +152,7 @@ pub async fn run_with_images(
         .await;
     }
 
-    let mut messages = vec![Message::system(prompt::build_system(&PromptContext {
+    let system_parts = prompt::system_parts(&PromptContext {
         settings: &settings,
         memory: &deps.memory,
         skills: &deps.skills,
@@ -168,11 +168,20 @@ pub async fn run_with_images(
         amendments: crate::growth::read_amendments(&deps.data_dir),
         background_task: deps.tasks.prompt_block(&session_id),
         voice: deps.voice,
-    }))];
+    });
+    let mut messages = vec![Message::system(prompt::join_parts(&system_parts))];
 
     // 2. Historique récent de la session.
     messages.extend(deps.history.conversation(&session_id, 20)?);
     messages.push(user_message.clone());
+    // Relevé du contexte (lot 0) : quel bloc coûte quoi, à chaque demande.
+    log::info!(
+        "[contexte] système {} ; historique {} message(s), {} caractères ; demande {} caractères",
+        prompt::sizes(&system_parts),
+        messages.len() - 2,
+        messages[1..messages.len() - 1].iter().map(|m| m.content.chars().count()).sum::<usize>(),
+        request.chars().count()
+    );
 
     deps.history
         .auto_title(&session_id, &request)
@@ -236,6 +245,11 @@ pub async fn run_with_images(
             break;
         }
 
+        // Lot 1 (contexte) : les vieux résultats d'outils sont compactés avant
+        // l'appel si le contexte dépasse son budget. Sans ça, 80 étapes de
+        // sorties à 12 000 caractères débordaient la fenêtre du modèle.
+        compact_before_call(&mut messages);
+
         let call_started = Instant::now();
         // En vocal, un appel ne peut pas bloquer plus de 45 s : le 4 octobre,
         // MiMo est resté muet 95 s avant un HTTP 500, l'utilisateur attendait
@@ -297,11 +311,12 @@ pub async fn run_with_images(
             }
         };
         log::info!(
-            "[agent] appel au modèle n°{} en {} ms ({} outil(s), {} caractères ; jetons : {} en entrée, {} en sortie)",
+            "[agent] appel au modèle n°{} en {} ms ({} outil(s), {} caractères ; contexte envoyé {} caractères ; jetons : {} en entrée, {} en sortie)",
             iteration + 1,
             call_started.elapsed().as_millis(),
             reply.tool_calls.len(),
             reply.content.chars().count(),
+            crate::core::compact::context_chars(&messages),
             reply.usage.prompt_tokens,
             reply.usage.completion_tokens
         );
@@ -562,6 +577,7 @@ pub async fn run_with_images(
              avec ce que tu as trouvé : sois bref, et dis honnêtement ce qu'il reste à faire."
                 .to_string(),
         ));
+        compact_before_call(&mut messages);
         // Même budget que les autres appels : la conclusion ne doit pas, à son
         // tour, laisser l'utilisateur sans réponse pendant des minutes.
         let budget = deps.voice.then_some(VOICE_CALL_TIMEOUT);
@@ -846,6 +862,18 @@ fn screen_note(images: &[crate::core::types::Image]) -> Option<String> {
 /// réglages (25 en vocal) et 10 min — même durée qu'à l'écrit : MiMo met 3 à
 /// 4 minutes pour une tâche de code, 180 s coupaient avant l'écriture. En
 /// fond, au moins `tasks::BACKGROUND_MAX_ITERATIONS` étapes et 20 min.
+/// Compacte le passé si le contexte dépasse son budget, et le note au journal.
+fn compact_before_call(messages: &mut [Message]) {
+    let before = crate::core::compact::context_chars(messages);
+    let reduced = crate::core::compact::fit(messages, crate::core::compact::BUDGET_CHARS, crate::core::compact::KEEP_ROUNDS);
+    if reduced > 0 {
+        log::info!(
+            "[contexte] compaction : {reduced} élément(s) réduit(s), {before} → {} caractères",
+            crate::core::compact::context_chars(messages)
+        );
+    }
+}
+
 fn step_budget(foreground_iterations: u32, background: bool) -> (u32, Duration) {
     if background {
         (

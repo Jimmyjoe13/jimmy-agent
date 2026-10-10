@@ -186,9 +186,32 @@ pub fn tools_summary(names: &[String]) -> String {
 }
 
 pub fn build_system(ctx: &PromptContext<'_>) -> String {
-    let mut parts: Vec<String> = vec![IDENTITY.to_string()];
+    join_parts(&system_parts(ctx))
+}
+
+/// Prompt système final : les blocs dans l'ordre, séparés par une ligne vide.
+pub fn join_parts(parts: &[(&'static str, String)]) -> String {
+    parts.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>().join("\n\n")
+}
+
+/// Taille de chaque bloc, pour le journal (« identité 5210, mémoire 1104… »).
+/// Mesurer avant d'optimiser : sans ce relevé, impossible de dire quel bloc
+/// coûte et ce qu'un changement fait gagner.
+pub fn sizes(parts: &[(&'static str, String)]) -> String {
+    let total: usize = parts.iter().map(|(_, text)| text.chars().count()).sum();
+    let detail = parts
+        .iter()
+        .map(|(label, text)| format!("{label} {}", text.chars().count()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{total} caractères ({detail})")
+}
+
+/// Les blocs du prompt système, étiquetés (voir [`sizes`]).
+pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
+    let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY.to_string())];
     if ctx.voice {
-        parts.push(VOICE_MODE.to_string());
+        parts.push(("voix", VOICE_MODE.to_string()));
     }
 
     let mut session = format!(
@@ -201,24 +224,27 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
             ctx.settings.memory.vault_folder
         ));
     }
-    parts.push(session);
+    parts.push(("session", session));
 
     if let Some(amendments) = &ctx.amendments {
-        parts.push(format!(
-            "## Amendements (leçons actées)\nCes consignes complètent tes instructions ; chacune vient d'une leçon actée \
-             avec l'utilisateur. Pour en ajouter ou en retirer : garde une sauvegarde `.bak` du fichier avant de \
-             l'écrire, et fais rejouer le test d'amendement après la modification.\n{amendments}"
+        parts.push((
+            "amendements",
+            format!(
+                "## Amendements (leçons actées)\nCes consignes complètent tes instructions ; chacune vient d'une leçon actée \
+                 avec l'utilisateur. Pour en ajouter ou en retirer : garde une sauvegarde `.bak` du fichier avant de \
+                 l'écrire, et fais rejouer le test d'amendement après la modification.\n{amendments}"
+            ),
         ));
     }
 
-    parts.push(tools_summary(&ctx.registry.names()));
+    parts.push(("outils", tools_summary(&ctx.registry.names())));
 
     if let Some(block) = &ctx.recent_tools {
-        parts.push(block.clone());
+        parts.push(("outils récents", block.clone()));
     }
 
     if let Some(block) = &ctx.background_task {
-        parts.push(block.clone());
+        parts.push(("tâche de fond", block.clone()));
     }
 
     // Plus de catalogue injecté : 3 noms suggérés + phrase d'orientation
@@ -226,13 +252,13 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
 
     if let Some(block) = &ctx.vault_block {
         if !block.trim().is_empty() {
-            parts.push(block.clone());
+            parts.push(("vault", block.clone()));
         }
     }
 
     if let Some(block) = &ctx.memory_block {
         if !block.trim().is_empty() {
-            parts.push(block.clone());
+            parts.push(("mémoire", block.clone()));
         }
     }
 
@@ -240,17 +266,16 @@ pub fn build_system(ctx: &PromptContext<'_>) -> String {
     // le modèle n'a plus à choisir lesquels il relit.
     let suggestions = ctx.skills.suggest(ctx.request, 3);
     if !suggestions.is_empty() {
-        parts.push(format!(
-            "Skills probablement utiles pour cette demande : {}",
-            suggestions
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+        parts.push((
+            "skills",
+            format!(
+                "Skills probablement utiles pour cette demande : {}",
+                suggestions.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")
+            ),
         ));
     }
 
-    parts.join("\n\n")
+    parts
 }
 
 /// Message utilisateur enrichi des souvenirs, quand le rappel doit être visible
@@ -409,6 +434,27 @@ mod tests {
             ..common_context(&settings, &memory, &skills, &registry)
         });
         assert!(!system.contains("## Amendements"), "{system}");
+    }
+
+    /// Le relevé du journal nomme chaque bloc présent avec sa taille, et le
+    /// prompt assemblé est exactement la somme des blocs.
+    #[test]
+    fn le_releve_des_tailles_nomme_chaque_bloc() {
+        let settings = Settings::default();
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().expect("db")));
+        let memory = MemoryStore::new(db);
+        let skills = crate::skills::SkillStore::new(std::env::temp_dir().join("prompt-test-skills")).unwrap();
+        let registry = ToolRegistry::new();
+        let ctx = PromptContext {
+            memory_block: Some("Ce que Jimy sait de l'utilisateur :\n- [fait] aime le vert".into()),
+            ..common_context(&settings, &memory, &skills, &registry)
+        };
+        let parts = system_parts(&ctx);
+        assert_eq!(join_parts(&parts), build_system(&ctx));
+        let report = sizes(&parts);
+        let memoire = parts.iter().find(|(l, _)| *l == "mémoire").unwrap().1.chars().count();
+        assert!(report.contains(&format!("mémoire {memoire}")), "{report}");
+        assert!(report.contains("identité ") && !report.contains("vault"), "{report}");
     }
 
     /// Gabarit de contexte réutilisé entre deux variantes d'un même test.
