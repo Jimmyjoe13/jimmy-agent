@@ -14,11 +14,18 @@
 //! l'accord dans le Chat ([`authorize`]) ; refus, silence ou demande vocale =
 //! l'outil n'est pas exécuté.
 //!
+//! « Toujours autoriser » (10 octobre) : l'accord est retenu, par **type
+//! d'action** pour le navigateur et par **fichier** pour les fichiers
+//! sensibles ([`always_key`]), dans `data/approvals.json`. Une action ainsi
+//! accordée passe sans carte, à la voix comme au Chat ; Paramètres → Sécurité
+//! les liste et les retire.
+//!
 //! C'est une détection par motifs, pas un bac à sable : un script
 //! intermédiaire qui ne nomme pas le fichier y échappe. Le prompt interdit ce
 //! contournement ; le garde-fou couvre les cas réels constatés.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -624,6 +631,25 @@ pub fn describe(tool: &str, args: &serde_json::Value) -> String {
     format!("{label}\n{body}")
 }
 
+/// Portée d'un « Toujours autoriser » pour une cible de [`needs_approval`].
+/// Navigateur : le **type** d'action, sans l'élément visé (« clic sur
+/// « Envoyer » » et « clic sur « Publier » » partagent un accord). Fichier
+/// sensible : le chemin exact, casse et séparateurs normalisés.
+pub fn always_key(target: &str) -> String {
+    match target.strip_prefix(BROWSER_TARGET) {
+        Some(action) if action.starts_with("clic sur « ") => {
+            format!("{BROWSER_TARGET}clic sur un élément qui engage")
+        }
+        Some(action) if action.starts_with("saisie validée dans « ") => {
+            format!("{BROWSER_TARGET}saisie validée (hors recherche)")
+        }
+        // Les autres types (script, Entrée, envoi de fichier…) n'embarquent
+        // pas d'élément : la cible est déjà le type.
+        Some(_) => target.to_string(),
+        None => target.to_lowercase().replace('/', "\\"),
+    }
+}
+
 // ── Demande d'autorisation ───────────────────────────────────────────────────
 
 /// Demandes en attente d'une réponse de l'utilisateur (une par appel d'outil
@@ -632,25 +658,86 @@ pub fn describe(tool: &str, args: &serde_json::Value) -> String {
 #[derive(Default)]
 pub struct Approvals {
     next: AtomicU64,
-    pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// Demandes en attente : la réponse à transmettre et la portée
+    /// ([`always_key`]) à retenir si l'utilisateur choisit « Toujours ».
+    pending: Mutex<HashMap<String, (oneshot::Sender<bool>, String)>>,
+    /// Portées accordées une fois pour toutes.
+    always: Mutex<BTreeSet<String>>,
+    /// Fichier où elles survivent au redémarrage (`None` : en mémoire seule,
+    /// pour les tests).
+    store: Option<PathBuf>,
 }
 
 impl Approvals {
-    /// Ouvre une demande : son identifiant et l'attente de la réponse.
-    pub fn request(&self) -> (String, oneshot::Receiver<bool>) {
+    /// Charge les accords permanents de `path` (absent ou illisible : aucun).
+    pub fn load(path: PathBuf) -> Self {
+        let always = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<BTreeSet<String>>(&raw).ok())
+            .unwrap_or_default();
+        Approvals { always: Mutex::new(always), store: Some(path), ..Default::default() }
+    }
+
+    /// Ouvre une demande pour la portée `key` : son identifiant et l'attente
+    /// de la réponse.
+    pub fn request(&self, key: String) -> (String, oneshot::Receiver<bool>) {
         let id = format!("approval-{}", self.next.fetch_add(1, Ordering::Relaxed) + 1);
         let (tx, rx) = oneshot::channel();
         if let Ok(mut pending) = self.pending.lock() {
-            pending.insert(id.clone(), tx);
+            pending.insert(id.clone(), (tx, key));
         }
         (id, rx)
     }
 
-    /// Réponse de l'utilisateur. `false` si la demande n'existe plus
-    /// (expirée, tâche arrêtée).
-    pub fn respond(&self, id: &str, approved: bool) -> bool {
-        let sender = self.pending.lock().ok().and_then(|mut p| p.remove(id));
-        sender.is_some_and(|tx| tx.send(approved).is_ok())
+    /// Réponse de l'utilisateur. `always` (avec `approved`) retient la portée
+    /// de la demande. `false` si la demande n'existe plus (expirée, tâche
+    /// arrêtée) : rien n'est retenu non plus.
+    pub fn respond(&self, id: &str, approved: bool, always: bool) -> bool {
+        let Some((tx, key)) = self.pending.lock().ok().and_then(|mut p| p.remove(id)) else {
+            return false;
+        };
+        if approved && always {
+            self.grant(key);
+        }
+        tx.send(approved).is_ok()
+    }
+
+    /// La portée est-elle accordée une fois pour toutes ?
+    pub fn is_always(&self, key: &str) -> bool {
+        self.always.lock().is_ok_and(|always| always.contains(key))
+    }
+
+    /// Accords permanents, triés, pour Paramètres.
+    pub fn always_list(&self) -> Vec<String> {
+        self.always.lock().map(|always| always.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Retire un accord permanent : la carte reviendra. `false` s'il n'existait pas.
+    pub fn revoke(&self, key: &str) -> bool {
+        let removed = self.always.lock().is_ok_and(|mut always| always.remove(key));
+        if removed {
+            self.save();
+        }
+        removed
+    }
+
+    fn grant(&self, key: String) {
+        log::info!("[sécurité] toujours autorisé désormais : {key}");
+        if let Ok(mut always) = self.always.lock() {
+            always.insert(key);
+        }
+        self.save();
+    }
+
+    fn save(&self) {
+        let Some(path) = &self.store else { return };
+        let list = self.always_list();
+        let written = serde_json::to_string_pretty(&list)
+            .map_err(|e| e.to_string())
+            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
+        if let Err(e) = written {
+            log::warn!("[sécurité] accords permanents non enregistrés ({}) : {e}", path.display());
+        }
     }
 
     fn forget(&self, id: &str) {
@@ -675,6 +762,12 @@ pub async fn authorize(
     timeout: Duration,
 ) -> Option<String> {
     let target = needs_approval(tool, args)?;
+    let key = always_key(&target);
+    // Accordé une fois pour toutes : ni carte ni refus vocal.
+    if approvals.is_always(&key) {
+        log::info!("[sécurité] « {target} » : toujours autorisé ({key})");
+        return None;
+    }
     // Action du navigateur en son nom, ou écriture d'un fichier sensible :
     // même carte, mots différents.
     let what = match target.strip_prefix(BROWSER_TARGET) {
@@ -688,13 +781,14 @@ pub async fn authorize(
              Ne tente pas de la faire autrement ; dis-lui de refaire la demande dans le Chat écrit."
         ));
     }
-    let (id, answer) = approvals.request();
+    let (id, answer) = approvals.request(key.clone());
     log::info!("[sécurité] autorisation demandée ({id}) pour modifier « {target} »");
     let _ = events
         .send(AgentEvent::Approval {
             id: id.clone(),
             target: target.clone(),
             detail: describe(tool, args),
+            scope: key,
         })
         .await;
     let approved = matches!(tokio::time::timeout(timeout, answer).await, Ok(Ok(true)));
@@ -1176,10 +1270,10 @@ mod tests {
                 authorize(&approvals, false, "run_command", &sensitive_call(), &tx, Duration::from_secs(5)).await
             })
         };
-        let Some(AgentEvent::Approval { id, target, detail }) = rx.recv().await else { panic!("pas de carte") };
+        let Some(AgentEvent::Approval { id, target, detail, .. }) = rx.recv().await else { panic!("pas de carte") };
         assert_eq!(target, ".env");
         assert!(detail.contains("echo X=1 >> .env"), "{detail}");
-        assert!(approvals.respond(&id, true));
+        assert!(approvals.respond(&id, true, false));
         assert_eq!(waiting.await.unwrap(), None, "accord donné : l'outil s'exécute");
         assert!(matches!(rx.recv().await, Some(AgentEvent::ApprovalResolved { approved: true, .. })));
     }
@@ -1196,7 +1290,7 @@ mod tests {
             })
         };
         let Some(AgentEvent::Approval { id, .. }) = rx.recv().await else { panic!("pas de carte") };
-        approvals.respond(&id, false);
+        approvals.respond(&id, false, false);
         assert!(waiting.await.unwrap().unwrap().starts_with("REFUSÉ"));
         // Pas de réponse dans le délai : refus, et la demande expirée ne
         // peut plus être acceptée après coup.
@@ -1204,7 +1298,7 @@ mod tests {
         let refus = authorize(&approvals, false, "run_command", &sensitive_call(), &tx, Duration::from_millis(50)).await;
         assert!(refus.is_some());
         let Some(AgentEvent::Approval { id, .. }) = rx.recv().await else { panic!("pas de carte") };
-        assert!(!approvals.respond(&id, true));
+        assert!(!approvals.respond(&id, true, false));
     }
 
     #[tokio::test]
@@ -1216,5 +1310,82 @@ mod tests {
         assert!(authorize(&approvals, false, "run_command", &anodin, &tx, Duration::from_secs(5)).await.is_none());
         drop(tx);
         assert!(rx.recv().await.is_none(), "aucune carte émise");
+    }
+
+    /// La portée de « Toujours » : le type d'action pour le navigateur (pas
+    /// l'élément), le fichier exact pour les fichiers sensibles.
+    #[test]
+    fn la_portee_de_toujours() {
+        let nav = |tool: &str, arguments: serde_json::Value| {
+            needs_approval("mcp_call", &json!({ "server": "navigateur", "tool": tool, "arguments": arguments }))
+                .map(|target| always_key(&target))
+                .expect("carte attendue")
+        };
+        let envoyer = nav("browser_click", json!({ "element": "Bouton Envoyer", "ref": "e1" }));
+        let publier = nav("browser_click", json!({ "element": "Publish post button", "ref": "e2" }));
+        assert_eq!(envoyer, publier, "deux clics qui engagent = un seul accord");
+        let saisie = nav("browser_type", json!({ "element": "zone prompt Gemini", "ref": "e3", "text": "x", "submit": true }));
+        assert_eq!(saisie, "navigateur : saisie validée (hors recherche)");
+        let envoi = nav("browser_file_upload", json!({ "paths": [r"C:\Users\user\cv.pdf"] }));
+        assert_ne!(envoi, envoyer, "accorder les clics n'accorde pas l'envoi de fichiers");
+        let script = nav("browser_run_code_unsafe", json!({ "code": "await page.getByRole('button', { name: 'Envoyer' }).click()" }));
+        assert_eq!(script, "navigateur : clic par script sur un élément qui engage");
+        assert_eq!(always_key("C:/Projet/App/.ENV"), always_key(r"c:\projet\app\.env"));
+        assert_ne!(always_key(r"C:\a\.env"), always_key(r"C:\b\.env"), "par fichier, pas tous les .env");
+    }
+
+    /// « Toujours autoriser » : plus de carte pour la même portée, à la voix
+    /// comme au Chat, après redémarrage ; retiré, la carte revient.
+    #[tokio::test]
+    async fn toujours_autoriser_retient_l_accord() {
+        let path = std::env::temp_dir().join(format!("approvals-{}.json", uuid::Uuid::new_v4()));
+        let approvals = std::sync::Arc::new(Approvals::load(path.clone()));
+        let clic = |element: &str| {
+            json!({ "server": "navigateur", "tool": "browser_click", "arguments": { "element": element, "ref": "e1" } })
+        };
+        let (tx, mut rx) = mpsc::channel(8);
+        let waiting = {
+            let approvals = approvals.clone();
+            let call = clic("Bouton Envoyer");
+            tokio::spawn(async move { authorize(&approvals, false, "mcp_call", &call, &tx, Duration::from_secs(5)).await })
+        };
+        let Some(AgentEvent::Approval { id, scope, .. }) = rx.recv().await else { panic!("pas de carte") };
+        assert_eq!(scope, "navigateur : clic sur un élément qui engage");
+        assert!(approvals.respond(&id, true, true));
+        assert_eq!(waiting.await.unwrap(), None);
+
+        // Rechargé depuis le disque : un autre bouton qui engage passe sans
+        // carte, même à la voix ; un envoi de fichier demande toujours.
+        let approvals = Approvals::load(path.clone());
+        let (tx, mut rx) = mpsc::channel(8);
+        assert!(authorize(&approvals, true, "mcp_call", &clic("Publier"), &tx, Duration::from_secs(5)).await.is_none());
+        let envoi = json!({ "server": "navigateur", "tool": "browser_file_upload", "arguments": { "paths": [r"C:\x.pdf"] } });
+        assert!(authorize(&approvals, true, "mcp_call", &envoi, &tx, Duration::from_secs(5)).await.is_some());
+        drop(tx);
+        assert!(rx.recv().await.is_none(), "aucune carte émise");
+
+        // Retiré : la carte revient (refus vocal immédiat).
+        assert!(approvals.revoke("navigateur : clic sur un élément qui engage"));
+        let (tx, _rx) = mpsc::channel(8);
+        assert!(authorize(&approvals, true, "mcp_call", &clic("Publier"), &tx, Duration::from_secs(5)).await.is_some());
+        assert!(Approvals::load(path.clone()).always_list().is_empty(), "retrait enregistré");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// « Autoriser une fois » ne retient rien.
+    #[tokio::test]
+    async fn autoriser_une_fois_ne_retient_rien() {
+        let approvals = std::sync::Arc::new(Approvals::default());
+        let (tx, mut rx) = mpsc::channel(8);
+        let waiting = {
+            let approvals = approvals.clone();
+            tokio::spawn(async move {
+                authorize(&approvals, false, "run_command", &sensitive_call(), &tx, Duration::from_secs(5)).await
+            })
+        };
+        let Some(AgentEvent::Approval { id, .. }) = rx.recv().await else { panic!("pas de carte") };
+        assert!(approvals.respond(&id, true, false));
+        assert_eq!(waiting.await.unwrap(), None);
+        assert!(approvals.always_list().is_empty());
     }
 }

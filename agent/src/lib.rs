@@ -341,6 +341,9 @@ impl App {
             paths.clone(),
         )));
 
+        // Accords « Toujours autoriser », gardés d'un lancement à l'autre.
+        let approvals = Arc::new(sensitive::Approvals::load(paths.data.join("approvals.json")));
+
         Ok(Arc::new(App {
             paths,
             settings: shared_settings,
@@ -353,7 +356,7 @@ impl App {
             tts,
             avatar,
             registry,
-            approvals: Arc::new(sensitive::Approvals::default()),
+            approvals,
             mcp,
             vault,
             stt: tokio::sync::Mutex::new(None),

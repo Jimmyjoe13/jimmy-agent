@@ -789,6 +789,23 @@ input[type="range"] {
   gap: 8px;
 }
 
+/* Portée de « Toujours autoriser », sous le détail de la commande. */
+.approval-scope {
+  margin: 0 0 8px;
+}
+
+/* Paramètres → permissions : un accord permanent par ligne, bouton à droite. */
+.always-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.always-row code {
+  word-break: break-all;
+}
+
 .approval-status {
   flex: 1;
   color: var(--text-dim);

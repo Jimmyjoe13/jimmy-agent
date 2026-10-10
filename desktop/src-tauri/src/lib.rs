@@ -235,6 +235,8 @@ pub fn run() {
                 commands::sessions,
                 commands::session_messages,
                 commands::approval_respond,
+                commands::approvals_always,
+                commands::approval_revoke,
                 commands::delete_session,
                 commands::get_settings,
                 commands::save_settings,

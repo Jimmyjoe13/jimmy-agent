@@ -749,6 +749,8 @@ export function chatView(ctx: AppContext): HTMLElement {
   const approvalCards = new Map<string, HTMLElement>();
   // Celles d'une tâche de fond : identifiant de demande → tâche.
   const approvalTasks = new Map<string, string>();
+  /** Cartes accordées par « Toujours autoriser » (libellé de clôture). */
+  const alwaysGiven = new Set<string>();
 
   /** Clôt les cartes d'un tour : premier plan (`null`) ou tâche de fond. */
   function closeApprovalsOf(taskId: string | null) {
@@ -764,16 +766,28 @@ export function chatView(ctx: AppContext): HTMLElement {
     if (!id || approvalCards.has(id)) return;
     if (event.taskId) approvalTasks.set(id, event.taskId);
     const status = h("span", { class: "approval-status" }, "Jimy attend ta réponse");
-    const allow = h("button", { class: "primary small" }, "Autoriser") as HTMLButtonElement;
+    const allow = h("button", { class: "small" }, "Autoriser une fois") as HTMLButtonElement;
+    // « Toujours » : la portée (type d'action ou fichier) est retenue, plus de
+    // carte pour elle — elle se retire dans Paramètres → Ajuster les permissions.
+    const always = h(
+      "button",
+      { class: "primary small", title: `Ne plus demander pour : ${event.scope ?? event.target ?? ""}` },
+      "Toujours autoriser",
+    ) as HTMLButtonElement;
     const deny = h("button", { class: "danger small" }, "Refuser") as HTMLButtonElement;
-    const answer = async (approved: boolean) => {
+    const answer = async (approved: boolean, forever = false) => {
       allow.disabled = true;
+      always.disabled = true;
       deny.disabled = true;
-      const accepted = await guard(() => api.approvalRespond(id, approved), "autorisation");
+      // Marqué avant l'appel : la clôture (`approvalResolved`) peut arriver
+      // avant sa réponse.
+      if (forever) alwaysGiven.add(id);
+      const accepted = await guard(() => api.approvalRespond(id, approved, forever), "autorisation");
       // Demande expirée ou tâche arrêtée entre-temps : rien n'a été exécuté.
       if (accepted === false) closeApproval(id, null);
     };
     allow.addEventListener("click", () => void answer(true));
+    always.addEventListener("click", () => void answer(true, true));
     deny.addEventListener("click", () => void answer(false));
     const card = h(
       "div",
@@ -789,7 +803,8 @@ export function chatView(ctx: AppContext): HTMLElement {
       ),
       h("code", { class: "approval-target" }, event.target ?? ""),
       h("pre", { class: "approval-detail" }, event.detail ?? ""),
-      h("div", { class: "approval-actions" }, status, deny, allow),
+      event.scope ? h("p", { class: "note approval-scope" }, `« Toujours » vaudra pour : ${event.scope}`) : null,
+      h("div", { class: "approval-actions" }, status, deny, allow, always),
     );
     approvalCards.set(id, card);
     clearEmptyState();
@@ -813,7 +828,16 @@ export function chatView(ctx: AppContext): HTMLElement {
     card.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
     card.classList.add(approved ? "approved" : "denied");
     const status = card.querySelector(".approval-status");
-    if (status) status.textContent = approved === null ? "Demande expirée : rien n'a été modifié" : approved ? "Autorisé" : "Refusé : rien n'a été modifié";
+    const forever = alwaysGiven.delete(id);
+    if (status)
+      status.textContent =
+        approved === null
+          ? "Demande expirée : rien n'a été modifié"
+          : approved
+            ? forever
+              ? "Autorisé — sans redemander désormais"
+              : "Autorisé"
+            : "Refusé : rien n'a été modifié";
   }
 
   async function submit() {

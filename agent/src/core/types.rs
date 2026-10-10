@@ -272,7 +272,8 @@ pub enum AgentEvent {
     /// Un outil veut modifier un fichier sensible (`.env`, clés, secrets) :
     /// il est suspendu jusqu'à la réponse de l'utilisateur
     /// (`approval_respond`). `detail` = l'outil et la commande exacte.
-    Approval { id: String, target: String, detail: String },
+    /// `scope` = ce que couvrirait « Toujours autoriser » (`sensitive::always_key`).
+    Approval { id: String, target: String, detail: String, scope: String },
     /// La demande est close : accord, refus ou délai dépassé.
     ApprovalResolved { id: String, approved: bool },
     /// Erreur non fatale, Jimmy continue.

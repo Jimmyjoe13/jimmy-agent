@@ -188,7 +188,7 @@ async fn pas_de_passage_en_fond_pendant_une_autorisation() {
     let (app, racine) = app_isolee();
     let (events, _rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
     let ticket = app.start_task("s1", "écris le .env", events, |tx, _| async move {
-        let _ = tx.send(AgentEvent::Approval { id: "a1".into(), target: ".env".into(), detail: String::new() }).await;
+        let _ = tx.send(AgentEvent::Approval { id: "a1".into(), target: ".env".into(), detail: String::new(), scope: ".env".into() }).await;
         for n in 1..=3 {
             let _ = tx.send(outil(n)).await;
         }

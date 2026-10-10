@@ -60,6 +60,8 @@ export interface AgentEvent {
   /** `approval` : demande d'autorisation (fichier sensible) ; `approvalResolved` : sa clôture. */
   id?: string;
   target?: string;
+  /** `approval` : ce que couvrirait « Toujours autoriser ». */
+  scope?: string;
   approved?: boolean;
   /** `detached` / `background` : la tâche de fond concernée (`sessionId` =
    *  sa conversation). `title` : début de sa demande. */
@@ -535,7 +537,11 @@ export const api = {
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
   /** Accord ou refus d'une modification de fichier sensible ; `false` = demande expirée. */
-  approvalRespond: (id: string, approved: boolean) => invoke<boolean>("approval_respond", { id, approved }),
+  approvalRespond: (id: string, approved: boolean, always = false) =>
+    invoke<boolean>("approval_respond", { id, approved, always }),
+  /** Accords « Toujours autoriser » en vigueur, et leur retrait. */
+  approvalsAlways: () => invoke<string[]>("approvals_always"),
+  approvalRevoke: (key: string) => invoke<boolean>("approval_revoke", { key }),
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   sttTranscribe: (wav: number[]) => invoke<string>("stt_transcribe", { wav }),
   avatarStart: () => invoke<void>("avatar_start"),

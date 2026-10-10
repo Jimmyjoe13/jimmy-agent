@@ -300,6 +300,39 @@ export function settingsView(ctx: AppContext): HTMLElement {
   async function openPermissions() {
     const permissions = await guard(() => api.getPermissions(), "permissions");
     if (!permissions) return;
+    // Accords « Toujours autoriser » donnés depuis les cartes du Chat.
+    const always = (await guard(() => api.approvalsAlways(), "autorisations permanentes")) ?? [];
+    const alwaysList = h("div", { class: "always-list" });
+    const renderAlways = () => {
+      if (!always.length) {
+        mount(alwaysList, h("p", { class: "note" }, "Aucune : chaque action qui t'engage demande une carte."));
+        return;
+      }
+      mount(
+        alwaysList,
+        ...always.map((key) =>
+          h(
+            "div",
+            { class: "permission-row always-row" },
+            h("code", {}, key),
+            h(
+              "button",
+              {
+                class: "ghost small",
+                onclick: async () => {
+                  if (!(await attempt(() => api.approvalRevoke(key), "autorisation"))) return;
+                  always.splice(always.indexOf(key), 1);
+                  renderAlways();
+                  toast("Autorisation retirée : la carte reviendra");
+                },
+              },
+              "Retirer",
+            ),
+          ),
+        ),
+      );
+    };
+    renderAlways();
     const keys: (keyof typeof permissions)[] = ["read", "write", "execute", "network"];
     const rows = keys.map((key) => {
       const rule = permissions[key];
@@ -357,6 +390,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
           },
           "Enregistrer",
         ),
+      ),
+      card(
+        "Autorisations permanentes",
+        h(
+          "p",
+          { class: "note" },
+          "Données par « Toujours autoriser » sur une carte du Chat : par type d'action dans le navigateur, par fichier pour les fichiers sensibles. Jimy les fait sans redemander, à la voix aussi.",
+        ),
+        alwaysList,
       ),
     );
   }

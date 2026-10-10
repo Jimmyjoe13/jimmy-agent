@@ -282,6 +282,12 @@ let stepPage = null;
     await p.waitForSelector(".bubble.approval", { timeout: 150_000 });
     const target = (await p.locator(".bubble.approval .approval-target").last().textContent()) ?? "";
     expect(target.endsWith(".env"), `fichier annoncé sur la carte : « ${target} »`);
+    // Trois réponses possibles depuis le 10 octobre.
+    const boutons = await p.locator(".bubble.approval").last().locator("button").allTextContents();
+    expect(
+      ["Refuser", "Autoriser une fois", "Toujours autoriser"].every((b) => boutons.includes(b)),
+      `boutons de la carte : ${boutons.join(", ")}`,
+    );
     await p.locator(".bubble.approval button", { hasText: "Refuser" }).last().click();
     await p.waitForSelector(".bubble.approval.denied", { timeout: 10_000 });
     await attendreReponse(180_000);
@@ -291,6 +297,43 @@ let stepPage = null;
     );
     expect(!existe, `le fichier a été écrit malgré le refus : ${fichier}`);
     return `carte « ${target.split("\\").pop()} », refus respecté`;
+  });
+
+  // « Toujours autoriser » : la même portée (ici un fichier) passe ensuite
+  // sans carte ; retirée dans Paramètres → permissions, elle disparaît.
+  await step("Chat : « Toujours autoriser » ne redemande plus, retrait dans Paramètres", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    const note = (await invoke("paths_info")).data;
+    const fichier = `${note}\\tests-ui\\toujours-${Date.now() % 10_000}.env`;
+    const avant = (await p.locator(".bubble.approval").count());
+    await p.locator(".composer-input").fill(`Écris dans « ${fichier} » la ligne unique : TEST=1. Utilise write_file.`);
+    await p.keyboard.press("Enter");
+    await p.waitForFunction((n) => document.querySelectorAll(".bubble.approval").length > n, avant, { timeout: 150_000 });
+    await p.locator(".bubble.approval button", { hasText: "Toujours autoriser" }).last().click();
+    await p.waitForSelector(".bubble.approval.approved", { timeout: 10_000 });
+    await attendreReponse(180_000);
+    const portees = await invoke("approvals_always");
+    const portee = portees.find((k) => k.endsWith(fichier.split("\\").pop().toLowerCase()));
+    expect(portee, `accord non retenu : ${JSON.stringify(portees)}`);
+    // Seconde écriture du même fichier : aucune nouvelle carte.
+    const cartes = await p.locator(".bubble.approval").count();
+    await p.locator(".composer-input").fill(`Réécris « ${fichier} » avec la ligne unique : TEST=2. Utilise write_file.`);
+    await p.keyboard.press("Enter");
+    await attendreReponse(180_000);
+    expect((await p.locator(".bubble.approval").count()) === cartes, "une carte est revenue malgré « Toujours »");
+    const contenu = await invoke("fs_preview", { path: fichier }).then((r) => JSON.stringify(r), () => "");
+    expect(contenu.includes("TEST=2"), `seconde écriture absente : ${contenu.slice(0, 120)}`);
+    // Retrait depuis Paramètres → Ajuster les permissions.
+    await nav("Paramètres");
+    await p.locator("button", { hasText: "Ajuster les permissions" }).click();
+    const ligne = p.locator(".always-row", { hasText: portee });
+    await ligne.locator("button", { hasText: "Retirer" }).click();
+    await p.waitForFunction((k) => ![...document.querySelectorAll(".always-row code")].some((c) => c.textContent === k), portee, {
+      timeout: 5000,
+    });
+    expect(!(await invoke("approvals_always")).includes(portee), "accord toujours présent après retrait");
+    await nav("Chat");
+    return `« ${portee.split("\\").pop()} » : accordé, réécrit sans carte, retiré`;
   });
 
   // Cas réel du 4 octobre (piège 69) : un projet choisi hors d'une

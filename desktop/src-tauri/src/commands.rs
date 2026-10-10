@@ -336,8 +336,22 @@ pub async fn approval_respond(
     state: State<'_, AppState>,
     id: String,
     approved: bool,
+    always: Option<bool>,
 ) -> std::result::Result<bool, String> {
-    Ok(state.app.approvals.respond(&id, approved))
+    // `always` : « Toujours autoriser », la portée de la demande est retenue.
+    Ok(state.app.approvals.respond(&id, approved, always.unwrap_or(false)))
+}
+
+/// Accords « Toujours autoriser » en vigueur (Paramètres → Sécurité).
+#[tauri::command]
+pub async fn approvals_always(state: State<'_, AppState>) -> std::result::Result<Vec<String>, String> {
+    Ok(state.app.approvals.always_list())
+}
+
+/// Retire un accord permanent : la carte d'autorisation reviendra.
+#[tauri::command]
+pub async fn approval_revoke(state: State<'_, AppState>, key: String) -> std::result::Result<bool, String> {
+    Ok(state.app.approvals.revoke(&key))
 }
 
 #[tauri::command]
