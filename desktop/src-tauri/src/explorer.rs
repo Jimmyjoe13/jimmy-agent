@@ -197,16 +197,41 @@ const MENTION_SKIP: &[&str] = &[
 /// Budget du parcours (entrées visitées) et taille du menu.
 const MENTION_VISITED: usize = 4000;
 const MENTION_RESULTS: usize = 20;
+/// Candidats ramassés avant le tri : le bon résultat peut venir tard dans
+/// l'ordre du disque, il ne faut pas couper avant de classer.
+const MENTION_POOL: usize = 300;
 
 /// Le parcours récursif lui-même, pur pour les tests. Requête vide : depth
 /// 0 uniquement. Requête non vide : profondeur 6, filtre sur le chemin
-/// relatif (insensible à la casse, accents repliés).
+/// relatif (insensible à la casse, accents repliés), puis tri par pertinence.
 fn walk_mentions(root: &Path, query: &str) -> (Vec<Mention>, bool) {
     let needle = normalize(query.trim());
     let mut visited = 0usize;
     let mut truncated = false;
     let mut out = Vec::new();
     walk_level(root, "", &needle, &mut out, &mut visited, &mut truncated, if needle.is_empty() { 0 } else { 6 });
+    if !needle.is_empty() {
+        // Clé de tri : nom == saisie, puis nom qui commence par, puis nom qui
+        // contient, puis chemin seul ; à égalité, le moins profond, le plus
+        // court, puis l'alphabet.
+        out.sort_by_cached_key(|m| {
+            let name = normalize(&m.name);
+            let rank = if name == needle {
+                0
+            } else if name.starts_with(&needle) {
+                1
+            } else if name.contains(&needle) {
+                2
+            } else {
+                3
+            };
+            (rank, m.display.matches('/').count(), m.display.len(), m.display.to_lowercase())
+        });
+    }
+    if out.len() > MENTION_RESULTS {
+        out.truncate(MENTION_RESULTS);
+        truncated = true;
+    }
     (out, truncated)
 }
 
@@ -225,8 +250,8 @@ fn walk_level(
     truncated: &mut bool,
     depth: u32,
 ) {
-    if out.len() >= MENTION_RESULTS || *visited >= MENTION_VISITED || *truncated {
-        *truncated = out.len() >= MENTION_RESULTS || *visited >= MENTION_VISITED;
+    if out.len() >= MENTION_POOL || *visited >= MENTION_VISITED || *truncated {
+        *truncated = out.len() >= MENTION_POOL || *visited >= MENTION_VISITED;
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -235,7 +260,7 @@ fn walk_level(
     let mut subdirs: Vec<PathBuf> = Vec::new();
     for entry in entries.flatten() {
         *visited += 1;
-        if *visited >= MENTION_VISITED || out.len() >= MENTION_RESULTS {
+        if *visited >= MENTION_VISITED || out.len() >= MENTION_POOL {
             *truncated = true;
             return;
         }
@@ -497,6 +522,26 @@ mod tests {
         assert_eq!(entries.len(), 1, "{entries:?}");
         assert_eq!(entries[0].display, "src/agent/notify.py");
         assert!(!entries[0].dir);
+    }
+
+    /// Le menu se trie par pertinence, pas par ordre du disque : le nom qui
+    /// commence par la saisie passe devant le nom qui la contient seulement
+    /// (« already »), et le fichier de la racine devant le même nom enfoui
+    /// (profil navigateur `data/profile/Default/README`).
+    #[test]
+    fn le_nom_qui_commence_par_la_saisie_passe_en_tete() {
+        // Racine à part : `racine()` est partagée par les tests parallèles.
+        let root = std::env::temp_dir().join(format!("mentions-ordre-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("already")).unwrap();
+        std::fs::write(root.join("README.md"), "x").unwrap();
+        std::fs::create_dir_all(root.join("data").join("profile").join("Default")).unwrap();
+        std::fs::write(root.join("data").join("profile").join("Default").join("README"), "x").unwrap();
+        let (entries, _) = walk_mentions(&root, "READ");
+        let shown: Vec<&str> = entries.iter().map(|m| m.display.as_str()).collect();
+        assert_eq!(shown.first(), Some(&"README.md"), "{shown:?}");
+        let pos = |d: &str| shown.iter().position(|s| *s == d).unwrap();
+        assert!(pos("data/profile/Default/README") < pos("already"), "{shown:?}");
     }
 
     #[test]

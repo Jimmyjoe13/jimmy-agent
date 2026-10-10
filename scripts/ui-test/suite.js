@@ -217,8 +217,11 @@ let stepPage = null;
     await input.fill("@READ");
     await p.waitForSelector(".mention-menu:not([hidden]) .mention-item", { timeout: 5000 });
     const items = await p.$$eval(".mention-menu .mention-name", (els) => els.map((e) => e.textContent));
-    expect(items.some((n) => n === "README.md"), `menu « @ » : ${items.join(", ")}`);
-    await p.keyboard.press("ArrowDown"); // changement d'item (Index 0 → 1 puis retour si un seul item)
+    // Tri par pertinence : le README de la racine passe devant les README
+    // enfouis (profil navigateur dans data/).
+    expect(items[0] === "README.md", `menu « @ » : ${items.join(", ")}`);
+    await p.keyboard.press("ArrowDown"); // navigation : item suivant…
+    await p.keyboard.press("ArrowUp"); // …puis retour au premier
     await p.keyboard.press("Enter");
     const value = await input.inputValue();
     expect(value.startsWith("@README.md "), `inséré après Entrée : « ${value} »`);
