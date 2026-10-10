@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy — Merci ! Activation de ton skin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border:1px solid #eee;border-radius:18px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.06)}
+h1{font-size:24px;margin-bottom:8px}
+.sub{color:#666;font-size:14px;margin-bottom:20px}
+.skin{font-size:20px;font-weight:700;margin:12px 0}
+.key{background:#111;color:#7CFC00;font-family:monospace;font-size:16px;padding:14px;border-radius:10px;margin:16px 0;word-break:break-all}
+.btn{display:block;background:#111;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-weight:700;margin-top:12px}
+.btn2{display:block;background:#fff;color:#111;border:2px solid #111;padding:12px;border-radius:10px;text-decoration:none;font-weight:600;margin-top:10px}
+.hint{font-size:13px;color:#777;margin-top:16px;line-height:1.5}
+.err{background:#fee;color:#900;padding:12px;border-radius:10px;font-size:14px;margin:12px 0}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🦊 Merci !</h1>
+<p class="sub">Paiement confirmé. J'active ton skin dans ton appli Jimy.</p>
+<div class="skin" id="skin">…</div>
+<div id="status"><p>Je vérifie ton paiement…</p></div>
+<div class="key" id="key" style="display:none"></div>
+<a class="btn" id="activate" style="display:none" href="#">Activer dans Jimy</a>
+<a class="btn2" href="https://www.jimy-agent.me">Retour au site</a>
+<p class="hint" id="hint">Garde cette page ouverte. Si l'appli ne s'ouvre pas, copie ta clé de licence et colle-la dans Jimy → onglet Skin → « J'ai déjà acheté ».</p>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const slug = params.get('skin') || 'neon';
+const sessionId = params.get('session_id') || params.get('session') || '';
+const names = { neon: '🦊 Renard Néon', fantome: '👻 Renard Fantôme', metal: '🤖 Renard Métal' };
+document.getElementById('skin').textContent = names[slug] || slug;
+async function go() {
+  const st = document.getElementById('status');
+  try {
+    const url = '/api/licence?skin=' + encodeURIComponent(slug) + (sessionId ? '&session=' + encodeURIComponent(sessionId) : '');
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'paiement non confirmé');
+    document.getElementById('key').style.display = 'block';
+    document.getElementById('key').textContent = data.license;
+    const deep = 'jimy://skin/' + encodeURIComponent(slug) + '?key=' + encodeURIComponent(data.license);
+    const btn = document.getElementById('activate');
+    btn.style.display = 'block';
+    btn.href = deep;
+    st.innerHTML = '<p>✅ Skin débloqué ! Clique sur Activer.</p>';
+    // Tentative d'ouverture auto de l'appli
+    setTimeout(() => { location.href = deep; }, 800);
+  } catch (e) {
+    st.innerHTML = '<div class="err">⚠️ ' + e.message + '. Si tu viens de payer, attends 10 secondes et recharge la page.</div>';
+  }
+}
+go();
+</script>
+</body>
+</html>

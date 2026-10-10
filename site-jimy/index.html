@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy — Boutique skins</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;min-height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:18px 22px;background:#fff;border-bottom:1px solid #eee}
+header img{width:56px;height:56px;border-radius:14px;object-fit:cover}
+header h1{font-size:22px}
+header p{font-size:13px;color:#666}
+main{max-width:960px;margin:0 auto;padding:28px 18px 60px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:22px}
+.card{background:#fff;border:1px solid #eee;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.card h2{font-size:19px}
+.prix{font-size:22px;font-weight:700}
+.desc{font-size:14px;color:#555;flex:1}
+.btn{display:inline-block;text-align:center;background:#111;color:#fff;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:600}
+.btn:hover{background:#333}
+.note{margin-top:22px;font-size:13px;color:#777;background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px}
+footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
+</style>
+</head>
+<body>
+<header>
+<img src="logo-jimy.jpg" alt="Logo Jimy">
+<div>
+<h1>Jimy</h1>
+<p>Agent personnel — boutique officielle des skins renard</p>
+</div>
+</header>
+<main>
+<h2>Choisis ton skin</h2>
+<p>Paiement sécurisé par Stripe. Le skin se débloque tout seul dans ton appli après paiement.</p>
+<div class="grid">
+<div class="card">
+<h2>🦊 Renard Néon</h2>
+<div class="prix">4,90 €</div>
+<p class="desc">Skin lumineux orange néon pour l'avatar renard de Jimy.</p>
+<a class="btn" href="/api/checkout?skin=neon">Acheter Néon</a>
+</div>
+<div class="card">
+<h2>👻 Renard Fantôme</h2>
+<div class="prix">6,90 €</div>
+<p class="desc">Skin spectral translucide, effet fantôme.</p>
+<a class="btn" href="/api/checkout?skin=fantome">Acheter Fantôme</a>
+</div>
+<div class="card">
+<h2>🤖 Renard Métal</h2>
+<div class="prix">9,90 €</div>
+<p class="desc">Skin métal brossé premium, reflets argentés.</p>
+<a class="btn" href="/api/checkout?skin=metal">Acheter Métal</a>
+</div>
+</div>
+<div class="note">
+Après paiement, tu arrives sur une page Merci qui débloque ton skin dans Jimy automatiquement (lien appli + clé de secours à coller dans l'onglet Skin).
+</div>
+<footer>Jimy avec un seul M — jimy-agent.me</footer>
+</main>
+</body>
+</html>
