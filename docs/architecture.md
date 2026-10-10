@@ -109,7 +109,14 @@ Trois garde-fous contre les boucles coûteuses :
 1. **Budget d'itérations** par demande (`llm.max_iterations`, 12 par défaut) ;
 2. **Mémoire d'appels** : rappeler le même outil avec les mêmes arguments
    renvoie le premier résultat et prévient le modèle, au lieu de recalculer ;
-3. **Borne de temps** globale (10 minutes).
+3. **Borne de temps** globale (10 minutes) ;
+4. **Compaction du contexte** (`core/compact.rs`) : avant chaque appel, si
+   la liste de messages dépasse 80 000 caractères, les vieux résultats
+   d'outils puis les gros arguments (contenu d'un `write_file`) sont
+   remplacés par une ligne (« N caractères à l'origine, début : …, relance
+   l'outil si besoin »). Les 2 derniers tours restent intacts et chaque
+   appel garde son résultat, sinon l'API refuse la séquence. Règle
+   mécanique, sans appel au modèle.
 
 ### Les erreurs d'outil ne sont pas des erreurs dJimmy
 
@@ -121,9 +128,41 @@ commande, changer d'argument, abandonner. Seules les erreurs *structurelles*
 ### Assemblage du prompt
 
 Le prompt système est reconstruit **à chaque tour**, à partir de ce que Jimmy
-sait au moment précis : identité, outils disponibles, catalogue de skills,
-souvenirs pertinents, notes du vault. Ce n'est pas un bloc figé, parce
-qu'un prompt figé devient faux dès qu'un paramètre change.
+sait au moment précis. Ce n'est pas un bloc figé, parce qu'un prompt figé
+devient faux dès qu'un paramètre change. Chaque bloc a un budget, et la
+taille de chacun est écrite au journal à chaque demande
+(`[contexte] système N caractères (identité …, maintenant …, mémoire …)`) :
+
+| Bloc | Contenu | Budget |
+|---|---|---|
+| identité (+ voix) | consignes fixes | ~5 600 car. |
+| maintenant | projet, modèle, vault, tâche de fond, date et canal, cartes d'accord en attente, dernière page du navigateur (< 2 h), titre de la fenêtre regardée si `memory.share_window_title` | ~450 car. |
+| amendements | leçons actées avec l'utilisateur | — |
+| outils | noms, serveurs MCP regroupés | ~3 300 car. |
+| chantiers | travaux suivis d'une conversation à l'autre | 5 lignes, 600 car. |
+| plus tôt | résumé des messages sortis de la fenêtre | 1 500 car. |
+| outils récents | résumé des outils des 3 derniers tours | 1 500 car. |
+| vault, mémoire, skills | notes et souvenirs proches, 3 skills suggérés | 1 200 car. pour la mémoire |
+
+L'historique renvoyé au modèle s'arrête aux **20 derniers messages** de
+texte. Une demande courte (moins de 6 mots, « et ensuite ? ») est rappelée
+avec le message précédent, le résumé et la tâche de fond en plus d'elle-même.
+
+### Carnet de bord : résumé glissant et chantiers
+
+`core/recap.rs`. Après la réponse, en tâche de fond, tous les deux échanges
+(modèle de la mémoire), un seul appel au modèle :
+
+- **fond** les messages sortis de la fenêtre de 20 dans un résumé par
+  conversation (`session_recaps`), injecté en bloc « plus tôt ». Le résumé
+  ne bouge que s'il y a des messages à fondre ; une vieille conversation se
+  fond par morceaux de 40 ;
+- **tient les chantiers** (`chantiers` : ouvert, en attente de
+  l'utilisateur, fini, avec la prochaine étape), montrés dans **toute**
+  conversation. C'est ce qui permet de reprendre « où on en était » d'une
+  session à l'autre, à l'écrit comme à la voix.
+
+Réponse illisible : rien ne change, le tour suivant réessaie.
 
 ---
 
@@ -164,6 +203,8 @@ Trois tables, trois familles de souvenirs :
 | Table | Rôle |
 |---|---|
 | `messages` | historique des conversations |
+| `session_recaps` | résumé glissant de chaque conversation (base v4) |
+| `chantiers` | chantiers suivis d'une conversation à l'autre (base v4) |
 | `memories` + `memory_vectors` | souvenirs et vecteurs |
 | `memories_fts` | index plein texte FTS5 |
 
@@ -285,9 +326,16 @@ ajoute une seconde barrière, appelée dans la boucle avant chaque outil : une
 `credential*`, dossiers `.ssh/`, `secure/`…) — par `write_file`, une commande
 PowerShell, une commande distante MCP (`vps_exec`, `ssh`, `docker`…) ou un
 envoi de fichier — suspend l'outil et émet `AgentEvent::Approval`. Le Chat
-affiche une carte « Autoriser / Refuser » ; refus, 5 min sans réponse ou
-demande vocale (personne pour cliquer) = outil non exécuté. La lecture reste
-libre. Détection par motifs, pas un bac à sable (HANDOFF, piège 77).
+affiche une carte « Refuser / Autoriser une fois / Toujours autoriser » ;
+refus, 5 min sans réponse ou demande vocale (personne pour cliquer) = outil
+non exécuté. La lecture reste libre. Détection par motifs, pas un bac à
+sable (HANDOFF, piège 77).
+
+« Toujours autoriser » retient une **portée** (`sensitive::always_key`) :
+par fichier pour les fichiers sensibles, par type d'action pour le
+navigateur (« clic sur un élément qui engage », « saisie validée »). Les
+portées sont gardées dans `data/approvals.json` et se retirent dans
+Paramètres › Permissions (« Autorisations permanentes »).
 
 ---
 

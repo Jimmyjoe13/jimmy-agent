@@ -45,7 +45,8 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Communication Tauri ↔ Godot | ✅ HTTP local, 10 routes (dont `/helper`, `/snapshot`) | tests `curl` sur 8787 |
 | Chat texte + LLM | ✅ OpenCode Go, outils, réponse en français, **écrite en direct** (flux SSE) | `agent/tests/happy_path.rs` |
 | Formats d'API des modèles | ✅ Chat, Responses (Muse Spark, GPT, Grok) et Messages (Qwen 3.7+, MiniMax), choisis d'après le catalogue | `agent/tests/protocols.rs` (un vrai modèle par format) |
-| Fichiers sensibles | ✅ toute **écriture** dans un `.env`, une clé, un secret attend ton accord (carte dans le Chat) ; la lecture reste libre | tests `sensitive` + suite d'interface |
+| Fichiers sensibles | ✅ toute **écriture** dans un `.env`, une clé, un secret attend ton accord (carte dans le Chat, « Toujours autoriser » par fichier ou par type d'action navigateur, retrait dans Paramètres) ; la lecture reste libre | tests `sensitive` + suite d'interface |
+| Contexte | ✅ prompt recomposé à chaque demande avec un budget par bloc ; résumé glissant des longues conversations ; **chantiers** suivis d'une conversation à l'autre ; bloc « Maintenant » ; compaction des vieux résultats d'outils pendant une longue tâche | tests `recap`, `compact`, `situation` + essai réel |
 | Tâches de fond | ✅ une tâche qui travaille encore 45 s après son premier outil passe en arrière-plan : Chat libre, voix qui réécoute, annonce de fin, « arrête tout » | `agent/tests/background.rs` + suite d'interface |
 | Lapin des tâches de fond | ✅ un lapin travaille à côté du renard pendant la tâche, saute à la réussite, baisse les oreilles à l'échec | captures de l'écran réel (`scripts/photo-avatar.ps1`) |
 | Vision | ✅ la fenêtre active est jointe à la demande (bouton « Joindre ma fenêtre » ou « regarde mon écran »), jamais à l'initiative du modèle | `--test protocols` (image), `--test screen` |
@@ -67,7 +68,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Boucle vocale | ✅ wake → STT → agent → voix → avatar | `voice/listener.rs` |
 | Profils graphiques | ✅ `low` / `medium` / `high` appliqués à Godot | logs `[godot/main]` |
 | Diagnostic | ✅ 8 vérifications, chemins, secrets | vue Diagnostic |
-| Interface | ✅ 28 parcours sur la vraie application (Chat, tâches de fond, capture, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
+| Interface | ✅ 33 parcours sur la vraie application (Chat, tâches de fond, capture, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
 
 ### Chiffres mesurés sur cette machine
 
