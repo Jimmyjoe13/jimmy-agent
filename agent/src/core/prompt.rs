@@ -118,6 +118,10 @@ pub struct PromptContext<'a> {
     pub vault_block: Option<String>,
     /// Résumé des outils appelés aux tours précédents (`History::tool_digest`).
     pub recent_tools: Option<String>,
+    /// Résumé glissant du début de la conversation (`recap::summary_block`).
+    pub earlier: Option<String>,
+    /// Chantiers ouverts, toutes conversations (`recap::chantiers_block`).
+    pub chantiers: Option<String>,
     /// Amendements du prompt (lot « croissance ») : des instructions
     /// additionnelles actées avec l'utilisateur, lues dans
     /// `data/growth_amendments.md`. Absent ou vide : prompt inchangé.
@@ -238,6 +242,14 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
     }
 
     parts.push(("outils", tools_summary(&ctx.registry.names())));
+
+    if let Some(block) = &ctx.chantiers {
+        parts.push(("chantiers", block.clone()));
+    }
+
+    if let Some(block) = &ctx.earlier {
+        parts.push(("plus tôt", block.clone()));
+    }
 
     if let Some(block) = &ctx.recent_tools {
         parts.push(("outils récents", block.clone()));
@@ -383,6 +395,8 @@ mod tests {
             memory_block: None,
             vault_block: None,
             recent_tools: None,
+            earlier: None,
+            chantiers: None,
             amendments: None,
             background_task: None,
             voice: false,
@@ -417,6 +431,8 @@ mod tests {
             memory_block: None,
             vault_block: None,
             recent_tools: None,
+            earlier: None,
+            chantiers: None,
             amendments: Some("Ne jamais reformuler la question avant de répondre.".into()),
             // La tâche de fond rejoint le prompt (réponse en parallèle).
             background_task: Some("## Tâche en cours en arrière-plan
@@ -473,6 +489,8 @@ mod tests {
             memory_block: None,
             vault_block: None,
             recent_tools: None,
+            earlier: None,
+            chantiers: None,
             amendments: None,
             background_task: None,
             voice: false,

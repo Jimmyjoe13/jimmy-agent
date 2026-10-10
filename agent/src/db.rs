@@ -13,7 +13,7 @@ use crate::error::Result;
 /// Version 2 : table `memory_semantic` (embeddings LM Studio). Toute table
 /// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
 /// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub struct Db {
     conn: Connection,
@@ -122,6 +122,29 @@ impl Db {
                 enabled     INTEGER NOT NULL DEFAULT 1,
                 updated_at  TEXT NOT NULL
             );
+
+            -- v4 : carnet de bord du contexte (`core::recap`). Résumé glissant
+            -- d'une conversation : `folded` = messages déjà fondus dans le
+            -- résumé, `seen` = messages déjà relus pour les chantiers.
+            CREATE TABLE IF NOT EXISTS session_recaps (
+                session_id  TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                summary     TEXT NOT NULL DEFAULT '',
+                folded      INTEGER NOT NULL DEFAULT 0,
+                seen        INTEGER NOT NULL DEFAULT 0,
+                updated_at  TEXT NOT NULL
+            );
+
+            -- Chantiers suivis d'une conversation à l'autre : statut
+            -- `ouvert`, `attente` (de l'utilisateur) ou `fini`.
+            CREATE TABLE IF NOT EXISTS chantiers (
+                id          TEXT PRIMARY KEY,
+                title       TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'ouvert',
+                next_step   TEXT NOT NULL DEFAULT '',
+                project     TEXT,
+                session_id  TEXT,
+                updated_at  TEXT NOT NULL
+            );
             "#,
         )?;
 
@@ -209,6 +232,34 @@ mod tests {
             .query_row("SELECT project FROM sessions WHERE id = 's1'", [], |r| r.get(0))
             .expect("la colonne project doit exister");
         assert!(project.is_none(), "les sessions existantes n'ont pas de projet");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Une base v3 (la vraie base au 10 octobre) reçoit le carnet de bord du
+    /// contexte : résumés glissants et chantiers.
+    #[test]
+    fn migration_v3_vers_v4_cree_le_carnet_de_bord() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-v4-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v3.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'x', \
+                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL, project TEXT); PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        for table in ["session_recaps", "chantiers"] {
+            let n: i64 = db
+                .conn()
+                .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1", [table], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1, "table {table} absente");
+        }
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

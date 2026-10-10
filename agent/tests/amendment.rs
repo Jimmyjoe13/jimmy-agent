@@ -84,6 +84,8 @@ async fn l_amendement_ne_degrade_pas_les_reponses() {
             memory_block: memory_block.clone(),
             vault_block: vault_block.clone(),
             recent_tools: None,
+            earlier: None,
+            chantiers: None,
             amendments,
             background_task: None,
             voice: false,

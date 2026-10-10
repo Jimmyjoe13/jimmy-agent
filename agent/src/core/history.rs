@@ -15,7 +15,7 @@ use crate::error::Result;
 pub type Shared<T> = Arc<Mutex<T>>;
 
 pub struct History {
-    db: Shared<Db>,
+    pub(crate) db: Shared<Db>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

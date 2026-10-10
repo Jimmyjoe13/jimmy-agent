@@ -163,6 +163,14 @@ pub async fn run_with_images(
         // 3 derniers tours, ≤ 1 500 caractères : le fil des outils sans
         // rejouer leurs résultats bruts (piège 45).
         recent_tools: deps.history.tool_digest(&session_id, 3, 1500).ok().flatten(),
+        // Carnet de bord (lots 2 et 4) : le début de la conversation sorti de
+        // la fenêtre, et les chantiers suivis d'une conversation à l'autre.
+        earlier: deps.history.recap(&session_id).ok().as_ref().and_then(crate::core::recap::summary_block),
+        chantiers: deps
+            .history
+            .chantiers(crate::core::recap::CHANTIERS_SHOWN)
+            .ok()
+            .and_then(|list| crate::core::recap::chantiers_block(&list, &session_id)),
         // Amendements (lot « croissance ») : des instructions additionnelles
         // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
         amendments: crate::growth::read_amendments(&deps.data_dir),
@@ -172,7 +180,7 @@ pub async fn run_with_images(
     let mut messages = vec![Message::system(prompt::join_parts(&system_parts))];
 
     // 2. Historique récent de la session.
-    messages.extend(deps.history.conversation(&session_id, 20)?);
+    messages.extend(deps.history.conversation(&session_id, crate::core::recap::WINDOW)?);
     messages.push(user_message.clone());
     // Relevé du contexte (lot 0) : quel bloc coûte quoi, à chaque demande.
     log::info!(
@@ -641,7 +649,11 @@ pub async fn run_with_images(
         let tool_errors = tool_errors.clone();
         let tools_used = tools_used.clone();
         let weak = events.downgrade();
+        let history = deps.history.clone();
+        let session = session_id.clone();
         tokio::spawn(async move {
+            // Carnet de bord d'abord : c'est lui que le prochain tour relit.
+            crate::core::recap::update(&llm, &settings, &history, &session).await;
             let learned =
                 crate::memory::learn::learn(&llm, &settings, &request, &answer, &tool_errors).await;
             for (kind, source, content) in learned {
