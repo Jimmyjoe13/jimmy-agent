@@ -331,6 +331,10 @@ async function main() {
         ),
       ),
     );
+    // Chat : en-tête réduit à une ligne et marges resserrées, le fil de
+    // discussion prend la hauteur (le reste s'efface au repos).
+    header.classList.toggle("compact", route === "chat");
+    content.classList.toggle("content-chat", route === "chat");
     // `mount` remplace le contenu : une seule vue à la fois.
     mount(content, viewFor(route));
     content.scrollTop = 0;

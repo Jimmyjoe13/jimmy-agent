@@ -1105,7 +1105,7 @@ input[type="range"] {
   padding: 0 16px 0 13px;
 }
 
-/* Sous la boîte : raccourcis à gauche, actions secondaires à droite. */
+/* Sous la boîte : les raccourcis clavier. */
 .composer-foot {
   width: 100%;
   max-width: 920px;
@@ -1117,16 +1117,138 @@ input[type="range"] {
   gap: 10px 12px;
 }
 
-.composer-foot-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .composer-hint {
   color: var(--text-faint);
   font-size: 12.5px;
   line-height: 1.8;
+}
+
+/* ── Chat compact (10 octobre) ────────────────────────────────────────────
+   Le fil n'avait que ~40 % de la hauteur : en-tête de page, barre du projet,
+   compositeur sur deux étages et aide sur deux lignes prenaient le reste.
+   Règle suivie (design-philosophy, VS Code) : une seule chose mène — le
+   fil — et le reste s'efface au repos. Espacements pris sur la rampe
+   4/6/8/10/12/16 px. */
+
+/* En-tête de page sur une ligne, logé dans la bande de la barre de titre :
+   le titre reste une zone de déplacement (la bande passe au-dessus de lui),
+   les actions passent au-dessus de la bande pour rester cliquables. La
+   marge droite laisse la place aux trois boutons de fenêtre (3 × 46 px). */
+.topbar.compact {
+  flex-wrap: nowrap;
+  padding: 6px 156px 6px 36px;
+}
+
+.topbar.compact h1 {
+  font-size: 22px;
+}
+
+.topbar.compact .subtitle {
+  display: none;
+}
+
+.topbar.compact .topbar-actions {
+  position: relative;
+  z-index: 301;
+  gap: 8px;
+}
+
+.topbar.compact .topbar-actions .chip {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.topbar.compact .topbar-actions button {
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+.content.content-chat {
+  padding: 10px 36px 12px;
+}
+
+.content-chat .chat-main {
+  gap: 8px;
+}
+
+/* Barre du projet : mêmes commandes, hauteur de contrôle compacte. */
+.content-chat .chat-header button {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+/* À gauche le projet et « Nouvelle session », à droite la fenêtre jointe
+   et les fichiers. */
+.chat-header-start,
+.chat-header-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Compositeur sur une ligne : saisie à gauche, « @ » et Envoyer à droite.
+   La saisie grandit avec le texte (autosize), les boutons restent en bas. */
+.content-chat .composer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* La fenêtre jointe garde sa ligne au-dessus de la saisie. */
+.content-chat .composer .capture-chip {
+  flex-basis: 100%;
+}
+
+.content-chat .composer-input,
+.content-chat .composer-input:focus {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  padding: 6px 0;
+  /* Pas de barre de défilement sur une ligne ; autosize la rend au-delà
+     de la hauteur maximale. */
+  overflow-y: hidden;
+}
+
+.content-chat .composer-actions {
+  gap: 4px;
+}
+
+.content-chat .composer-spacer {
+  display: none;
+}
+
+.content-chat .composer-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.content-chat .send-button {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 0 14px 0 11px;
+}
+
+/* Aide sur une seule ligne discrète (les actions sont montées dans la
+   barre du projet). */
+.content-chat .composer-foot {
+  flex-wrap: nowrap;
+}
+
+.content-chat .composer-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 1.6;
 }
 
 /* ── Mentions « @ » (classes propres à ce composant) ─────────────────────── */

@@ -177,7 +177,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   const input = h("textarea", {
     class: "composer-input",
     rows: 1,
-    placeholder: "Dis à Jimy ce qu'il doit faire…",
+    placeholder: "Dis à Jimy quoi faire…",
     "aria-label": "Message pour Jimy",
   }) as HTMLTextAreaElement;
   const sendLabel = h("span", { class: "send-label" }, "Envoyer");
@@ -298,14 +298,13 @@ export function chatView(ctx: AppContext): HTMLElement {
   const hint = h(
     "span",
     { class: "composer-hint" },
+    // Une seule ligne discrète sous la saisie (coupée si la place manque).
     h("kbd", {}, "Entrée"),
-    " pour envoyer · ",
-    h("kbd", {}, "Maj"),
-    " + ",
-    h("kbd", {}, "Entrée"),
-    " pour un retour à la ligne · ",
+    " envoyer · ",
+    h("kbd", {}, "Maj+Entrée"),
+    " nouvelle ligne · ",
     h("kbd", {}, "@"),
-    " pour citer un fichier",
+    " citer un fichier",
   );
 
   // Bouton « @ » du compositeur : insère le caractère au curseur et relance
@@ -438,6 +437,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   function autosize() {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+    input.style.overflowY = input.scrollHeight > 180 ? "auto" : "hidden";
   }
 
   function setBusy(busy: boolean) {
@@ -1176,11 +1176,30 @@ export function chatView(ctx: AppContext): HTMLElement {
   void refreshTasks();
   window.setTimeout(() => input.focus(), 0);
 
+  const newSessionButton = h(
+    "button",
+    {
+      class: "ghost",
+      title: "Commencer une nouvelle conversation",
+      onclick: () => {
+        sessionId = null;
+        ctx.lastSessionId = null;
+        // Nouveau fil dans le même projet, comme chez Codex.
+        ctx.pendingProject = project;
+        mount(activity);
+        void loadHistory();
+      },
+    },
+    "Nouvelle session",
+  );
+
+  // Barre du projet : les actions de la conversation y vivent (avant sous la
+  // saisie, où elles écrasaient l'aide sur une ligne).
   const chatHeader = h(
     "div",
     { class: "chat-header" },
-    h("div", { class: "project-picker" }, projectButton, projectMenu),
-    filesButton,
+    h("div", { class: "chat-header-start" }, h("div", { class: "project-picker" }, projectButton, projectMenu), newSessionButton),
+    h("div", { class: "chat-header-end" }, captureButton, filesButton),
   );
 
   return h(
@@ -1221,32 +1240,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         sendButton,
       ),
     ),
-    h(
-      "div",
-      { class: "composer-foot" },
-      hint,
-      h(
-        "div",
-        { class: "composer-foot-actions" },
-        h(
-          "button",
-          {
-            class: "ghost",
-            title: "Commencer une nouvelle conversation",
-            onclick: () => {
-              sessionId = null;
-              ctx.lastSessionId = null;
-              // Nouveau fil dans le même projet, comme chez Codex.
-              ctx.pendingProject = project;
-              mount(activity);
-              void loadHistory();
-            },
-          },
-          "Nouvelle session",
-        ),
-        captureButton,
-      ),
-    ),
+    h("div", { class: "composer-foot" }, hint),
       ),
       explorer.element,
     ),
