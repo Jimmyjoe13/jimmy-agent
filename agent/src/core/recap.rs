@@ -301,6 +301,19 @@ fn transcript(messages: &[Message]) -> String {
         .join("\n")
 }
 
+/// Carnet après une mise à jour. Le résumé ne change que s'il y avait des
+/// messages à fondre : sinon le modèle résume des messages encore dans
+/// l'historique (observé au premier essai réel : un « résumé » qui doublait
+/// la fenêtre). Un résumé vide alors qu'il fallait fondre : on garde l'ancien
+/// et rien n'est marqué fondu (réessai au prochain tour).
+fn next_recap(recap: &Recap, plan: &Plan, resume: &str) -> Recap {
+    let resume = resume.trim();
+    if plan.fold.is_empty() || resume.is_empty() {
+        return Recap { seen: plan.recent.end, ..recap.clone() };
+    }
+    Recap { summary: resume.to_string(), folded: plan.fold.end.max(recap.folded), seen: plan.recent.end }
+}
+
 /// Un seul carnet mis à jour à la fois : deux tours qui finissent ensemble
 /// (Chat + tâche de fond) ne doivent pas créer deux fois le même chantier.
 static RUNNING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -351,18 +364,13 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
         log::warn!("[contexte] carnet illisible : {}", crate::sensitive::mask_text(&raw.chars().take(200).collect::<String>()));
         return;
     };
-    // Un résumé vide alors qu'il fallait fondre : on garde l'ancien et on ne
-    // marque rien comme fondu (réessai au prochain tour).
-    let summary = output.resume.trim().to_string();
-    let next = if plan.fold.is_empty() || !summary.is_empty() {
-        Recap {
-            summary: if summary.is_empty() { recap.summary.clone() } else { summary },
-            folded: plan.fold.end.max(recap.folded),
-            seen: plan.recent.end,
-        }
-    } else {
-        Recap { seen: plan.recent.end, ..recap.clone() }
-    };
+    let next = next_recap(&recap, &plan, &output.resume);
+    // Le carnet d'abord : si la conversation a été supprimée pendant l'appel
+    // (clé étrangère), on s'arrête là, sans créer de chantier orphelin.
+    if let Err(error) = history.save_recap(session_id, &next) {
+        log::info!("[contexte] carnet non écrit (conversation supprimée ?) : {error}");
+        return;
+    }
     let project = history.project(session_id).ok().flatten();
     let changed = history
         .apply_chantiers(session_id, project.as_deref(), &known, output.chantiers)
@@ -370,10 +378,6 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
             log::warn!("[contexte] chantiers non écrits : {error}");
             0
         });
-    if let Err(error) = history.save_recap(session_id, &next) {
-        log::warn!("[contexte] carnet non écrit : {error}");
-        return;
-    }
     log::info!(
         "[contexte] carnet à jour : {} message(s) fondu(s), résumé {} caractères, {changed} chantier(s) touché(s)",
         plan.fold.len(),
@@ -421,6 +425,32 @@ mod tests {
         let old = plan(500, &Recap::default()).unwrap();
         assert_eq!(old.fold, 0..40);
         assert_eq!(old.recent, 488..500);
+    }
+
+    #[test]
+    fn le_resume_ne_bouge_que_s_il_y_a_des_messages_a_fondre() {
+        let avant = Recap { summary: String::new(), folded: 0, seen: 0 };
+        // Rien à fondre : le « résumé » inventé par le modèle est ignoré.
+        let rien = Plan { fold: 0..0, recent: 0..4 };
+        assert_eq!(next_recap(&avant, &rien, "On a parlé de bananes."), Recap { seen: 4, ..avant.clone() });
+        // Des messages à fondre : le résumé est pris, les messages marqués.
+        let fondre = Plan { fold: 0..6, recent: 14..26 };
+        assert_eq!(
+            next_recap(&avant, &fondre, " Début : le VPS. "),
+            Recap { summary: "Début : le VPS.".into(), folded: 6, seen: 26 }
+        );
+        // Réponse vide alors qu'il fallait fondre : rien n'est marqué fondu.
+        assert_eq!(next_recap(&avant, &fondre, "  ").folded, 0);
+    }
+
+    /// Conversation supprimée pendant l'appel : le carnet échoue (clé
+    /// étrangère), ce qui doit arrêter la mise à jour avant les chantiers.
+    #[test]
+    fn le_carnet_d_une_conversation_supprimee_echoue() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        h.delete_session(&s).unwrap();
+        assert!(h.save_recap(&s, &Recap::default()).is_err());
     }
 
     #[test]
