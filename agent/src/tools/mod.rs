@@ -45,6 +45,12 @@ impl ToolContext {
         permissions.check(capability, target)
     }
 
+    /// Capacité accordée, sans filtre de chemin : voir `Permissions::check_granted`.
+    pub fn check_granted(&self, capability: Capability, label: &str) -> Result<()> {
+        let permissions = self.permissions.read().map_err(|_| Error::Tool("permissions illisibles".into()))?;
+        permissions.check_granted(capability, label)
+    }
+
     /// Résout un chemin fourni par le modèle : relatif = relatif au workspace,
     /// absolu = accepté tel quel puis vérifié par les permissions.
     pub fn resolve(&self, path: &str) -> PathBuf {

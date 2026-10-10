@@ -163,6 +163,22 @@ impl Permissions {
         Ok(())
     }
 
+    /// Vérifie seulement que la capacité est accordée, sans liste de chemins
+    /// ni de commandes. Pour les magasins propres à Jimmy (mémoire locale,
+    /// inbox du vault configuré) : leur emplacement est fixé par la
+    /// configuration, pas par le modèle, et n'est pas un chemin à filtrer.
+    pub fn check_granted(&self, capability: Capability, label: &str) -> Result<()> {
+        if self.rule(capability).granted {
+            return Ok(());
+        }
+        Err(Error::PermissionDenied(format!(
+            "la capacité « {} » n'est pas accordée ({}{})",
+            capability.as_str(),
+            capability.as_str(),
+            suffix(label)
+        )))
+    }
+
     /// Résumé lisible pour l'interface.
     pub fn summary(&self) -> Vec<(Capability, bool)> {
         vec![

@@ -91,7 +91,8 @@ impl Tool for Remember {
                 .get("importance")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.6) as f32;
-            ctx.check(Capability::Write, "mémoire")?;
+            // Mémoire interne : seule la capacité compte, « mémoire » n'est pas un chemin.
+            ctx.check_granted(Capability::Write, "mémoire")?;
             let id = ctx.memory.remember_indexed(kind, &content, "conversation", importance).await?;
             Ok(format!("mémorisé ({}), identifiant {id}", kind.as_str()))
         })
@@ -222,9 +223,58 @@ impl Tool for VaultWrite {
             let vault = require_vault(ctx)?;
             let content = arg_str(args, "content").ok_or_else(|| Error::Tool("« content » manquant".into()))?;
             let kind = memory_kind(args, MemoryKind::Semantic);
-            ctx.check(Capability::Write, "vault obsidian")?;
+            // Inbox du vault configuré : peut être hors des chemins autorisés
+            // (C:\Obsidian), seule la capacité d'écriture compte.
+            ctx.check_granted(Capability::Write, "vault obsidian")?;
             let chemin = vault.remember(kind.as_str(), &content).await?;
             Ok(format!("capturé dans l'inbox du vault : {}", chemin.display()))
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permissions::Permissions;
+    use std::sync::{Arc, Mutex, RwLock};
+
+    /// Contexte d'outil identique à celui de l'agent : permissions par défaut
+    /// (chemins limités à `C:\Users\**` et `C:\Dev\**`).
+    fn contexte(vault: Option<Arc<crate::memory::vault::Vault>>) -> ToolContext {
+        let db = Arc::new(Mutex::new(crate::db::Db::open_in_memory().expect("db")));
+        let skills_dir = std::env::temp_dir().join(format!("knowledge-skills-{}", uuid::Uuid::new_v4()));
+        ToolContext {
+            workspace: std::env::temp_dir(),
+            permissions: Arc::new(RwLock::new(Permissions::default())),
+            memory: Arc::new(crate::memory::MemoryStore::new(db)),
+            skills: Arc::new(crate::skills::SkillStore::new(skills_dir).unwrap()),
+            vault,
+        }
+    }
+
+    /// Régression : « mémoire » n'est pas un chemin, la liste de chemins
+    /// autorisés le refusait à chaque appel (« chemin non autorisé : mémoire »).
+    #[tokio::test]
+    async fn remember_passe_avec_les_permissions_par_defaut() {
+        let ctx = contexte(None);
+        let args = serde_json::json!({"content": "Jimmy boit son café sans sucre."});
+        let sortie = Remember.call(&args, &ctx).await.expect("remember refusé");
+        assert!(sortie.starts_with("mémorisé"), "{sortie}");
+    }
+
+    /// Même bug pour le vault ; et une écriture coupée reste refusée.
+    #[tokio::test]
+    async fn vault_write_passe_et_respecte_l_ecriture_coupee() {
+        let racine = std::env::temp_dir().join(format!("knowledge-vault-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&racine).unwrap();
+        let vault = crate::memory::vault::Vault::open(racine.to_str().unwrap(), "0_Inbox/Jimmy").expect("vault");
+        let ctx = contexte(Some(Arc::new(vault)));
+        let args = serde_json::json!({"content": "Le vault de test accepte une capture."});
+        let sortie = VaultWrite.call(&args, &ctx).await.expect("vault_write refusé");
+        assert!(sortie.contains("capturé"), "{sortie}");
+
+        ctx.permissions.write().unwrap().write.granted = false;
+        assert!(VaultWrite.call(&args, &ctx).await.is_err());
+        assert!(Remember.call(&args, &ctx).await.is_err());
+        let _ = std::fs::remove_dir_all(&racine);
     }
 }
