@@ -41,6 +41,13 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # Piège connu (CONTRIBUTION §1) : le link.exe de Git (usr/bin) passe
+      # devant celui de Visual Studio et casse l'édition de liens de Rust.
+      # La machine de GitHub est jetable : on l'écarte simplement.
+      - name: Écarter le link.exe de Git
+        shell: pwsh
+        run: Rename-Item 'C:\Program Files\Git\usr\bin\link.exe' link-git.exe
+
       # Godot n'est pas sur la machine de GitHub : le script le télécharge
       # depuis les releases officielles de Godot.
       - name: Installeur
