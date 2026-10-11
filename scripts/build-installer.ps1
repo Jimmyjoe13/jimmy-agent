@@ -2,10 +2,11 @@
 #
 #   .\scripts\build-installer.ps1
 #
-# Contrairement à `build.ps1 -Release -Bundles`, l'installeur embarque :
-#   - le projet de l'avatar (`godot/`, sans son cache `.godot/`) ;
-#   - l'exécutable Godot 4.5.1 (licence MIT, redistribuable), pris sur cette
-#     machine s'il est trouvé, sinon téléchargé depuis les releases Godot.
+# Contrairement à `build.ps1 -Release -Bundles`, l'installeur embarque
+# l'exécutable Godot 4.5.1 (licence MIT, redistribuable), pris sur cette
+# machine s'il est trouvé, sinon téléchargé depuis les releases Godot. Le
+# projet de l'avatar (`godot/`) est, lui, intégré au binaire de Jimy
+# (agent/build.rs) : aucun script modifiable n'est livré en clair.
 # whisper.cpp et ses modèles ne sont pas embarqués : Jimy les télécharge au
 # premier lancement (agent/src/components.rs).
 #
@@ -20,14 +21,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $res = Join-Path $root 'desktop\src-tauri\installer-res'
 $godotName = 'Godot_v4.5.1-stable_win64.exe'
 
-Write-Host '1. Projet de l''avatar' -ForegroundColor Cyan
 if (Test-Path $res) { Remove-Item -Recurse -Force $res }
 New-Item -ItemType Directory -Force -Path (Join-Path $res 'godot-runtime') | Out-Null
-# robocopy : code de sortie < 8 = succès (1 = fichiers copiés).
-robocopy (Join-Path $root 'godot') (Join-Path $res 'godot') /E /XD .godot /NFL /NDL /NJH /NJS /NP | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "copie du projet godot en échec ($LASTEXITCODE)" }
 
-Write-Host '2. Exécutable Godot' -ForegroundColor Cyan
+Write-Host '1. Exécutable Godot' -ForegroundColor Cyan
 # @(...) autour du filtre : un seul résultat resterait sinon une chaîne, et
 # `$candidates[0]` en donnerait la première lettre.
 $candidates = @(@(
@@ -51,7 +48,7 @@ else {
 }
 if (-not (Test-Path $target)) { throw "Godot introuvable dans les ressources" }
 
-Write-Host '3. Installeur NSIS' -ForegroundColor Cyan
+Write-Host '2. Installeur NSIS' -ForegroundColor Cyan
 Push-Location (Join-Path $root 'desktop')
 & (Join-Path $root 'scripts\with-msvc.ps1') npx tauri build --bundles nsis --config src-tauri/tauri.installer.conf.json
 $code = $LASTEXITCODE

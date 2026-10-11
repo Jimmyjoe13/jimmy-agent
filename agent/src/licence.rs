@@ -47,7 +47,8 @@ fn invalid() -> String {
     "clé de licence invalide".to_string()
 }
 
-fn public_key() -> Vec<u8> {
+/// Clé publique Ed25519 de Jimy (licences et manifeste premium).
+pub(crate) fn public_key() -> Vec<u8> {
     // Constante du code : un échec ici est une erreur de compilation déguisée,
     // couverte par le test `cle_publique_lisible`.
     STANDARD.decode(PUBLIC_KEY_B64).unwrap_or_default()

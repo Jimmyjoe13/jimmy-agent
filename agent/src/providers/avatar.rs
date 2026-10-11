@@ -35,36 +35,56 @@ pub const PREMIUM_SKINS: &[(&str, &str, &str)] = &[("neon", "Renard Néon", "né
 /// Boutique où s'achètent les skins premium.
 pub const SHOP_URL: &str = "https://jimy-agent.me";
 
+/// En-tête qui porte le jeton de l'avatar (voir `godot/scripts/http_server.gd`).
+pub const TOKEN_HEADER: &str = "X-Jimy-Token";
+
 #[derive(Debug, Clone)]
 pub struct AvatarClient {
     http: reqwest::Client,
     base_url: String,
+    /// Jeton exigé par Godot, nouveau à chaque lancement de Jimy (variable
+    /// d'environnement JIMMY_GODOT_TOKEN du processus Godot).
+    token: String,
 }
 
 impl AvatarClient {
-    pub fn new(host: &str, port: u16) -> Result<Self> {
+    pub fn new(host: &str, port: u16, token: &str) -> Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_millis(1500))
             .build()?;
         Ok(AvatarClient {
             http,
             base_url: format!("http://{host}:{port}"),
+            token: token.to_string(),
         })
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     pub async fn is_up(&self) -> bool {
         self.http
             .get(format!("{}/health", self.base_url))
+            .header(TOKEN_HEADER, &self.token)
             .send()
             .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
     }
 
+    /// Un serveur répond-il sur le port, même en refusant (401) ? Un Godot
+    /// orphelin d'un lancement précédent a un autre jeton : il répond mais
+    /// ne se laisse plus piloter.
+    pub async fn port_answers(&self) -> bool {
+        self.http.get(format!("{}/health", self.base_url)).send().await.is_ok()
+    }
+
     async fn post(&self, path: &str, payload: serde_json::Value) -> bool {
         match self
             .http
             .post(format!("{}{}", self.base_url, path))
+            .header(TOKEN_HEADER, &self.token)
             .json(&payload)
             .send()
             .await

@@ -14,6 +14,13 @@ class_name JimmyHttpServer
 ##   POST /skin            -> {"skin":"renard"}
 ##   POST /position        -> {"x":120,"y":240}
 ##   GET  /stats           -> fps + état courant
+##
+## Jeton : quand `token` est posé (Tauri le passe par la variable
+## d'environnement JIMMY_GODOT_TOKEN, nouveau à chaque lancement), toute
+## requête sans l'en-tête `X-Jimy-Token` exact reçoit 401 et n'est pas
+## exécutée. Sans lui, n'importe quel programme local pouvait piloter
+## l'avatar et appliquer un skin payant sans licence. Godot lancé à la main
+## (tests, sans la variable) reste ouvert.
 
 const MAX_BODY := 65536
 const READ_SLICE := 4096
@@ -25,6 +32,8 @@ var _peers: Array[StreamPeerTCP] = []
 var _buffers: Array[String] = []
 var _port: int = 0
 var _running := false
+## Jeton exigé dans l'en-tête X-Jimy-Token (vide : pas de contrôle).
+var token := ""
 
 
 ## Démarre le serveur. Retourne OK ou un code d'erreur.
@@ -101,6 +110,7 @@ func _process(_delta: float) -> void:
 		var method := request_line[0]
 		var path := request_line[1]
 		var content_length := 0
+		var given_token := ""
 		for j in range(1, lines.size()):
 			var colon := lines[j].find(":")
 			if colon == -1:
@@ -109,6 +119,8 @@ func _process(_delta: float) -> void:
 			var value := lines[j].substr(colon + 1).strip_edges()
 			if name == "content-length":
 				content_length = int(value)
+			elif name == "x-jimy-token":
+				given_token = value
 
 		if rest.length() < content_length:
 			continue # corps incomplet
@@ -119,6 +131,13 @@ func _process(_delta: float) -> void:
 			var parsed = JSON.parse_string(body_text)
 			if typeof(parsed) == TYPE_DICTIONARY:
 				body = parsed
+
+		if token != "" and given_token != token:
+			print("[godot/http] requête refusée (jeton absent ou faux) : %s %s" % [method, path])
+			_respond(peer, 401, {"error": "non autorisé"})
+			_peers.remove_at(i)
+			_buffers.remove_at(i)
+			continue
 
 		request_received.emit(method, path, body)
 		_respond(peer, 200, {"ok": true})

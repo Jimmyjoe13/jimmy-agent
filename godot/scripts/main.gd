@@ -387,6 +387,8 @@ func _start_http() -> void:
 	_http = JimmyHttp.new()
 	_http.name = "HttpServer"
 	_http.request_received.connect(_on_http_request)
+	# Jeton posé par Tauri (voir http_server.gd) : seul Jimy pilote l'avatar.
+	_http.token = OS.get_environment("JIMMY_GODOT_TOKEN")
 	add_child(_http)
 	var err: int = _http.start(port)
 	if err != OK:

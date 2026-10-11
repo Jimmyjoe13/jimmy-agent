@@ -53,12 +53,12 @@ impl Paths {
             cursor = dir.parent();
         }
 
-        // Mode installé : les données dans `%APPDATA%\Jimmy`, les ressources
-        // livrées par l'installeur (`godot/`, `godot-runtime/`) à côté de
-        // l'exécutable. Sans elles (ancien installeur), tout reste dans les
-        // données comme avant.
+        // Mode installé : les données dans `%APPDATA%\Jimmy`, Godot livré
+        // par l'installeur (`godot-runtime/`) à côté de l'exécutable. Le
+        // projet de l'avatar, lui, est intégré au binaire (`lib.rs`,
+        // `godot_project_dir`).
         let base = dirs_data_dir();
-        let app = if exe_dir.join("godot").join("project.godot").is_file() { exe_dir } else { base.clone() };
+        let app = if exe_dir.join("godot-runtime").is_dir() { exe_dir } else { base.clone() };
         Ok(Paths {
             data: base,
             app,

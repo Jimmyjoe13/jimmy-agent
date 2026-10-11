@@ -17,6 +17,7 @@ pub mod memory;
 pub mod mcp;
 pub mod paths;
 pub mod permissions;
+pub mod premium;
 pub mod providers;
 pub mod screen;
 pub mod sensitive;
@@ -59,6 +60,8 @@ pub struct App {
     pub approvals: Arc<sensitive::Approvals>,
     /// Licences des skins premium activées sur cette machine.
     pub licences: Arc<licence::Licences>,
+    /// Intégrité des fichiers premium (manifeste signé).
+    pub premium: Arc<premium::Premium>,
     /// Composants vocaux téléchargés au premier lancement (installeur).
     pub components: Arc<components::Components>,
     /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
@@ -254,6 +257,31 @@ pub enum SttRole {
     Command,
 }
 
+/// Projet de l'avatar intégré au binaire (`agent/build.rs`).
+mod embedded_godot {
+    include!(concat!(env!("OUT_DIR"), "/godot_files.rs"));
+}
+
+/// Arrête le Godot orphelin qui tient le port de l'avatar. Identification :
+/// processus `Godot*` dont la ligne de commande porte `--port=<port>` (c'est
+/// ainsi que Jimy lance l'avatar) — jamais un Godot quelconque.
+async fn kill_orphan_avatar(port: u16) {
+    log::warn!("[avatar] Godot orphelin sur le port {port} (autre jeton) : arrêt");
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "Get-CimInstance Win32_Process -Filter \"Name like 'Godot%'\" |              Where-Object {{ $_.CommandLine -match '--port={port}( |$)' }} |              ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+        );
+        let mut command = tokio::process::Command::new("powershell");
+        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        command.creation_flags(0x08000000);
+        if let Err(error) = command.status().await {
+            log::warn!("[avatar] arrêt de l'orphelin impossible : {error}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    }
+}
+
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.
 pub type Mutex<T> = std::sync::Mutex<T>;
 
@@ -288,7 +316,15 @@ impl App {
         // viennent de la configuration, pas des deux arguments ci-dessus.
         llm.update_providers(&settings.llm, &secrets);
         let tts = Tts::new(providers::tts::TtsProvider::FishAudio)?;
-        let avatar = AvatarClient::new(&settings.avatar.host, settings.avatar.port)?;
+        // Jeton de l'avatar : nouveau à chaque lancement, transmis à Godot
+        // par son environnement (jamais en ligne de commande, lisible par
+        // tout programme). En développement seulement, il est aussi écrit
+        // dans `data/avatar.token` pour les outils de diagnostic (curl).
+        let avatar_token = uuid::Uuid::new_v4().simple().to_string();
+        if paths.dev {
+            let _ = std::fs::write(paths.data.join("avatar.token"), &avatar_token);
+        }
+        let avatar = AvatarClient::new(&settings.avatar.host, settings.avatar.port, &avatar_token)?;
 
         let vault = if settings.memory.enabled && settings.memory.vault_enabled {
             // Chemin vide = automatique : vault d'Obsidian, sinon vault propre.
@@ -353,6 +389,7 @@ impl App {
         // Accords « Toujours autoriser », gardés d'un lancement à l'autre.
         let approvals = Arc::new(sensitive::Approvals::load(paths.data.join("approvals.json")));
         let licences = Arc::new(licence::Licences::load(paths.data.join("licences.json")));
+        let premium_dir = paths.data.join("premium");
 
         Ok(Arc::new(App {
             paths,
@@ -368,6 +405,7 @@ impl App {
             registry,
             approvals,
             licences,
+            premium: Arc::new(premium::Premium::new(premium_dir)),
             components: Arc::new(components::Components::default()),
             mcp,
             vault,
@@ -752,8 +790,14 @@ impl App {
         if self.avatar.is_up().await {
             return Ok(());
         }
+        // Le port répond mais refuse notre jeton : Godot orphelin d'un
+        // lancement précédent. On l'arrête, sinon le nouveau ne peut pas
+        // ouvrir le port et deux avatars cohabitent.
+        if self.avatar.port_answers().await {
+            kill_orphan_avatar(settings.avatar.port).await;
+        }
         let exe = paths::find_godot_exe(&settings.avatar.godot_exe)?;
-        let project = self.paths.godot_project();
+        let project = self.godot_project_dir()?;
         if !project.join("project.godot").is_file() {
             log::warn!("[avatar] projet Godot absent : {}", project.display());
             return Ok(());
@@ -779,6 +823,7 @@ impl App {
             .env("JIMMY_GODOT_PORT", settings.avatar.port.to_string())
             .env("JIMMY_BRIDGE_PORT", settings.avatar.bridge_port.to_string())
             .env("JIMMY_SKIN", skin)
+            .env("JIMMY_GODOT_TOKEN", self.avatar.token())
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
         #[cfg(windows)]
@@ -834,8 +879,51 @@ impl App {
     /// Le skin peut-il être appliqué ? Skin de base : toujours ; skin premium :
     /// seulement avec une licence activée ([`licence`]).
     pub fn skin_allowed(&self, skin: &str) -> bool {
-        providers::avatar::SKINS.iter().any(|(id, _)| *id == skin)
-            || (providers::avatar::PREMIUM_SKINS.iter().any(|(id, _, _)| *id == skin) && self.licences.unlocks(skin))
+        providers::avatar::SKINS.iter().any(|(id, _)| *id == skin) || self.premium_ready(skin)
+    }
+
+    /// Skin premium utilisable : connu, débloqué par une licence, et ses
+    /// fichiers conformes au manifeste signé (pas de palette retouchée ni de
+    /// modèle remplacé : pas d'avatar maison).
+    pub fn premium_ready(&self, skin: &str) -> bool {
+        providers::avatar::PREMIUM_SKINS.iter().any(|(id, _, _)| *id == skin)
+            && self.licences.unlocks(skin)
+            && self.premium.skin_intact(skin)
+    }
+
+    /// Dossier du projet de l'avatar à lancer. En développement : `godot/`
+    /// du dépôt (on y travaille). Installé : le projet **intégré au binaire**
+    /// (`embedded_godot`), réécrit à chaque lancement dans
+    /// `<données>/godot-project` après l'avoir vidé — un script modifié ou
+    /// ajouté par l'utilisateur (skin maison) ne survit pas. Seul le cache de
+    /// shaders de Godot (`.godot/`) est gardé, sans son index de classes.
+    fn godot_project_dir(&self) -> Result<std::path::PathBuf> {
+        if self.paths.dev {
+            return Ok(self.paths.godot_project());
+        }
+        let dir = self.paths.data.join("godot-project");
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if entry.file_name() == ".godot" {
+                    let _ = std::fs::remove_file(path.join("global_script_class_cache.cfg"));
+                    continue;
+                }
+                if path.is_dir() {
+                    std::fs::remove_dir_all(&path)?;
+                } else {
+                    std::fs::remove_file(&path)?;
+                }
+            }
+        }
+        for (rel, bytes) in embedded_godot::GODOT_FILES {
+            let path = dir.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, bytes)?;
+        }
+        Ok(dir)
     }
 
     /// Mot d'éveil en vigueur : le nom du skin premium actif (s'il est
@@ -844,7 +932,7 @@ impl App {
         let settings = self.settings();
         let skin = settings.avatar.skin.as_str();
         match providers::avatar::PREMIUM_SKINS.iter().find(|(id, _, _)| *id == skin) {
-            Some((_, _, wake)) if self.licences.unlocks(skin) => wake.to_string(),
+            Some((_, _, wake)) if self.premium_ready(skin) => wake.to_string(),
             _ => settings.stt.wake_word.clone(),
         }
     }
@@ -1377,7 +1465,7 @@ impl App {
                     "id": id, "label": label
                 })).collect::<Vec<_>>(),
                 "premium": providers::avatar::PREMIUM_SKINS.iter().map(|(id, label, wake)| serde_json::json!({
-                    "id": id, "label": label, "wake_word": wake, "unlocked": self.licences.unlocks(id)
+                    "id": id, "label": label, "wake_word": wake, "unlocked": self.premium_ready(id)
                 })).collect::<Vec<_>>(),
                 "shop": providers::avatar::SHOP_URL,
                 "quality": settings.avatar.quality,
