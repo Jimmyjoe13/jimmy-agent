@@ -55,6 +55,10 @@ export function settingsView(ctx: AppContext): HTMLElement {
     for (const skin of ctx.status.avatar.skins) {
       skinSelect.append(h("option", { value: skin.id }, skin.label));
     }
+    // Skins premium : seulement ceux qu'une licence débloque.
+    for (const skin of ctx.status.avatar.premium.filter((s) => s.unlocked)) {
+      skinSelect.append(h("option", { value: skin.id }, skin.label));
+    }
     skinSelect.value = settings.avatar.skin;
 
     mount(startupSelect);

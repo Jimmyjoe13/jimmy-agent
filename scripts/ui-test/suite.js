@@ -1,4 +1,4 @@
-// Suite de tests UI de bout en bout, sur la vraie application (CDP).
+﻿// Suite de tests UI de bout en bout, sur la vraie application (CDP).
 // Chaque parcours affiche OK / ÉCHEC avec le détail ; code de sortie 1 si un
 // parcours échoue.
 const { chromium } = require("playwright-core");
@@ -525,6 +525,46 @@ let stepPage = null;
     const states = await p.$$eval(".state-chip", (els) => els.map((e) => e.textContent));
     expect(states.includes("j'écoute"), `états non traduits : ${states.join(", ")}`);
     return "fennec puis renard";
+  });
+
+  await step("Skin : skins premium (licence refusée, débloqué = applicable)", async () => {
+    await nav("Skin");
+    const premium = p.locator(".card", { hasText: "Skins premium" });
+    expect((await premium.count()) === 1, "carte « Skins premium » absente");
+    const neon = premium.locator("button", { hasText: "Renard Néon" });
+    expect((await neon.count()) === 1, "bouton Renard Néon absent");
+    const locked = await neon.isDisabled();
+    if (locked) {
+      // Machine sans licence : une fausse clé est refusée, rien n'est débloqué.
+      await premium.locator("input").fill("JIMY-faux.faux");
+      await premium.locator("button", { hasText: "Activer" }).click();
+      const toastText = await p.waitForSelector(".toast.error", { timeout: 5000 }).then((t) => t.textContent());
+      expect(toastText.includes("invalide"), `toast : ${toastText}`);
+      expect(await neon.isDisabled(), "Néon débloqué par une fausse clé");
+      return "verrouillé, fausse clé refusée";
+    }
+    // Machine avec licence : le Néon s'applique, puis retour au renard.
+    await neon.click();
+    await p
+      .waitForFunction(
+        () => [...document.querySelectorAll("button")].some((b) => b.textContent.includes("Renard Néon") && b.className === "primary"),
+        null,
+        { timeout: 15000, polling: 200 },
+      )
+      .catch(() => {});
+    const cls = await p.locator("button", { hasText: "Renard Néon" }).getAttribute("class");
+    expect(cls === "primary", `bouton Néon : ${cls}`);
+    await p.locator("button", { hasText: "Renard roux" }).click();
+    await p
+      .waitForFunction(
+        () => [...document.querySelectorAll("button")].some((b) => b.textContent.includes("Renard roux") && b.className === "primary"),
+        null,
+        { timeout: 15000, polling: 200 },
+      )
+      .catch(() => {});
+    const back = await p.locator("button", { hasText: "Renard roux" }).getAttribute("class");
+    expect(back === "primary", `retour renard : ${back}`);
+    return "débloqué : néon puis renard";
   });
 
   await step("Paramètres : enregistrement confirmé", async () => {

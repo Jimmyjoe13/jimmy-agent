@@ -279,6 +279,8 @@ pub fn run() {
                 commands::avatar_say,
                 commands::avatar_quality,
                 commands::avatar_skin,
+                commands::licence_activate,
+                commands::shop_open,
                 commands::avatar_dodge,
                 commands::llm_test_model,
                 commands::set_llm_model,

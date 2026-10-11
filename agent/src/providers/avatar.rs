@@ -20,6 +20,17 @@ pub const SKINS: &[(&str, &str)] = &[
     ("robot", "Robot"),
 ];
 
+/// Skin appliqué quand le skin demandé n'est pas autorisé.
+pub const DEFAULT_SKIN: &str = "renard";
+
+/// Skins premium (identifiant, libellé). Leurs palettes vivent dans
+/// `godot/premium/skins/<id>.json` (licence propriétaire, hors MIT) : garder
+/// les deux alignés. Débloqués par une licence (`crate::licence`).
+pub const PREMIUM_SKINS: &[(&str, &str)] = &[("neon", "Renard Néon")];
+
+/// Boutique où s'achètent les skins premium.
+pub const SHOP_URL: &str = "https://jimy-agent.me";
+
 #[derive(Debug, Clone)]
 pub struct AvatarClient {
     http: reqwest::Client,
@@ -101,5 +112,27 @@ impl AvatarClient {
 
     pub async fn hide_bubble(&self) -> bool {
         self.post("/hide", serde_json::json!({})).await
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Chaque skin premium proposé a sa palette côté Godot : sinon un achat
+    /// débloquerait un skin que l'avatar refuse (« skin inconnu »).
+    #[test]
+    fn skins_premium_ont_leur_palette_godot() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../godot/premium/skins");
+        for (id, _) in PREMIUM_SKINS {
+            let file = dir.join(format!("{id}.json"));
+            let raw = std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("palette absente : {}", file.display()));
+            let json: serde_json::Value = serde_json::from_str(&raw).expect("JSON valide");
+            for key in ["fur", "cream", "dark", "shirt", "accent"] {
+                assert!(json.get(key).is_some_and(|v| v.as_array().is_some_and(|a| a.len() >= 3)), "{id} : couleur {key}");
+            }
+        }
+        // Un identifiant ne peut pas être à la fois de base et premium.
+        assert!(PREMIUM_SKINS.iter().all(|(p, _)| !SKINS.iter().any(|(b, _)| b == p)));
+        assert!(SKINS.iter().any(|(id, _)| *id == DEFAULT_SKIN));
     }
 }

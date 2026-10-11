@@ -21,13 +21,13 @@ h1{font-size:24px;margin-bottom:8px}
 <body>
 <div class="card">
 <h1>🦊 Merci !</h1>
-<p class="sub">Paiement confirmé. J'active ton skin dans ton appli Jimy.</p>
+<p class="sub">Paiement confirmé. Voici ta clé pour débloquer ton skin dans Jimy.</p>
 <div class="skin" id="skin">…</div>
 <div id="status"><p>Je vérifie ton paiement…</p></div>
 <div class="key" id="key" style="display:none"></div>
-<a class="btn" id="activate" style="display:none" href="#">Activer dans Jimy</a>
+<a class="btn" id="activate" style="display:none" href="#">Copier la clé</a>
 <a class="btn2" href="https://www.jimy-agent.me">Retour au site</a>
-<p class="hint" id="hint">Garde cette page ouverte. Si l'appli ne s'ouvre pas, copie ta clé de licence et colle-la dans Jimy → onglet Skin → « J'ai déjà acheté ».</p>
+<p class="hint" id="hint">Dans Jimy : onglet Skin → « Skins premium », colle la clé puis clique sur Activer. Garde-la précieusement : elle resservira si tu réinstalles Jimy.</p>
 </div>
 <script>
 const params = new URLSearchParams(location.search);
@@ -44,13 +44,16 @@ async function go() {
     if (!data.ok) throw new Error(data.error || 'paiement non confirmé');
     document.getElementById('key').style.display = 'block';
     document.getElementById('key').textContent = data.license;
-    const deep = 'jimy://skin/' + encodeURIComponent(slug) + '?key=' + encodeURIComponent(data.license);
+    // Pas d'ouverture automatique de l'appli (lien jimy:// pas encore géré) :
+    // la clé se copie et se colle dans l'onglet Skin.
     const btn = document.getElementById('activate');
     btn.style.display = 'block';
-    btn.href = deep;
-    st.innerHTML = '<p>✅ Skin débloqué ! Clique sur Activer.</p>';
-    // Tentative d'ouverture auto de l'appli
-    setTimeout(() => { location.href = deep; }, 800);
+    btn.onclick = async (ev) => {
+      ev.preventDefault();
+      try { await navigator.clipboard.writeText(data.license); btn.textContent = 'Clé copiée ✓'; }
+      catch { btn.textContent = 'Sélectionne la clé ci-dessus'; }
+    };
+    st.innerHTML = '<p>✅ Paiement vérifié. Copie ta clé et colle-la dans Jimy.</p>';
   } catch (e) {
     st.innerHTML = '<div class="err">⚠️ ' + e.message + '. Si tu viens de payer, attends 10 secondes et recharge la page.</div>';
   }

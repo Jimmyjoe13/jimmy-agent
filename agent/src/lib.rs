@@ -11,6 +11,7 @@ pub mod core;
 pub mod db;
 pub mod error;
 pub mod growth;
+pub mod licence;
 pub mod memory;
 pub mod mcp;
 pub mod paths;
@@ -55,6 +56,8 @@ pub struct App {
     /// Demandes d'autorisation en attente (fichiers sensibles) : la boucle
     /// d'agent y attend le clic « Autoriser / Refuser » du Chat.
     pub approvals: Arc<sensitive::Approvals>,
+    /// Licences des skins premium activées sur cette machine.
+    pub licences: Arc<licence::Licences>,
     /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
     pub mcp: Arc<mcp::McpRegistry>,
     /// Mémoire persistante dans le vault Obsidian : `None` si le chemin est
@@ -343,6 +346,7 @@ impl App {
 
         // Accords « Toujours autoriser », gardés d'un lancement à l'autre.
         let approvals = Arc::new(sensitive::Approvals::load(paths.data.join("approvals.json")));
+        let licences = Arc::new(licence::Licences::load(paths.data.join("licences.json")));
 
         Ok(Arc::new(App {
             paths,
@@ -357,6 +361,7 @@ impl App {
             avatar,
             registry,
             approvals,
+            licences,
             mcp,
             vault,
             stt: tokio::sync::Mutex::new(None),
@@ -747,6 +752,9 @@ impl App {
             return Ok(());
         }
 
+        // Un skin premium sans licence (config modifiée à la main, licence
+        // retirée) ne s'applique pas : Godot démarre avec le skin par défaut.
+        let skin = self.allowed_skin(&settings.avatar.skin);
         let mut command = tokio::process::Command::new(&exe);
         command
             .arg("--path")
@@ -756,12 +764,12 @@ impl App {
             .arg("--")
             .arg(format!("--port={}", settings.avatar.port))
             .arg(format!("--bridge-port={}", settings.avatar.bridge_port))
-            .arg(format!("--skin={}", settings.avatar.skin))
+            .arg(format!("--skin={skin}"))
             .arg(format!("--quality={}", settings.avatar.quality))
             .arg(format!("--dodge={}", u8::from(settings.avatar.dodge)))
             .env("JIMMY_GODOT_PORT", settings.avatar.port.to_string())
             .env("JIMMY_BRIDGE_PORT", settings.avatar.bridge_port.to_string())
-            .env("JIMMY_SKIN", &settings.avatar.skin)
+            .env("JIMMY_SKIN", skin)
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
         #[cfg(windows)]
@@ -814,6 +822,23 @@ impl App {
     /// Vrai si le processus Godot tient encore. Avant, un enfant terminé
     /// restait stocké dans `godot` : l'interface affichait « avatar en
     /// marche » pour un renard absent.
+    /// Le skin peut-il être appliqué ? Skin de base : toujours ; skin premium :
+    /// seulement avec une licence activée ([`licence`]).
+    pub fn skin_allowed(&self, skin: &str) -> bool {
+        providers::avatar::SKINS.iter().any(|(id, _)| *id == skin)
+            || (providers::avatar::PREMIUM_SKINS.iter().any(|(id, _)| *id == skin) && self.licences.unlocks(skin))
+    }
+
+    /// `skin` s'il est autorisé, sinon le skin par défaut.
+    pub fn allowed_skin<'a>(&self, skin: &'a str) -> &'a str {
+        if self.skin_allowed(skin) {
+            skin
+        } else {
+            log::warn!("[avatar] skin « {skin} » non débloqué : skin par défaut");
+            providers::avatar::DEFAULT_SKIN
+        }
+    }
+
     pub fn avatar_running(&self) -> bool {
         self.godot
             .try_lock()
@@ -1299,6 +1324,10 @@ impl App {
                 "skins": providers::avatar::SKINS.iter().map(|(id, label)| serde_json::json!({
                     "id": id, "label": label
                 })).collect::<Vec<_>>(),
+                "premium": providers::avatar::PREMIUM_SKINS.iter().map(|(id, label)| serde_json::json!({
+                    "id": id, "label": label, "unlocked": self.licences.unlocks(id)
+                })).collect::<Vec<_>>(),
+                "shop": providers::avatar::SHOP_URL,
                 "quality": settings.avatar.quality,
                 "dodge": settings.avatar.dodge,
                 "host": settings.avatar.host,

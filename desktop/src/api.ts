@@ -140,6 +140,10 @@ export interface Status {
     enabled: boolean;
     skin: string;
     skins: { id: string; label: string }[];
+    /** Skins payants : `unlocked` si une licence activée les débloque. */
+    premium: { id: string; label: string; unlocked: boolean }[];
+    /** Boutique où ils s'achètent. */
+    shop: string;
     quality: string;
     dodge: boolean;
     host: string;
@@ -553,6 +557,9 @@ export const api = {
   avatarSay: (text: string) => invoke<void>("avatar_say", { text }),
   avatarQuality: (level: string) => invoke<void>("avatar_quality", { level }),
   avatarSkin: (skin: string) => invoke<void>("avatar_skin", { skin }),
+  /** Active une clé de licence ; renvoie le skin débloqué (`*` = tous). */
+  licenceActivate: (key: string) => invoke<string>("licence_activate", { key }),
+  shopOpen: () => invoke<void>("shop_open"),
   avatarDodge: (enabled: boolean) => invoke<void>("avatar_dodge", { enabled }),
   wakeWordTest: (transcript: string, wakeWord: string) =>
     invoke<boolean>("wake_word_test", { transcript, wakeWord }),

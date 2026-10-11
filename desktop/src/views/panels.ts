@@ -262,27 +262,56 @@ export function skillsView(): HTMLElement {
 
 /** Skin : choix de l'apparence de Jimy, appliqué à chaud par Godot. */
 export function skinView(ctx: AppContext): HTMLElement {
-  const skinButtons = h(
+  // Bouton d'un skin applicable (de base, ou premium débloqué).
+  const skinButton = (skin: { id: string; label: string }) =>
+    h(
+      "button",
+      {
+        class: ctx.status.avatar.skin === skin.id ? "primary" : "ghost",
+        onclick: async () => {
+          // `attempt` et non `guard` : la commande ne renvoie rien (piège 13).
+          if (!(await attempt(() => api.avatarSkin(skin.id), "skin"))) return;
+          await ctx.refreshStatus();
+          // Re-rendu : le bouton du skin actif doit changer d'apparence.
+          ctx.navigate("skin");
+          toast(`Skin « ${skin.label} » appliqué`);
+        },
+      },
+      skin.label,
+    );
+  const skinButtons = h("div", { class: "row" }, ...ctx.status.avatar.skins.map(skinButton));
+
+  // Skins premium : applicables s'ils sont débloqués, sinon à acheter. La
+  // clé reçue après l'achat (page Merci du site) se colle ici.
+  const premium = ctx.status.avatar.premium;
+  const premiumButtons = h(
     "div",
     { class: "row" },
-    ...ctx.status.avatar.skins.map((skin) =>
-      h(
-        "button",
-        {
-          class: ctx.status.avatar.skin === skin.id ? "primary" : "ghost",
-          onclick: async () => {
-            // `attempt` et non `guard` : la commande ne renvoie rien (piège 13).
-            if (!(await attempt(() => api.avatarSkin(skin.id), "skin"))) return;
-            await ctx.refreshStatus();
-            // Re-rendu : le bouton du skin actif doit changer d'apparence.
-            ctx.navigate("skin");
-            toast(`Skin « ${skin.label} » appliqué`);
-          },
-        },
-        skin.label,
-      ),
+    ...premium.map((skin) =>
+      skin.unlocked
+        ? skinButton(skin)
+        : h("button", { class: "ghost premium-locked", disabled: true, title: "À débloquer avec une licence" }, `🔒 ${skin.label}`),
     ),
   );
+  const keyInput = h("input", { class: "field", placeholder: "JIMY-…", spellcheck: "false" }) as HTMLInputElement;
+  const activateButton = h(
+    "button",
+    {
+      class: "primary",
+      onclick: async () => {
+        const key = keyInput.value.trim();
+        if (!key) return;
+        const unlocked = await guard(() => api.licenceActivate(key), "licence");
+        if (unlocked === undefined) return;
+        await ctx.refreshStatus();
+        ctx.navigate("skin");
+        const label = premium.find((s) => s.id === unlocked)?.label;
+        toast(unlocked === "*" ? "Tous les skins premium sont débloqués" : `Skin « ${label ?? unlocked} » débloqué`);
+      },
+    },
+    "Activer",
+  );
+  const allUnlocked = premium.every((s) => s.unlocked);
 
   const qualityButtons = h(
     "div",
@@ -335,6 +364,31 @@ export function skinView(ctx: AppContext): HTMLElement {
         { class: "note" },
         "Jimy est l'identité, le skin n'est qu'une apparence : le changer ne touche ni à la mémoire ni aux réglages.",
       ),
+    ),
+    card(
+      "Skins premium",
+      premiumButtons,
+      allUnlocked
+        ? h("p", { class: "note" }, "Tous les skins premium sont débloqués sur cette machine.")
+        : h(
+            "div",
+            {},
+            h(
+              "p",
+              { class: "note" },
+              "Après l'achat, la page de confirmation affiche ta clé de licence : colle-la ici. Elle est vérifiée sur ta machine, sans connexion.",
+            ),
+            h("div", { class: "row" }, keyInput, activateButton),
+            h(
+              "div",
+              { class: "row" },
+              h(
+                "button",
+                { class: "ghost", onclick: () => attempt(() => api.shopOpen(), "boutique") },
+                "Voir la boutique",
+              ),
+            ),
+          ),
     ),
     card("Qualité graphique", h("p", { class: "note" }, "Appliquée immédiatement à l'avatar Godot."), qualityButtons),
     card(

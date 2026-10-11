@@ -412,6 +412,10 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> st
     // Une clé vide venant de l'interface veut dire « inchangée » (`get_settings`
     // masque les clés) : seul `llm_set_provider_key` pose ou retire une clé.
     let mut settings = settings;
+    // Un skin premium sans licence ne passe pas par Paramètres non plus.
+    if !app.skin_allowed(&settings.avatar.skin) {
+        settings.avatar.skin = before.avatar.skin.clone();
+    }
     for provider in &mut settings.llm.providers {
         if provider.api_key.trim().is_empty() {
             if let Some(old) = before.llm.providers.iter().find(|p| p.id == provider.id) {
@@ -1146,15 +1150,35 @@ pub async fn avatar_dodge(state: State<'_, AppState>, enabled: bool) -> std::res
 
 #[tauri::command]
 pub async fn avatar_skin(state: State<'_, AppState>, skin: String) -> std::result::Result<(), String> {
-    if !jimmy_agent::providers::avatar::SKINS.iter().any(|(id, _)| *id == skin) {
-        return Err(format!("skin inconnu : {skin}"));
-    }
     let app = state.app.clone();
+    // Skin de base, ou skin premium débloqué par une licence.
+    if !app.skin_allowed(&skin) {
+        let premium = jimmy_agent::providers::avatar::PREMIUM_SKINS.iter().any(|(id, _)| *id == skin);
+        return Err(if premium { format!("skin premium non débloqué : {skin}") } else { format!("skin inconnu : {skin}") });
+    }
     let mut settings = app.settings();
     settings.avatar.skin = skin.clone();
     app.save_settings(settings).map_err(err)?;
     app.avatar.set_skin(&skin).await;
     Ok(())
+}
+
+/// Active une clé de licence (onglet Skin, « J'ai une clé ») : vérifiée hors
+/// ligne, puis enregistrée. Renvoie le skin débloqué (`*` = tous).
+#[tauri::command]
+pub fn licence_activate(state: State<'_, AppState>, key: String) -> std::result::Result<String, String> {
+    state.app.licences.activate(&key).map(|licence| licence.skin)
+}
+
+/// Ouvre la boutique des skins dans le navigateur par défaut. Adresse fixe :
+/// l'interface ne peut pas faire ouvrir une URL quelconque.
+#[tauri::command]
+pub fn shop_open() -> std::result::Result<(), String> {
+    std::process::Command::new("explorer.exe")
+        .arg(jimmy_agent::providers::avatar::SHOP_URL)
+        .spawn()
+        .map(|_| ())
+        .map_err(err)
 }
 
 // ── Outils de diagnostic ─────────────────────────────────────────────────────
