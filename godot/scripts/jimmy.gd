@@ -306,7 +306,13 @@ func set_skin(name: String) -> bool:
 
 ## Vrai si le skin existe, de base ou premium.
 func has_skin(name: String) -> bool:
-	return SKINS.has(name) or _premium_skins().has(name)
+	if SKINS.has(name) or _premium_skins().has(name):
+		return true
+	# Skin premium livré après le lancement (achat, premier téléchargement) :
+	# on relit le dossier une fois avant de conclure qu'il n'existe pas.
+	_premium_loaded = false
+	_premium_cache = {}
+	return _premium_skins().has(name)
 
 
 ## Palette du skin courant (base, sinon premium, sinon skin par défaut).

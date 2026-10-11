@@ -136,6 +136,17 @@ impl Licences {
         self.active.lock().is_ok_and(|active| active.iter().any(|(_, l)| l.unlocks(skin)))
     }
 
+    /// Clé à présenter au serveur pour télécharger les fichiers du skin :
+    /// la licence de ce skin de préférence, sinon une licence « tous ».
+    pub fn key_for(&self, skin: &str) -> Option<String> {
+        let active = self.active.lock().ok()?;
+        active
+            .iter()
+            .find(|(_, l)| l.skin == skin)
+            .or_else(|| active.iter().find(|(_, l)| l.unlocks(skin)))
+            .map(|(k, _)| k.clone())
+    }
+
     fn save(&self) -> Result<(), String> {
         let Some(path) = &self.store else {
             return Ok(());
@@ -237,6 +248,9 @@ mod tests {
         let reloaded = Licences::load_with(Some(path.clone()), public);
         assert!(reloaded.unlocks("neon"));
         assert!(!reloaded.unlocks("metal"));
+        // Clé à présenter au serveur : celle du skin, rien pour un autre.
+        assert_eq!(reloaded.key_for("neon").as_deref(), Some(key.as_str()));
+        assert_eq!(reloaded.key_for("metal"), None);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -301,6 +301,8 @@ export function skinView(ctx: AppContext): HTMLElement {
       onclick: async () => {
         const key = keyInput.value.trim();
         if (!key) return;
+        // Les fichiers du skin sont téléchargés à l'activation (quelques Mo).
+        toast("Activation et téléchargement du skin…");
         const unlocked = await guard(() => api.licenceActivate(key), "licence");
         if (unlocked === undefined) return;
         await ctx.refreshStatus();

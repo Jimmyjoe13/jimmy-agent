@@ -1184,10 +1184,15 @@ pub async fn avatar_skin(state: State<'_, AppState>, skin: String) -> std::resul
 }
 
 /// Active une clé de licence (onglet Skin, « J'ai une clé ») : vérifiée hors
-/// ligne, puis enregistrée. Renvoie le skin débloqué (`*` = tous).
+/// ligne, enregistrée, puis les fichiers du skin sont téléchargés depuis le
+/// site. Renvoie le skin débloqué (`*` = tous). Si le téléchargement échoue,
+/// la licence reste activée : il sera retenté au prochain lancement.
 #[tauri::command]
-pub fn licence_activate(state: State<'_, AppState>, key: String) -> std::result::Result<String, String> {
-    state.app.licences.activate(&key).map(|licence| licence.skin)
+pub async fn licence_activate(state: State<'_, AppState>, key: String) -> std::result::Result<String, String> {
+    let app = state.app.clone();
+    let licence = app.licences.activate(&key)?;
+    app.sync_premium().await.map_err(|e| format!("licence activée, mais {e}. Nouvel essai au prochain lancement."))?;
+    Ok(licence.skin)
 }
 
 /// Ouvre la boutique des skins dans le navigateur par défaut. Adresse fixe :

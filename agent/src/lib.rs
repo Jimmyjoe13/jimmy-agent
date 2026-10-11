@@ -891,6 +891,34 @@ impl App {
             && self.premium.skin_intact(skin)
     }
 
+    /// Télécharge les skins premium débloqués dont les fichiers manquent ou
+    /// ne sont plus conformes (achat, nouvelle installation, fichier abîmé).
+    /// Renvoie les skins installés ; erreur si l'un n'a pas pu l'être.
+    pub async fn sync_premium(&self) -> std::result::Result<Vec<String>, String> {
+        let mut installed = Vec::new();
+        let mut errors = Vec::new();
+        for (id, label, _) in providers::avatar::PREMIUM_SKINS {
+            let Some(key) = self.licences.key_for(id) else {
+                continue;
+            };
+            if self.premium.skin_intact(id) {
+                continue;
+            }
+            match self.premium.download(&key, id).await {
+                Ok(()) => installed.push(id.to_string()),
+                Err(e) => {
+                    log::warn!("[premium] {id} : {e}");
+                    errors.push(format!("{label} : {e}"));
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(installed)
+        } else {
+            Err(format!("téléchargement du skin impossible ({})", errors.join(" ; ")))
+        }
+    }
+
     /// Dossier du projet de l'avatar à lancer. En développement : `godot/`
     /// du dépôt (on y travaille). Installé : le projet **intégré au binaire**
     /// (`embedded_godot`), réécrit à chaque lancement dans

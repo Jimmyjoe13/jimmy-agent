@@ -185,6 +185,23 @@ pub fn run() {
                     });
                 }
 
+                // Skins premium achetés mais absents (nouvelle installation,
+                // téléchargement interrompu) : récupérés en tâche de fond. Si
+                // c'est le skin choisi, il est appliqué dès son arrivée.
+                let app_for_premium = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match app_for_premium.sync_premium().await {
+                        Ok(installed) => {
+                            let skin = app_for_premium.settings().avatar.skin;
+                            if installed.contains(&skin) {
+                                app_for_premium.avatar.set_skin(&skin).await;
+                                app_for_premium.refresh_wake_prompts().await;
+                            }
+                        }
+                        Err(error) => log::warn!("[premium] {error}"),
+                    }
+                });
+
                 // Mémoire : vecteurs sémantiques manquants (LM Studio), en
                 // tâche de fond. Sans LM Studio, s'arrête au premier essai.
                 let app_for_memory = app.clone();
