@@ -22,6 +22,12 @@ main{max-width:960px;margin:0 auto;padding:28px 18px 60px}
 .btn.off{background:#ddd;color:#777;cursor:default}
 .note{margin-top:22px;font-size:13px;color:#777;background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px}
 footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
+.download{background:#fff;border:1px solid #eee;border-radius:16px;padding:24px;margin-bottom:34px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.download h2{font-size:22px;margin-bottom:6px}
+.download .lead{color:#555;margin-bottom:16px}
+.btn.big{font-size:17px;padding:14px 22px}
+.steps{margin:18px 0 0 18px;color:#444;font-size:14px;line-height:1.6}
+.small{font-size:12px;color:#888;margin-top:12px}
 </style>
 </head>
 <body>
@@ -33,6 +39,17 @@ footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
 </div>
 </header>
 <main>
+<section class="download" id="telecharger">
+<h2>Télécharger Jimy pour Windows</h2>
+<p class="lead">Ton agent personnel, sur ton bureau : avatar 3D, voix en local, et il agit pour toi. Version bêta, gratuite et open source.</p>
+<a class="btn big" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe">⬇ Télécharger l'installeur (Windows 10/11)</a>
+<ol class="steps">
+<li>Lance <b>Jimy-setup.exe</b>. Windows peut afficher « Windows a protégé votre ordinateur » (application pas encore signée) : clique sur <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>.</li>
+<li>Au premier lancement, Jimy télécharge sa reconnaissance vocale (environ 65 Mo, puis 180 Mo en option) : l'écoute s'active à la fin.</li>
+<li>Il te faut une clé de modèle de langage (<b>OpenCode Go</b> ou <b>OpenRouter</b>) : l'écran d'accueil te la demande, elle reste sur ta machine.</li>
+</ol>
+<p class="small">Code source et notes de version : <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases">github.com/Jimmyjoe13/jimmy-agent</a>. Mac : bientôt.</p>
+</section>
 <h2>Choisis ton skin</h2>
 <p>La boutique ouvre bientôt. Les skins seront activables dans l'appli Jimy dès l'ouverture.</p>
 <div class="grid">
