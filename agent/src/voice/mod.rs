@@ -850,6 +850,21 @@ mod tests {
         assert!(!matches_wake_word("Jean, ouvre mes notes", "jimy"));
     }
 
+    /// Skins premium : le mot d'éveil est le nom du skin (11 octobre). Les
+    /// graphies probables de Whisper déclenchent ; « Jimy » ne déclenche plus.
+    #[test]
+    fn mot_d_eveil_des_skins_premium() {
+        for transcript in ["JEVA, ouvre mes notes", "Jeva, quelle heure est-il ?", "Hé Jeva !", "Jéva, analyse ça"] {
+            assert!(matches_wake_word(transcript, "jeva"), "{transcript}");
+        }
+        assert_eq!(strip_wake_word("Jeva, quelle heure est-il ?", "jeva"), "quelle heure est-il ?");
+        assert!(!matches_wake_word("Jimmy, ouvre mes notes", "jeva"));
+        for transcript in ["Néon, ouvre mes notes", "Neon, quelle heure est-il ?", "Hé Néon !"] {
+            assert!(matches_wake_word(transcript, "néon"), "{transcript}");
+        }
+        assert!(!matches_wake_word("Jimmy, ouvre mes notes", "néon"));
+    }
+
     #[test]
     fn interjection_avant_le_nom() {
         assert!(matches_wake_word("Hé Jimmy, ouvre mes notes", "jimmy"));

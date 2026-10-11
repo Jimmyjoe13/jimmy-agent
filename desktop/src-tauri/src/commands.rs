@@ -432,6 +432,9 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> st
     if before.avatar.skin != settings.avatar.skin {
         app.avatar.set_skin(&settings.avatar.skin).await;
     }
+    if before.avatar.skin != settings.avatar.skin || before.stt.wake_word != settings.stt.wake_word {
+        app.refresh_wake_prompts().await;
+    }
     Ok(())
 }
 
@@ -1168,13 +1171,15 @@ pub async fn avatar_skin(state: State<'_, AppState>, skin: String) -> std::resul
     let app = state.app.clone();
     // Skin de base, ou skin premium débloqué par une licence.
     if !app.skin_allowed(&skin) {
-        let premium = jimmy_agent::providers::avatar::PREMIUM_SKINS.iter().any(|(id, _)| *id == skin);
+        let premium = jimmy_agent::providers::avatar::PREMIUM_SKINS.iter().any(|(id, _, _)| *id == skin);
         return Err(if premium { format!("skin premium non débloqué : {skin}") } else { format!("skin inconnu : {skin}") });
     }
     let mut settings = app.settings();
     settings.avatar.skin = skin.clone();
     app.save_settings(settings).map_err(err)?;
     app.avatar.set_skin(&skin).await;
+    // Un skin premium répond à son nom : Whisper doit l'attendre.
+    app.refresh_wake_prompts().await;
     Ok(())
 }
 

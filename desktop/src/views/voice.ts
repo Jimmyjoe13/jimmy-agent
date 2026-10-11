@@ -389,6 +389,15 @@ export function voiceView(ctx: AppContext): HTMLElement {
       field("Modèle de la commande (précis)", commandSelect),
       field("Langue", languageSelect),
       field("Mot d'activation", wakeWordInput, "jimy"),
+      // Skin premium actif : il répond à son nom, le réglage ci-dessus ne
+      // vaut que pour les skins de base.
+      ctx.status.stt.wake_word !== ctx.status.stt.wake_word_setting
+        ? h(
+            "p",
+            { class: "note" },
+            `Avec le skin actuel, Jimy répond à « ${capitalize(ctx.status.stt.wake_word)} » : chaque skin premium a son propre nom. Ce mot-ci vaut pour les skins de base.`,
+          )
+        : null,
       field("Conversation continue (écoute sans redire le nom)", followSelect),
       field("Pause qui termine ta phrase (ms)", pauseInput),
       h(

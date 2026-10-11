@@ -133,7 +133,10 @@ export interface Status {
     model: string;
     command_model: string;
     language: string;
+    /** Mot en vigueur : le nom du skin premium actif, sinon le réglage. */
     wake_word: string;
+    /** Mot réglé dans l'onglet Voix (skins de base). */
+    wake_word_setting: string;
     models: { id: string; label: string; note: string }[];
   };
   avatar: {
@@ -141,7 +144,7 @@ export interface Status {
     skin: string;
     skins: { id: string; label: string }[];
     /** Skins payants : `unlocked` si une licence activée les débloque. */
-    premium: { id: string; label: string; unlocked: boolean }[];
+    premium: { id: string; label: string; wake_word: string; unlocked: boolean }[];
     /** Boutique où ils s'achètent. */
     shop: string;
     quality: string;

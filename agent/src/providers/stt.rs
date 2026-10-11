@@ -63,6 +63,11 @@ impl Stt {
         })
     }
 
+    /// Remplace le contexte d'un client déjà lancé (changement de mot d'éveil).
+    pub fn set_prompt(&mut self, prompt: &str) {
+        self.prompt = prompt.trim().to_string();
+    }
+
     /// Contexte de transcription (voir le champ `prompt`).
     pub fn with_prompt(mut self, prompt: &str) -> Self {
         self.prompt = prompt.trim().to_string();

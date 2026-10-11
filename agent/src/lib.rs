@@ -831,7 +831,31 @@ impl App {
     /// seulement avec une licence activée ([`licence`]).
     pub fn skin_allowed(&self, skin: &str) -> bool {
         providers::avatar::SKINS.iter().any(|(id, _)| *id == skin)
-            || (providers::avatar::PREMIUM_SKINS.iter().any(|(id, _)| *id == skin) && self.licences.unlocks(skin))
+            || (providers::avatar::PREMIUM_SKINS.iter().any(|(id, _, _)| *id == skin) && self.licences.unlocks(skin))
+    }
+
+    /// Mot d'éveil en vigueur : le nom du skin premium actif (s'il est
+    /// débloqué), sinon celui des réglages (« jimy » par défaut).
+    pub fn wake_word(&self) -> String {
+        let settings = self.settings();
+        let skin = settings.avatar.skin.as_str();
+        match providers::avatar::PREMIUM_SKINS.iter().find(|(id, _, _)| *id == skin) {
+            Some((_, _, wake)) if self.licences.unlocks(skin) => wake.to_string(),
+            _ => settings.stt.wake_word.clone(),
+        }
+    }
+
+    /// Recale le contexte de Whisper sur le mot d'éveil en vigueur (après un
+    /// changement de skin) : sans lui, Whisper transcrit mal un nom inhabituel.
+    pub async fn refresh_wake_prompts(&self) {
+        let wake = self.wake_word();
+        if let Some(stt) = self.stt.lock().await.as_mut() {
+            stt.set_prompt(&whisper_prompt(&wake, SttRole::Wake));
+        }
+        if let Some(stt) = self.stt_command.lock().await.as_mut() {
+            stt.set_prompt(&whisper_prompt(&wake, SttRole::Command));
+        }
+        log::info!("[voice] mot d'activation : « {wake} »");
     }
 
     /// `skin` s'il est autorisé, sinon le skin par défaut.
@@ -994,7 +1018,7 @@ impl App {
                     old.shutdown().await;
                 }
                 let mut stt = providers::Stt::new(settings.stt.port, &settings.stt.language)?
-                    .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Wake));
+                    .with_prompt(&whisper_prompt(&self.wake_word(), SttRole::Wake));
                 // Serveur du mot d'éveil : contexte complet. Réduit, il
                 // reconnaît mal les mots courts (« Dis-moi bonjour » →
                 // « D'y ma bonjour », mesuré).
@@ -1023,7 +1047,7 @@ impl App {
         }
         let started = async {
             let mut stt = providers::Stt::new(settings.stt.command_port, &settings.stt.language)?
-                .with_prompt(&whisper_prompt(&settings.stt.wake_word, SttRole::Command));
+                .with_prompt(&whisper_prompt(&self.wake_word(), SttRole::Command));
             stt.ensure_server(
                 &server_exe,
                 &models.join(command_model),
@@ -1318,7 +1342,10 @@ impl App {
                 "model": settings.stt.model,
                 "command_model": settings.stt.command_model,
                 "language": settings.stt.language,
-                "wake_word": settings.stt.wake_word,
+                // Mot en vigueur (nom du skin premium actif) ; le réglage
+                // reste visible à part pour le champ de l'onglet Voix.
+                "wake_word": self.wake_word(),
+                "wake_word_setting": settings.stt.wake_word,
                 "models": providers::stt::MODELS.iter().map(|(id, label, note)| serde_json::json!({
                     "id": id, "label": label, "note": note
                 })).collect::<Vec<_>>(),
@@ -1329,8 +1356,8 @@ impl App {
                 "skins": providers::avatar::SKINS.iter().map(|(id, label)| serde_json::json!({
                     "id": id, "label": label
                 })).collect::<Vec<_>>(),
-                "premium": providers::avatar::PREMIUM_SKINS.iter().map(|(id, label)| serde_json::json!({
-                    "id": id, "label": label, "unlocked": self.licences.unlocks(id)
+                "premium": providers::avatar::PREMIUM_SKINS.iter().map(|(id, label, wake)| serde_json::json!({
+                    "id": id, "label": label, "wake_word": wake, "unlocked": self.licences.unlocks(id)
                 })).collect::<Vec<_>>(),
                 "shop": providers::avatar::SHOP_URL,
                 "quality": settings.avatar.quality,

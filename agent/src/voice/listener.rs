@@ -102,7 +102,7 @@ impl App {
             // s'arrête, même si `is_running` est de nouveau vrai.
             let generation = runtime.generation();
             let alive = |runtime: &VoiceRuntime| runtime.is_running() && runtime.generation() == generation;
-            log::info!("[voice] écoute démarrée — mot d'activation « {} »", settings.stt.wake_word);
+            log::info!("[voice] écoute démarrée — mot d'activation « {} »", self.wake_word());
 
             // Session vocale portée par `App` (voir son commentaire) : elle
             // survit à un arrêt/relance de l'écoute, sinon une simple reprise
@@ -177,7 +177,7 @@ impl App {
                     if !alive(&runtime) {
                         continue;
                     }
-                    early_match = matches_wake_word(&early, &settings.stt.wake_word);
+                    early_match = matches_wake_word(&early, &self.wake_word());
                     if !early.is_empty() {
                         emit(&events, AgentEvent::Heard { text: early.clone(), matched: early_match }).await;
                     }
@@ -219,7 +219,7 @@ impl App {
                     // pendant la parole : on le réessaie sur l'extrait rogné
                     // (0,5 s) avant de payer le modèle précis (2 à 3 s).
                     let quick = transcribe_fast_clip(&self, &captured.samples, rate).await;
-                    if matches_wake_word(&quick, &settings.stt.wake_word) {
+                    if matches_wake_word(&quick, &self.wake_word()) {
                         quick
                     } else {
                         transcribe_precise(&self, &captured.samples, rate).await
@@ -228,7 +228,7 @@ impl App {
                     transcribe_precise(&self, &captured.samples, rate).await
                 };
                 dump_clip(&self, &captured.samples, rate, "phrase", &utterance);
-                let full_match = matches_wake_word(&utterance, &settings.stt.wake_word);
+                let full_match = matches_wake_word(&utterance, &self.wake_word());
                 log::info!(
                     "[voice] phrase en {} ms ({} ms de parole) : « {utterance} » (rapide : « {early} »)",
                     detected_at.elapsed().as_millis(),
@@ -271,7 +271,7 @@ impl App {
                     emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: utterance.clone() }).await;
                 }
 
-                let mut command = strip_wake_word(&utterance, &settings.stt.wake_word);
+                let mut command = strip_wake_word(&utterance, &self.wake_word());
                 let name_alone = (early_match || full_match) && command.trim().is_empty();
                 if !name_alone {
                     // Phrase coupée par une hésitation ou par la limite de
@@ -325,7 +325,7 @@ impl App {
                     };
                     command = match heard {
                         Some((text, cursor, cut)) => {
-                            let first = strip_wake_word(&strip_cue_echo(&text), &settings.stt.wake_word);
+                            let first = strip_wake_word(&strip_cue_echo(&text), &self.wake_word());
                             if first.trim().is_empty() {
                                 first
                             } else {

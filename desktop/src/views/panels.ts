@@ -369,7 +369,13 @@ export function skinView(ctx: AppContext): HTMLElement {
       "Skins premium",
       premiumButtons,
       allUnlocked
-        ? h("p", { class: "note" }, "Tous les skins premium sont débloqués sur cette machine.")
+        ? h(
+            "p",
+            { class: "note" },
+            "Tous les skins premium sont débloqués sur cette machine. Chacun répond à son nom : " +
+              premium.map((s) => `${s.label} → « ${s.wake_word} »`).join(", ") +
+              ".",
+          )
         : h(
             "div",
             {},
