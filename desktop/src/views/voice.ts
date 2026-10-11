@@ -335,9 +335,25 @@ export function voiceView(ctx: AppContext): HTMLElement {
 
   void loadVoiceSettings();
 
+  // Installation neuve : whisper.cpp se télécharge au premier lancement.
+  // Tant qu'il manque, l'écoute ne peut pas démarrer : on dit où on en est.
+  const comp = ctx.status.stt.components;
+  const componentsNote = comp.ready
+    ? null
+    : h(
+        "div",
+        { class: "warn-note" },
+        comp.active
+          ? `Téléchargement des composants vocaux : ${comp.current}, ${
+              comp.total_bytes > 0 ? Math.floor((comp.done_bytes * 100) / comp.total_bytes) : 0
+            } % (${Math.round(comp.done_bytes / 1048576)} Mo). L'écoute sera disponible à la fin.`
+          : `Composants vocaux absents${comp.error ? ` (${comp.error})` : ""}. Relance Jimy pour réessayer le téléchargement.`,
+      );
+
   return h(
     "section",
     { class: "view" },
+    componentsNote,
     h(
       "div",
       { class: "card voice-hero" },
@@ -462,6 +478,14 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
   const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
   const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  // Clé du modèle de langage : sans elle, rien ne répond (installation neuve).
+  const keyProvider = h(
+    "select",
+    { class: "field" },
+    h("option", { value: "opencode" }, "OpenCode Go"),
+    h("option", { value: "openrouter" }, "OpenRouter"),
+  ) as HTMLSelectElement;
+  const keyInput = h("input", { class: "field", type: "password", placeholder: "Clé d'API", autocomplete: "off" }) as HTMLInputElement;
   // Accès : une nouvelle installation part de « tout refusé ». Seule la
   // lecture est cochée d'office ; le reste est un choix explicite.
   const grant = (label: string, note: string, checked: boolean) => {
@@ -521,7 +545,18 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       title: "Quel modèle pour réfléchir ?",
       body: [
         h("p", {}, "Le modèle qui me fait écrire le code, lire les fichiers et raisonner."),
-        h("p", { class: "note" }, status.llm.has_key ? "Clé OpenCode Go détectée." : "Aucune clé détectée : OPENCODE_API_KEY dans le .env, ou saisie dans Paramètres → LLM."),
+        status.llm.has_key
+          ? h("p", { class: "note" }, "Clé OpenCode Go détectée.")
+          : h(
+              "div",
+              {},
+              h(
+                "p",
+                { class: "note" },
+                "Il me faut une clé de modèle de langage pour répondre. Colle-la ici (elle reste sur ta machine) ; modifiable dans Paramètres → LLM.",
+              ),
+              h("div", { class: "row" }, keyProvider, keyInput),
+            ),
         h("div", { class: "row" }, modelSelect),
       ],
     },
@@ -616,6 +651,9 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
                 render();
                 return;
               }
+              // Clé saisie : enregistrée d'abord (une erreur garde l'écran).
+              const key = keyInput.value.trim();
+              if (key && !(await attempt(() => api.llmSetProviderKey(keyProvider.value, key), "clé"))) return;
               // L'écran ne se ferme que si l'enregistrement a réussi.
               const done = await guard(
                 () =>

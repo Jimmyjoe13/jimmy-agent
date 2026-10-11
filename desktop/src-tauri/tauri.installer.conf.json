@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "installer-res/godot/": "godot/",
+      "installer-res/godot-runtime/": "godot-runtime/"
+    }
+  }
+}

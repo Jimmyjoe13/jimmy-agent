@@ -173,6 +173,18 @@ pub fn run() {
                     });
                 }
 
+                // Installation neuve : whisper.cpp et ses modèles sont
+                // téléchargés en tâche de fond (no-op s'ils sont là).
+                if !app.components.ready(&app.paths.whisper_dir()) {
+                    let app_for_components = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let paths = app_for_components.paths.clone();
+                        if let Err(error) = app_for_components.components.ensure(&paths).await {
+                            log::warn!("[composants] {error}");
+                        }
+                    });
+                }
+
                 // Mémoire : vecteurs sémantiques manquants (LM Studio), en
                 // tâche de fond. Sans LM Studio, s'arrête au premier essai.
                 let app_for_memory = app.clone();

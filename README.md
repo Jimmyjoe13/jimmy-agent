@@ -211,23 +211,36 @@ cd desktop; npm install; cd ..
 
 ### Installeur Windows (NSIS)
 
+**Téléchargement** : bouton sur https://jimy-agent.me, ou directement
+`https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe`.
+
+Construction :
+
 ```powershell
-.\scripts\build.ps1 -Release -Bundles
+.\scriptsuild-installer.ps1
 ```
 
-Produit un installeur dans `target/release/bundle/nsis/` (mode
-utilisateur courant : pas de droits administrateur). Limites connues,
-lues dans `tauri.conf.json` et `paths.rs` — **non vérifié de bout en
-bout** :
+Produit `target/release/bundle/nsis/Jimmy_<version>_x64-setup.exe` (≈ 64 Mo,
+mode utilisateur courant, sans droits administrateur). Il embarque le
+projet de l'avatar (`godot/`) et l'exécutable Godot 4.5.1 (licence MIT) ;
+whisper.cpp et ses modèles (≈ 65 Mo indispensables, 180 Mo pour le modèle
+précis) sont **téléchargés au premier lancement** (`agent/src/components.rs`,
+progression dans l'onglet Voix). Vérifié le 11 octobre sur une installation
+vierge : avatar lancé depuis l'installeur, composants téléchargés, accueil
+avec clé du modèle et accès.
 
-- l'installeur n'embarque ni `godot/`, ni whisper, ni les skills :
-  l'avatar et la voix y sont indisponibles ;
-- les données partent dans `%APPDATA%\Jimy` (base, config et logs
-  frais, sans vos réglages) ;
-- **pas de mise à jour automatique** depuis un installeur : `/update`
-  exige un clone git (voir ci-dessous).
+Limites :
 
-Pour un Jimy complet (avatar, voix, mises à jour), passez par les
+- **pas signé** : Windows affiche « Windows a protégé votre ordinateur »
+  (Informations complémentaires → Exécuter quand même) ;
+- une **clé de modèle de langage** (OpenCode Go ou OpenRouter) est demandée
+  à l'accueil ;
+- données dans `%APPDATA%\Jimmy`, **pas de mise à jour automatique** depuis
+  un installeur (`/update` exige un clone git) ;
+- les skins premium en modèle 3D (JEVA) ne sont pas fournis : leur modèle se
+  livre après achat.
+
+Pour développer Jimy (et les mises à jour automatiques), passez par les
 sources (`git clone` + `install.ps1`).
 
 ### Deuxième PC (depuis les sources)

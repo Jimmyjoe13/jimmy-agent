@@ -58,3 +58,6 @@ desktop.ini
 /HANDOFF.md
 /JOURNAL.md
 /PLAN.md
+
+# Ressources de l'installeur (copiées par scripts/build-installer.ps1)
+/desktop/src-tauri/installer-res/

@@ -53,11 +53,15 @@ impl Paths {
             cursor = dir.parent();
         }
 
-        // Mode installé.
+        // Mode installé : les données dans `%APPDATA%\Jimmy`, les ressources
+        // livrées par l'installeur (`godot/`, `godot-runtime/`) à côté de
+        // l'exécutable. Sans elles (ancien installeur), tout reste dans les
+        // données comme avant.
         let base = dirs_data_dir();
+        let app = if exe_dir.join("godot").join("project.godot").is_file() { exe_dir } else { base.clone() };
         Ok(Paths {
-            data: base.clone(),
-            app: base,
+            data: base,
+            app,
             dev: false,
         })
     }
@@ -165,6 +169,13 @@ pub fn find_godot_exe(configured: &str) -> Result<PathBuf> {
         let p = PathBuf::from(env);
         if p.is_file() {
             return Ok(p);
+        }
+    }
+    // Godot livré par l'installeur, à côté de l'exécutable de Jimy.
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+        let bundled = dir.join("godot-runtime").join("Godot_v4.5.1-stable_win64.exe");
+        if bundled.is_file() {
+            return Ok(bundled);
         }
     }
     let mut candidates: Vec<PathBuf> = vec![

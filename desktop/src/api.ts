@@ -137,6 +137,15 @@ export interface Status {
     wake_word: string;
     /** Mot réglé dans l'onglet Voix (skins de base). */
     wake_word_setting: string;
+    /** Téléchargement de whisper.cpp et de ses modèles (installation neuve). */
+    components: {
+      active: boolean;
+      current: string;
+      done_bytes: number;
+      total_bytes: number;
+      ready: boolean;
+      error: string | null;
+    };
     models: { id: string; label: string; note: string }[];
   };
   avatar: {

@@ -6,6 +6,7 @@
 //!
 //! [`App`] assemble les pièces et sert de point d'entrée unique à l'interface.
 
+pub mod components;
 pub mod config;
 pub mod core;
 pub mod db;
@@ -58,6 +59,8 @@ pub struct App {
     pub approvals: Arc<sensitive::Approvals>,
     /// Licences des skins premium activées sur cette machine.
     pub licences: Arc<licence::Licences>,
+    /// Composants vocaux téléchargés au premier lancement (installeur).
+    pub components: Arc<components::Components>,
     /// Serveurs MCP : leurs outils sont ajoutés au registre par [`App::start_mcp`].
     pub mcp: Arc<mcp::McpRegistry>,
     /// Mémoire persistante dans le vault Obsidian : `None` si le chemin est
@@ -365,6 +368,7 @@ impl App {
             registry,
             approvals,
             licences,
+            components: Arc::new(components::Components::default()),
             mcp,
             vault,
             stt: tokio::sync::Mutex::new(None),
@@ -989,6 +993,20 @@ impl App {
                 "la voix ou la reconnaissance vocale est désactivée dans les paramètres".into(),
             ));
         }
+        // Installation neuve : whisper.cpp arrive par téléchargement
+        // (`components`). Tant qu'il manque, la voix explique pourquoi.
+        if !self.components.ready(&self.paths.whisper_dir()) {
+            let p = self.components.progress(&self.paths.whisper_dir());
+            return Err(Error::Voice(if p.active {
+                let percent = if p.total_bytes > 0 { p.done_bytes * 100 / p.total_bytes } else { 0 };
+                format!("composants vocaux en cours de téléchargement ({} : {percent} %)", p.current)
+            } else {
+                format!(
+                    "composants vocaux absents{} — relance Jimy pour réessayer",
+                    p.error.map(|e| format!(" ({e})")).unwrap_or_default()
+                )
+            }));
+        }
         self.ensure_stt().await?;
         runtime.start()
     }
@@ -1345,6 +1363,8 @@ impl App {
                 // Mot en vigueur (nom du skin premium actif) ; le réglage
                 // reste visible à part pour le champ de l'onglet Voix.
                 "wake_word": self.wake_word(),
+                // Téléchargement des composants vocaux (installation neuve).
+                "components": self.components.progress(&self.paths.whisper_dir()),
                 "wake_word_setting": settings.stt.wake_word,
                 "models": providers::stt::MODELS.iter().map(|(id, label, note)| serde_json::json!({
                     "id": id, "label": label, "note": note
