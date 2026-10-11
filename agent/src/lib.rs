@@ -768,6 +768,8 @@ impl App {
             .arg(format!("--port={}", settings.avatar.port))
             .arg(format!("--bridge-port={}", settings.avatar.bridge_port))
             .arg(format!("--skin={skin}"))
+            // Modèles .glb des skins premium : hors dépôt, dans les données.
+            .arg(format!("--premium-dir={}", self.paths.data.join("premium").display()))
             .arg(format!("--quality={}", settings.avatar.quality))
             .arg(format!("--dodge={}", u8::from(settings.avatar.dodge)))
             .env("JIMMY_GODOT_PORT", settings.avatar.port.to_string())

@@ -27,6 +27,11 @@ const POP_SECONDS := 0.35
 const OUTLINE_WIDTH := 0.006
 const OUTLINE_COLOR := Color(0.16, 0.10, 0.10)
 
+## Thème : "" = lapin blanc (skins de base), "neon" = lapin néon, compagnon
+## du skin premium Néon (corps sombre, contour orange, ventre violet
+## lumineux). Posé par main.gd avant l'entrée dans l'arbre.
+var theme := ""
+
 var state: String = HIDDEN
 var _t := 0.0
 var _state_t := 0.0
@@ -155,28 +160,40 @@ func _build() -> void:
 	_outline = StandardMaterial3D.new()
 	_outline.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_outline.cull_mode = BaseMaterial3D.CULL_FRONT
-	_outline.albedo_color = OUTLINE_COLOR
+	var neon := theme == "neon"
+	# Néon : contour orange vif et épais, comme le skin du renard.
+	_outline.albedo_color = Color(1.0, 0.45, 0.02) if neon else OUTLINE_COLOR
 	_outline.grow = true
-	_outline.grow_amount = OUTLINE_WIDTH
+	_outline.grow_amount = OUTLINE_WIDTH * (2.2 if neon else 1.0)
 
-	var fur := _material(Color(0.93, 0.92, 0.90), 0.95)
+	var fur := _material(Color(0.07, 0.06, 0.11) if neon else Color(0.93, 0.92, 0.90), 0.95)
 	fur.rim_enabled = true
 	fur.rim = 0.35
 	fur.rim_tint = 0.6
-	var belly := _material(Color(1.0, 0.98, 0.95), 0.95)
-	var pink := _material(Color(0.97, 0.62, 0.70), 0.8)
-	var eye := _material(Color(0.05, 0.04, 0.05), 0.3, false)
+	var belly := _material(Color(0.55, 0.12, 0.85) if neon else Color(1.0, 0.98, 0.95), 0.95)
+	var pink := _material(Color(1.0, 0.38, 0.0) if neon else Color(0.97, 0.62, 0.70), 0.8)
+	# Néon : yeux orange lumineux (des yeux noirs disparaîtraient sur un
+	# corps sombre).
+	var eye := _material(Color(1.0, 0.45, 0.05) if neon else Color(0.05, 0.04, 0.05), 0.3, false)
+	if neon:
+		for pair in [[belly, 0.6], [pink, 1.4], [eye, 1.6]]:
+			var lit: StandardMaterial3D = pair[0]
+			lit.emission_enabled = true
+			lit.emission = lit.albedo_color
+			lit.emission_energy_multiplier = float(pair[1])
 	var shine := _material(Color(1, 1, 1), 0.2, false)
 	var laptop := _material(Color(0.22, 0.24, 0.28), 0.5)
 	laptop.metallic = 0.4
 	var keys := _material(Color(0.12, 0.13, 0.15), 0.7, false)
-	var gear := _material(Color(0.96, 0.62, 0.04), 0.4, false)
+	var gear_color := Color(1.0, 0.12, 0.62) if neon else Color(0.96, 0.62, 0.04)
+	var gear := _material(gear_color, 0.4, false)
 	gear.emission_enabled = true
-	gear.emission = Color(0.96, 0.62, 0.04)
+	gear.emission = gear_color
 	gear.emission_energy_multiplier = 0.5
-	_screen_mat = _material(Color(0.35, 0.75, 1.0), 0.2, false)
+	var screen_color := Color(1.0, 0.45, 0.05) if neon else Color(0.35, 0.75, 1.0)
+	_screen_mat = _material(screen_color, 0.2, false)
 	_screen_mat.emission_enabled = true
-	_screen_mat.emission = Color(0.35, 0.75, 1.0)
+	_screen_mat.emission = screen_color
 	_screen_mat.emission_energy_multiplier = 1.5
 
 	# Racine : sert à l'apparition (échelle) et aux sauts (hauteur).

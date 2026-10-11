@@ -1,16 +1,41 @@
 {
   "_licence": "Contenu premium Jimy, hors MIT : voir godot/premium/LICENSE.md",
   "label": "Renard Néon",
-  "fur": [0.07, 0.06, 0.11],
-  "cream": [0.55, 0.12, 0.85],
-  "dark": [0.03, 0.02, 0.05],
-  "shirt": [0.04, 0.03, 0.07],
-  "accent": [1.0, 0.38, 0.0],
-  "outline": [1.0, 0.45, 0.02],
+  "fur": [
+    0.07,
+    0.06,
+    0.11
+  ],
+  "cream": [
+    0.55,
+    0.12,
+    0.85
+  ],
+  "dark": [
+    0.03,
+    0.02,
+    0.05
+  ],
+  "shirt": [
+    0.04,
+    0.03,
+    0.07
+  ],
+  "accent": [
+    1.0,
+    0.38,
+    0.0
+  ],
+  "outline": [
+    1.0,
+    0.45,
+    0.02
+  ],
   "outline_scale": 2.4,
   "ear_scale": 1.0,
   "tail_scale": 1.0,
   "metallic": 0.0,
   "has_fur": 1.0,
-  "glow": 1.0
+  "glow": 1.0,
+  "companion": "lapin_neon"
 }

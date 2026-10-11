@@ -139,7 +139,31 @@ const SKIN_DEFAULT := "renard"
 const PREMIUM_SKINS_DIR := "res://premium/skins"
 const SKIN_COLOR_KEYS := ["fur", "cream", "dark", "shirt", "accent"]
 ## Couleurs facultatives d'un skin premium (absentes = valeurs par défaut).
-const SKIN_OPTIONAL_COLOR_KEYS := ["outline"]
+## `eye_ring` : anneau de l'œil, `rim` : liseré lumineux d'un modèle 3D.
+const SKIN_OPTIONAL_COLOR_KEYS := ["outline", "eye_ring", "rim"]
+
+## Skin premium à **modèle 3D** (`"model": "jeva.glb"` dans son JSON) : le
+## fichier `.glb` n'est pas dans le dépôt public, il vit dans
+## `<données>/premium/models/` (Tauri passe `--premium-dir`). Le modèle est
+## figé dans sa pose ; l'animation garde les mêmes nœuds que le renard
+## (torse, tête, bras, mâchoire vides) pour que `_apply_pose` serve tel quel,
+## et l'œil est procédural, fixé sur la tête. Clés du JSON :
+##   `model_height` (hauteur à l'écran), `model_lift` (lévitation),
+##   `model_min_y` (bas du modèle, unités du .glb), `head_center` et
+##   `eye_offset` (unités du .glb), `eye_radius`, `companion`.
+## Liseré lumineux additif posé sur le modèle (aucun fichier : code GLSL).
+const RIM_SHADER := """
+shader_type spatial;
+render_mode blend_add, unshaded, depth_draw_never, cull_back;
+uniform vec4 rim_color : source_color = vec4(0.25, 0.85, 1.0, 1.0);
+uniform float rim_power = 2.6;
+uniform float rim_strength = 0.8;
+void fragment() {
+	float f = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), rim_power);
+	ALBEDO = rim_color.rgb * f * rim_strength;
+	ALPHA = f * rim_strength;
+}
+"""
 
 ## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
 ## tête est rapprochée du col pour une silhouette plus compacte.
@@ -173,6 +197,17 @@ var skin: String = SKIN_DEFAULT
 ## être appelé avant l'entrée dans l'arbre.
 var _premium_cache: Dictionary = {}
 var _premium_loaded := false
+## Dossier des données premium (`<données>/premium`), posé par main.gd.
+var premium_dir := ""
+## Modèles .glb déjà lus (chemin → scène) : une reconstruction (qualité,
+## skin) ne relit pas 6 Mo à chaque fois.
+var _model_cache: Dictionary = {}
+## Nœuds propres à un skin à modèle 3D (null pour le renard).
+var _float: Node3D = null
+var _iris_mat: StandardMaterial3D = null
+## Part du regard appliquée à la tête : l'œil d'un casque glisse sur sa
+## surface, un regard complet le ferait sortir de la visière.
+var _gaze_scale := 1.0
 var _t := 0.0
 var _blink_t := 0.0
 var _blink := 0.0
@@ -248,6 +283,12 @@ func set_skin(name: String) -> bool:
 		return false
 	if name == skin:
 		return true
+	# Skin à modèle 3D sans son fichier (pas encore téléchargé) : refusé
+	# plutôt qu'un personnage vide.
+	var wanted := _palette_of(name)
+	if wanted.has("model") and _load_model(wanted) == null:
+		push_warning("[godot/jimmy] modèle absent pour le skin %s" % name)
+		return false
 	skin = name
 	if is_inside_tree():
 		_make_materials()
@@ -262,9 +303,42 @@ func has_skin(name: String) -> bool:
 
 ## Palette du skin courant (base, sinon premium, sinon skin par défaut).
 func _palette() -> Dictionary:
-	if SKINS.has(skin):
-		return SKINS[skin]
-	return _premium_skins().get(skin, SKINS[SKIN_DEFAULT])
+	return _palette_of(skin)
+
+
+func _palette_of(name: String) -> Dictionary:
+	if SKINS.has(name):
+		return SKINS[name]
+	return _premium_skins().get(name, SKINS[SKIN_DEFAULT])
+
+
+## Compagnon des tâches de fond du skin courant : le lapin pour les skins de
+## base, celui que le skin premium déclare sinon (`companion`).
+func companion() -> String:
+	return str(_palette().get("companion", "lapin"))
+
+
+## Scène du modèle 3D d'un skin (lue une fois, puis en cache), ou null si le
+## fichier manque ou ne se lit pas.
+func _load_model(palette: Dictionary) -> Node3D:
+	var dir := premium_dir
+	if dir == "":
+		# Lancement direct de Godot (tests) : `data/premium` du dépôt.
+		dir = ProjectSettings.globalize_path("res://").path_join("../data/premium").simplify_path()
+	var path := dir.path_join("models").path_join(str(palette.get("model", "")))
+	if _model_cache.has(path):
+		return _model_cache[path]
+	if not FileAccess.file_exists(path):
+		return null
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	if doc.append_from_file(path, state) != OK:
+		push_warning("[godot/jimmy] modèle illisible : %s" % path)
+		return null
+	var scene := doc.generate_scene(state) as Node3D
+	_model_cache[path] = scene
+	print("[godot/jimmy] modèle chargé : %s" % path.get_file())
+	return scene
 
 
 ## Lit les skins premium (un JSON par skin). Un fichier invalide est ignoré
@@ -296,6 +370,12 @@ func _premium_skins() -> Dictionary:
 					valid = false
 					break
 				palette[key] = Color(float(value[0]), float(value[1]), float(value[2]))
+			elif typeof(value) == TYPE_STRING:
+				# `model`, `companion` : des noms, pas des nombres.
+				palette[key] = value
+			elif typeof(value) == TYPE_ARRAY and value.size() >= 3:
+				# `head_center`, `eye_offset` : positions dans le modèle.
+				palette[key] = Vector3(float(value[0]), float(value[1]), float(value[2]))
 			else:
 				palette[key] = float(value)
 		for key in SKIN_COLOR_KEYS:
@@ -315,6 +395,8 @@ func _rebuild() -> void:
 	_tail.clear()
 	_eyes.clear()
 	_pupils.clear()
+	_float = null
+	_iris_mat = null
 	_build_body()
 
 
@@ -459,8 +541,8 @@ func _apply_pose(delta: float) -> void:
 	var away: Vector2 = GAZE_AWAY.get(state, Vector2.ZERO)
 	var gaze_target := _viewer_angles() * contact + away + _glance * _glance_w
 	_gaze = _gaze.lerp(gaze_target, clampf(delta * 6.0, 0.0, 1.0))
-	_head.rotation.x = _pose["head_pitch"] + _gaze.y
-	_head.rotation.y = _pose["head_yaw"] + _gaze.x
+	_head.rotation.x = _pose["head_pitch"] + _gaze.y * _gaze_scale
+	_head.rotation.y = _pose["head_yaw"] + _gaze.x * _gaze_scale
 	_head.rotation.z = _pose["head_roll"]
 	_head.position.y = HEAD_Y + 0.012 * breathe * bounce
 
@@ -469,6 +551,15 @@ func _apply_pose(delta: float) -> void:
 	if state == SPEAKING:
 		jaw *= 0.55 + 0.45 * absf(sin(_t * 11.0))
 	_jaw.rotation.x = jaw * 0.42
+
+	# Skin à modèle 3D : lévitation lente, et l'œil (sans mâchoire) s'illumine
+	# au rythme de la parole.
+	if _float != null:
+		_float.position.y = 0.035 * sin(_t * 1.3)
+		_float.rotation.z = deg_to_rad(1.5) * sin(_t * 0.8)
+	if _iris_mat != null:
+		var listening := 0.35 if state == LISTENING else 0.0
+		_iris_mat.emission_energy_multiplier = 0.9 + listening + jaw * 2.2
 
 	# Bras.
 	_arm_l.rotation.z = -_pose["arm_l"] - deg_to_rad(4.0) * breathe * bounce
@@ -695,9 +786,186 @@ func _build_body() -> void:
 	_body.name = "Body"
 	add_child(_body)
 
+	_gaze_scale = 1.0
+	if _palette().has("model"):
+		_build_model_body()
+		return
+
 	_build_legs()
 	_build_torso()
 	_build_tail()
+
+
+## Skin à modèle 3D (voir `RIM_SHADER`) : le .glb remplace jambes, torse,
+## tête et queue. Des nœuds vides gardent les points d'accroche de
+## `_apply_pose` (bras, oreilles, mâchoire) ; l'œil est construit ici.
+func _build_model_body() -> void:
+	var p := _palette()
+	var source := _load_model(p)
+	# Lévitation sur un nœud à part : `_body` reste piloté par la respiration.
+	_float = Node3D.new()
+	_float.name = "Float"
+	_body.add_child(_float)
+	_torso = Node3D.new()
+	_torso.name = "Torso"
+	_torso.position = Vector3(0.0, 0.40, 0.0)
+	_float.add_child(_torso)
+
+	# Mise à l'échelle : le .glb fait 1 unité de haut, centré ; son bas est
+	# posé à `model_lift` au-dessus du sol (il flotte).
+	var s := float(p.get("model_height", 1.45))
+	var lift := float(p.get("model_lift", 0.06))
+	var min_y := float(p.get("model_min_y", -0.5))
+	var model_pos := Vector3(0.0, lift - _torso.position.y - min_y * s, 0.0)
+	if source != null:
+		var model := source.duplicate() as Node3D
+		model.name = "Model"
+		model.scale = Vector3.ONE * s
+		model.position = model_pos
+		_torso.add_child(model)
+		_dress_model(model, p)
+
+	# Bras figés dans le modèle : points d'accroche sans géométrie.
+	_arm_l = Node3D.new()
+	_arm_l.name = "ArmL"
+	_torso.add_child(_arm_l)
+	_arm_r = Node3D.new()
+	_arm_r.name = "ArmR"
+	_torso.add_child(_arm_r)
+
+	# Tête : pivot au centre du casque, pour que l'œil tourne sur sa surface.
+	var center: Vector3 = p.get("head_center", Vector3(0.0, 0.437, 0.035))
+	var neck := Node3D.new()
+	neck.name = "Neck"
+	neck.position = model_pos + center * s - Vector3(0.0, HEAD_Y, 0.0)
+	_torso.add_child(neck)
+	_head = Node3D.new()
+	_head.name = "Head"
+	_head.position = Vector3(0.0, HEAD_Y, 0.0)
+	neck.add_child(_head)
+	_jaw = Node3D.new()
+	_jaw.name = "Jaw"
+	_head.add_child(_jaw)
+	_ear_l = Node3D.new()
+	_head.add_child(_ear_l)
+	_ear_r = Node3D.new()
+	_head.add_child(_ear_r)
+	_gaze_scale = 0.45
+
+	_build_model_eye(p, s)
+	_build_data_bits(p)
+
+
+## Matériaux du modèle : copies (le modèle en cache reste intact), métal un
+## peu adouci (la scène n'a pas de ciel à refléter : le chrome virait au
+## noir) et liseré lumineux additif.
+func _dress_model(model: Node3D, p: Dictionary) -> void:
+	var rim := ShaderMaterial.new()
+	var shader := Shader.new()
+	shader.code = RIM_SHADER
+	rim.shader = shader
+	rim.set_shader_parameter("rim_color", p.get("rim", Color(0.25, 0.85, 1.0)))
+	for node in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := node as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var source := mi.get_active_material(i)
+			if source == null:
+				continue
+			var mat := source.duplicate() as Material
+			if mat is BaseMaterial3D:
+				var base := mat as BaseMaterial3D
+				base.metallic = minf(base.metallic, float(p.get("model_metallic", 0.55)))
+				base.roughness = maxf(base.roughness, 0.28)
+			mat.next_pass = rim
+			mi.set_surface_override_material(i, mat)
+
+
+## Œil unique : anneau, iris lumineux et pupille mobile, face à l'utilisateur.
+## Il cligne (échelle) et regarde comme les yeux du renard (`_apply_pose`).
+func _build_model_eye(p: Dictionary, s: float) -> void:
+	var offset: Vector3 = p.get("eye_offset", Vector3(0.0, 0.003, 0.09))
+	var r := float(p.get("eye_radius", 0.036)) * s
+	var eye := Node3D.new()
+	eye.name = "Eye"
+	eye.position = offset * s
+	_head.add_child(eye)
+
+	var torus := TorusMesh.new()
+	torus.inner_radius = r * 0.80
+	torus.outer_radius = r
+	torus.rings = _segments(24)
+	torus.ring_segments = 8
+	torus.material = _glow_material(p.get("eye_ring", Color(1.0, 0.2, 0.7)), 1.2)
+	var ring := MeshInstance3D.new()
+	ring.mesh = torus
+	# Le tore est couché dans le plan XZ : on le redresse face à la caméra.
+	ring.rotation.x = deg_to_rad(90.0)
+	eye.add_child(ring)
+
+	# Émission modérée : au-delà, la lueur (profil « haute ») blanchit le cyan.
+	_iris_mat = _glow_material(p["accent"], 0.9)
+	var iris := _sphere(r * 0.76, _iris_mat, 20)
+	iris.scale = Vector3(1.0, 1.0, 0.35)
+	eye.add_child(iris)
+
+	var pupil := _sphere(r * 0.30, _mat_pupil, 14)
+	pupil.position = Vector3(0.0, 0.0, r * 0.27)
+	pupil.scale = Vector3(1.0, 1.0, 0.5)
+	eye.add_child(pupil)
+
+	_eyes.append(eye)
+	_pupils.append(pupil)
+
+
+func _glow_material(color: Color, energy: float) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.3
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = energy
+	return mat
+
+
+## Petits carrés de données lumineux qui montent autour du corps. Ils restent
+## dans la zone cliquable (piège 85 : hors zone, rien n'est dessiné).
+func _build_data_bits(p: Dictionary) -> void:
+	var process := ParticleProcessMaterial.new()
+	process.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	process.emission_box_extents = Vector3(0.42, 0.55, 0.18)
+	process.direction = Vector3(0.0, 1.0, 0.0)
+	process.spread = 12.0
+	process.initial_velocity_min = 0.03
+	process.initial_velocity_max = 0.08
+	process.gravity = Vector3.ZERO
+	process.scale_min = 0.6
+	process.scale_max = 1.3
+	# Couleur tirée au hasard entre l'iris et l'anneau.
+	var ramp := Gradient.new()
+	ramp.set_color(0, p["accent"])
+	ramp.set_color(1, p.get("eye_ring", Color(1.0, 0.2, 0.7)))
+	var ramp_tex := GradientTexture1D.new()
+	ramp_tex.gradient = ramp
+	process.color_initial_ramp = ramp_tex
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.018, 0.018)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mat.vertex_color_use_as_albedo = true
+	quad.material = mat
+
+	var bits := GPUParticles3D.new()
+	bits.name = "DataBits"
+	bits.amount = int(10 * _detail) + 10
+	bits.lifetime = 4.0
+	bits.preprocess = 4.0
+	bits.process_material = process
+	bits.draw_pass_1 = quad
+	bits.position = Vector3(0.0, 0.78, 0.0)
+	bits.visibility_aabb = AABB(Vector3(-1.0, -1.0, -1.0), Vector3(2.0, 2.0, 2.0))
+	_float.add_child(bits)
 
 
 func _build_tail() -> void:

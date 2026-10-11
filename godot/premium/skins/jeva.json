@@ -1,0 +1,21 @@
+{
+  "_licence": "Contenu premium Jimy, hors MIT : voir godot/premium/LICENSE.md",
+  "_modele": "Modèle 3D jeva.glb (TRELLIS.2, licence MIT) hors dépôt : <données>/premium/models/",
+  "label": "JEVA",
+  "model": "jeva.glb",
+  "model_height": 1.45,
+  "model_lift": 0.06,
+  "model_min_y": -0.5,
+  "model_metallic": 0.55,
+  "head_center": [0.0, 0.437, 0.035],
+  "eye_offset": [0.0, 0.004, 0.092],
+  "eye_radius": 0.036,
+  "companion": "sonde",
+  "fur": [0.78, 0.82, 0.88],
+  "cream": [0.90, 0.92, 0.96],
+  "dark": [0.06, 0.07, 0.12],
+  "shirt": [0.10, 0.12, 0.20],
+  "accent": [0.20, 0.90, 1.00],
+  "eye_ring": [1.00, 0.22, 0.75],
+  "rim": [0.30, 0.80, 1.00]
+}

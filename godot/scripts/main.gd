@@ -36,13 +36,19 @@ const WINDOW_SIZE := Vector2i(560, 620)
 const BUBBLE_HIDE_DELAY := 12.0
 
 var skin: String = SKIN_DEFAULT
+## Dossier des données premium (modèles .glb des skins payants), passé par
+## Tauri (`--premium-dir`). Vide : `data/premium` du dépôt (lancement direct).
+var premium_dir := ""
 var port: int = 8787
 var bridge_host: String = "127.0.0.1"
 var bridge_port: int = 8790
 
 var _jimmy: Node3D
-## Lapin assistant des tâches de fond (`helper_rabbit.gd`, route `/helper`).
+## Compagnon des tâches de fond (route `/helper`) : le lapin pour les skins
+## de base, celui du skin premium sinon (`_apply_companion`).
 var _helper: Node3D
+## Type du compagnon affiché (`lapin`, `lapin_neon`, `sonde`).
+var _companion := ""
 var _camera: Camera3D
 var _http: Node
 var _bubble: PanelContainer
@@ -87,6 +93,8 @@ func _parse_cmdline() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--skin="):
 			skin = arg.trim_prefix("--skin=")
+		elif arg.begins_with("--premium-dir="):
+			premium_dir = arg.trim_prefix("--premium-dir=")
 		elif arg.begins_with("--port="):
 			port = int(arg.trim_prefix("--port="))
 		elif arg.begins_with("--bridge-port="):
@@ -199,6 +207,7 @@ func _build_scene() -> void:
 
 	_jimmy = JimmyFox.new()
 	_jimmy.name = "Jimmy"
+	_jimmy.premium_dir = premium_dir
 	if not _jimmy.set_skin(skin):
 		push_warning("[godot/main] skin inconnu : %s (repli sur %s)" % [skin, SKIN_DEFAULT])
 		skin = SKIN_DEFAULT
@@ -206,16 +215,7 @@ func _build_scene() -> void:
 	# Jimmy regarde l'utilisateur, c'est-à-dire la caméra (voir jimmy.gd).
 	_jimmy.set_viewer(_camera)
 
-	# Lapin des tâches de fond : à droite du renard, un peu en avant, tourné
-	# de trois quarts vers lui. Invisible tant qu'aucune tâche ne tourne.
-	# `preload` plutôt que le `class_name` : une classe nouvelle n'est connue
-	# du cache global qu'après un passage dans l'éditeur.
-	_helper = preload("res://scripts/helper_rabbit.gd").new()
-	_helper.name = "Helper"
-	# x 0,68 / z 0,05 : à 0,82 / 0,25, l'ordinateur sortait du cadre en bas.
-	_helper.position = Vector3(0.68, 0.0, 0.05)
-	_helper.rotation.y = deg_to_rad(-28.0)
-	add_child(_helper)
+	_apply_companion()
 
 	_build_ground()
 
@@ -225,6 +225,36 @@ func _build_scene() -> void:
 	add_child(_bridge)
 
 	_apply_quality(_quality)
+
+
+## Compagnon des tâches de fond assorti au skin : à droite du personnage, un
+## peu en avant, tourné de trois quarts vers lui. Invisible tant qu'aucune
+## tâche ne tourne. Changé avec le skin ; une tâche en cours le reste.
+## `preload` plutôt que le `class_name` : une classe nouvelle n'est connue
+## du cache global qu'après un passage dans l'éditeur.
+func _apply_companion() -> void:
+	var kind: String = _jimmy.companion()
+	if kind == _companion and _helper != null:
+		return
+	var working := _helper != null and str(_helper.get("state")) == "working"
+	if _helper != null:
+		remove_child(_helper)
+		_helper.queue_free()
+	match kind:
+		"sonde":
+			_helper = preload("res://scripts/helper_probe.gd").new()
+		_:
+			_helper = preload("res://scripts/helper_rabbit.gd").new()
+			_helper.set("theme", "neon" if kind == "lapin_neon" else "")
+	_helper.name = "Helper"
+	# x 0,68 / z 0,05 : à 0,82 / 0,25, l'ordinateur du lapin sortait du cadre.
+	_helper.position = Vector3(0.68, 0.0, 0.05)
+	_helper.rotation.y = deg_to_rad(-28.0)
+	add_child(_helper)
+	if working:
+		_helper.set_helper_state("working")
+	_companion = kind
+	print("[godot/main] compagnon : %s" % kind)
 
 
 ## Le fond est transparent : il n'y a pas de sol pour recevoir une ombre, et le
@@ -389,6 +419,7 @@ func _on_http_request(method: String, path: String, body: Dictionary) -> void:
 			if _jimmy.set_skin(wanted):
 				skin = wanted
 				print("[godot/main] skin appliqué : %s" % skin)
+				_apply_companion()
 			else:
 				print("[godot/main] skin inconnu : %s (on garde %s)" % [wanted, skin])
 		"/position":

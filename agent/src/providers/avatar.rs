@@ -26,7 +26,9 @@ pub const DEFAULT_SKIN: &str = "renard";
 /// Skins premium (identifiant, libellé). Leurs palettes vivent dans
 /// `godot/premium/skins/<id>.json` (licence propriétaire, hors MIT) : garder
 /// les deux alignés. Débloqués par une licence (`crate::licence`).
-pub const PREMIUM_SKINS: &[(&str, &str)] = &[("neon", "Renard Néon")];
+/// Un skin premium peut aussi porter un modèle 3D (`"model"` dans son JSON) :
+/// le `.glb` vit hors dépôt, dans `<données>/premium/models/`.
+pub const PREMIUM_SKINS: &[(&str, &str)] = &[("neon", "Renard Néon"), ("jeva", "JEVA")];
 
 /// Boutique où s'achètent les skins premium.
 pub const SHOP_URL: &str = "https://jimy-agent.me";
@@ -130,6 +132,14 @@ mod tests {
             for key in ["fur", "cream", "dark", "shirt", "accent"] {
                 assert!(json.get(key).is_some_and(|v| v.as_array().is_some_and(|a| a.len() >= 3)), "{id} : couleur {key}");
             }
+        }
+        // Un skin premium a son compagnon de tâches de fond (le lapin blanc
+        // est réservé aux skins de base, décision du 11 octobre).
+        for (id, _) in PREMIUM_SKINS {
+            let raw = std::fs::read_to_string(dir.join(format!("{id}.json"))).expect("palette");
+            let json: serde_json::Value = serde_json::from_str(&raw).expect("JSON valide");
+            let companion = json.get("companion").and_then(|c| c.as_str()).unwrap_or("lapin");
+            assert!(["lapin_neon", "sonde"].contains(&companion), "{id} : compagnon « {companion} »");
         }
         // Un identifiant ne peut pas être à la fois de base et premium.
         assert!(PREMIUM_SKINS.iter().all(|(p, _)| !SKINS.iter().any(|(b, _)| b == p)));
