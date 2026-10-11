@@ -19,6 +19,7 @@ main{max-width:960px;margin:0 auto;padding:28px 18px 60px}
 .desc{font-size:14px;color:#555;flex:1}
 .btn{display:inline-block;text-align:center;background:#111;color:#fff;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:600}
 .btn:hover{background:#333}
+.btn.off{background:#ddd;color:#777;cursor:default}
 .note{margin-top:22px;font-size:13px;color:#777;background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px}
 footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
 </style>
@@ -33,29 +34,29 @@ footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
 </header>
 <main>
 <h2>Choisis ton skin</h2>
-<p>Paiement sécurisé par Stripe. Le skin se débloque tout seul dans ton appli après paiement.</p>
+<p>La boutique ouvre bientôt. Les skins seront activables dans l'appli Jimy dès l'ouverture.</p>
 <div class="grid">
 <div class="card">
 <h2>🦊 Renard Néon</h2>
 <div class="prix">4,90 €</div>
 <p class="desc">Skin lumineux orange néon pour l'avatar renard de Jimy.</p>
-<a class="btn" href="/api/checkout?skin=neon">Acheter Néon</a>
+<span class="btn off">Bientôt disponible</span>
 </div>
 <div class="card">
 <h2>👻 Renard Fantôme</h2>
 <div class="prix">6,90 €</div>
 <p class="desc">Skin spectral translucide, effet fantôme.</p>
-<a class="btn" href="/api/checkout?skin=fantome">Acheter Fantôme</a>
+<span class="btn off">Bientôt disponible</span>
 </div>
 <div class="card">
 <h2>🤖 Renard Métal</h2>
 <div class="prix">9,90 €</div>
 <p class="desc">Skin métal brossé premium, reflets argentés.</p>
-<a class="btn" href="/api/checkout?skin=metal">Acheter Métal</a>
+<span class="btn off">Bientôt disponible</span>
 </div>
 </div>
 <div class="note">
-Après paiement, tu arrives sur une page Merci qui débloque ton skin dans Jimy automatiquement (lien appli + clé de secours à coller dans l'onglet Skin).
+Les achats ne sont pas encore ouverts : aucun paiement n'est possible pour le moment.
 </div>
 <footer>Jimy avec un seul M — jimy-agent.me</footer>
 </main>

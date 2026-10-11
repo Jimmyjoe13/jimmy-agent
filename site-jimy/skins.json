@@ -1,36 +1,34 @@
-// Catalogue officiel boutique Jimy — relié à Stripe (compte live acct_1Qp9pjLlPGgejV8r)
-// Les payment_links permanents sont à compléter dans Stripe Dashboard > Payment Links.
-// En attendant, les boutons utilisent les Checkout Sessions 24h créées le 11/10/2026.
 {
+  "_note": "Catalogue boutique Jimy (compte Stripe live). Boutique fermée : statut 'bientot' tant que l'appli ne sait pas activer un skin acheté. Le paiement passe par /api/checkout (session dynamique), plus par des liens de paiement fixes.",
   "currency": "eur",
-  "success_url": "https://jimy-agent-site.vercel.app/merci.html?skin={slug}",
-  "cancel_url": "https://jimy-agent-site.vercel.app/boutique.html?annule=1",
+  "success_url": "https://jimy-agent.me/merci.html?skin={slug}&session_id={CHECKOUT_SESSION_ID}",
+  "cancel_url": "https://jimy-agent.me/?annule=1",
   "skins": [
     {
       "slug": "neon",
       "nom": "Renard Néon",
       "prix": "4,90 €",
+      "statut": "bientot",
       "product": "prod_VPybAJXynnImgP",
       "price": "price_1UP8e1LlPGgejV8ryS4qeCdA",
-      "payment_link": "https://buy.stripe.com/5kQaEY4Q9bzhbHY7Jr3F60e",
       "description": "Skin lumineux orange néon pour l'avatar renard de Jimy."
     },
     {
       "slug": "fantome",
       "nom": "Renard Fantôme",
       "prix": "6,90 €",
+      "statut": "bientot",
       "product": "prod_VPybhE78VVd60m",
       "price": "price_1UP8eHLlPGgejV8rlvWFof3n",
-      "payment_link": null,
       "description": "Skin spectral translucide, effet fantôme."
     },
     {
       "slug": "metal",
       "nom": "Renard Métal",
       "prix": "9,90 €",
+      "statut": "bientot",
       "product": "prod_VPybKuHUtyLu2W",
       "price": "price_1UP8eILlPGgejV8rC9xYReS3",
-      "payment_link": null,
       "description": "Skin métal brossé premium, reflets argentés."
     }
   ]

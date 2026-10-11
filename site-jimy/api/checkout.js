@@ -5,6 +5,12 @@ const config = {
 };
 
 export default async function handler(req, res) {
+  // Boutique fermée tant que l'appli ne sait pas activer un skin acheté :
+  // aucune session de paiement n'est créée. Réouverture = variable Vercel
+  // BOUTIQUE_OUVERTE=true, sans toucher au code.
+  if (process.env.BOUTIQUE_OUVERTE !== 'true') {
+    return res.status(503).json({ ok: false, error: 'boutique pas encore ouverte' });
+  }
   try {
     const url = new URL(req.url, 'https://x');
     const slug = (url.searchParams.get('skin') || '').toLowerCase();
