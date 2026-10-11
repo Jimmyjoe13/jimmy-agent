@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy — Politique de confidentialité</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;line-height:1.6}
+header{display:flex;align-items:center;gap:14px;padding:18px 22px;background:#fff;border-bottom:1px solid #eee}
+header img{width:44px;height:44px;border-radius:12px;object-fit:cover}
+header a{color:#222;text-decoration:none;font-weight:700;font-size:20px}
+main{max-width:820px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin-bottom:14px}
+h2{font-size:19px;margin:26px 0 8px}
+p,li{margin-bottom:8px}
+ul{margin-left:20px}
+.box{background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px;margin:14px 0}
+footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
+a{color:#b35a12}
+</style>
+</head>
+<body>
+<header><img src="logo-jimy.jpg" alt="Logo Jimy"><a href="/">Jimy</a></header>
+<main>
+<h1>Politique de confidentialité</h1>
+<p>Jimy est un agent personnel qui fonctionne <b>sur ton ordinateur</b>. Pas de compte, pas de publicité, pas de télémétrie : rien n'est envoyé à l'auteur de Jimy.</p>
+
+<h2>Ce qui reste sur ta machine</h2>
+<ul>
+<li>Historique des conversations, mémoire, réglages, clés d'API : stockés localement (<code>%APPDATA%\Jimmy</code>).</li>
+<li>La reconnaissance vocale est locale (whisper.cpp) : <b>l'audio du micro ne quitte pas ton ordinateur</b>.</li>
+</ul>
+
+<h2>Ce qui part sur le réseau, et pourquoi</h2>
+<ul>
+<li><b>Le fournisseur de modèle de langage que tu choisis</b> (OpenCode Go, OpenRouter…) reçoit tes messages et le contexte nécessaire pour répondre, avec ta propre clé. Sa politique de confidentialité s'applique.</li>
+<li><b>La synthèse vocale</b> (Fish Audio via OpenRouter) reçoit le texte que Jimy lit à voix haute.</li>
+<li><b>Au premier lancement</b>, Jimy télécharge ses composants vocaux depuis GitHub et Hugging Face.</li>
+<li><b>Les actions que tu autorises</b> (navigateur, requêtes web, serveurs MCP) contactent les services que tu demandes. Par défaut, tout est refusé tant que tu ne l'as pas autorisé.</li>
+</ul>
+
+<h2>Le site jimy-agent.me</h2>
+<ul>
+<li>Hébergé par Vercel. Pas de cookie de suivi ni d'outil d'analyse.</li>
+<li>Paiements (boutique de skins) par Stripe : tes données de carte sont traitées par Stripe, jamais par nous. Nous ne stockons rien nous-mêmes : la référence du paiement reste chez Stripe et figure dans ta clé de licence.</li>
+</ul>
+
+<h2>English summary</h2>
+<p>This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it: messages go only to the language-model provider the user configures, read-aloud text to the text-to-speech service, and voice components are downloaded once at first launch. Speech recognition runs locally.</p>
+
+<h2>Contact</h2>
+<p>Via le dépôt <a href="https://github.com/Jimmyjoe13/jimmy-agent/issues">GitHub</a>.</p>
+<footer>Jimy — <a href="/">jimy-agent.me</a> · <a href="/code-signing.html">Code signing policy</a> · <a href="/confidentialite.html">Confidentialité</a></footer>
+</main>
+</body>
+</html>

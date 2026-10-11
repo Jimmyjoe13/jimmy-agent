@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy — Code signing policy</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;line-height:1.6}
+header{display:flex;align-items:center;gap:14px;padding:18px 22px;background:#fff;border-bottom:1px solid #eee}
+header img{width:44px;height:44px;border-radius:12px;object-fit:cover}
+header a{color:#222;text-decoration:none;font-weight:700;font-size:20px}
+main{max-width:820px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin-bottom:14px}
+h2{font-size:19px;margin:26px 0 8px}
+p,li{margin-bottom:8px}
+ul{margin-left:20px}
+.box{background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px;margin:14px 0}
+footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
+a{color:#b35a12}
+</style>
+</head>
+<body>
+<header><img src="logo-jimy.jpg" alt="Logo Jimy"><a href="/">Jimy</a></header>
+<main>
+<h1>Code signing policy</h1>
+<div class="box">
+<p><b>Statut :</b> la signature gratuite de l'installeur Windows est <b>en cours de demande</b> auprès de SignPath Foundation. Tant qu'elle n'est pas accordée, l'installeur n'est pas signé et Windows affiche un avertissement.</p>
+<p><b>Status:</b> free code signing for the Windows installer has been <b>requested</b> from SignPath Foundation. Until it is granted, the installer is unsigned.</p>
+<p>Once granted: <b>Free code signing provided by <a href="https://about.signpath.io">SignPath.io</a>, certificate by <a href="https://signpath.org">SignPath Foundation</a>.</b></p>
+</div>
+
+<h2>Ce qui est signé / What gets signed</h2>
+<ul>
+<li>Uniquement l'installeur Windows de Jimy (<code>Jimy-setup.exe</code>) et l'application qu'il installe, construits <b>par GitHub Actions</b> à partir du code public du dépôt <a href="https://github.com/Jimmyjoe13/jimmy-agent">github.com/Jimmyjoe13/jimmy-agent</a> (workflow <a href="https://github.com/Jimmyjoe13/jimmy-agent/blob/main/.github/workflows/installeur-windows.yml">installeur-windows.yml</a>).</li>
+<li>Only the Jimy Windows installer and the application it installs, built by GitHub Actions from the public source code of the repository above. No binary built on a personal machine is signed.</li>
+<li>Chaque demande de signature est approuvée manuellement / Every signing request is approved manually.</li>
+</ul>
+
+<h2>Équipe / Team roles</h2>
+<ul>
+<li><b>Committers and reviewers:</b> <a href="https://github.com/Jimmyjoe13">Jimmyjoe13</a></li>
+<li><b>Approvers:</b> <a href="https://github.com/Jimmyjoe13">Jimmyjoe13</a></li>
+</ul>
+<p>Les membres de l'équipe utilisent l'authentification à deux facteurs sur GitHub et SignPath. / Team members use multi-factor authentication for GitHub and SignPath.</p>
+
+<h2>Confidentialité / Privacy</h2>
+<p>This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Détail : <a href="/confidentialite.html">politique de confidentialité</a>.</p>
+<footer>Jimy — <a href="/">jimy-agent.me</a> · <a href="/code-signing.html">Code signing policy</a> · <a href="/confidentialite.html">Confidentialité</a></footer>
+</main>
+</body>
+</html>
