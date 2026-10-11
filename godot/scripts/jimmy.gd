@@ -128,6 +128,15 @@ const SKINS := {
 }
 const SKIN_DEFAULT := "renard"
 
+## Skins premium : données sous licence propriétaire (godot/premium/LICENSE.md),
+## hors MIT ; ce code de chargement, lui, reste MIT. Un fichier JSON par skin
+## (nom du fichier = identifiant), mêmes clés que `SKINS`, couleurs en
+## [r, g, b]. Paramètre de forme en plus : `glow` (0 = aucun, 1 = néon).
+## L'appli ne les propose pas encore : Tauri n'accepte que les skins de
+## `providers::avatar::SKINS` (Rust) ; l'activation par licence viendra ensuite.
+const PREMIUM_SKINS_DIR := "res://premium/skins"
+const SKIN_COLOR_KEYS := ["fur", "cream", "dark", "shirt", "accent"]
+
 ## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
 ## tête est rapprochée du col pour une silhouette plus compacte.
 const HEAD_Y := 0.30
@@ -156,6 +165,10 @@ const GAZE_PITCH_MAX := 0.45
 var state: String = IDLE
 ## Skin courant. Positionné avant l'entrée dans l'arbre, ou via `set_skin`.
 var skin: String = SKIN_DEFAULT
+## Skins premium lus sur disque, chargés au premier besoin : `set_skin` peut
+## être appelé avant l'entrée dans l'arbre.
+var _premium_cache: Dictionary = {}
+var _premium_loaded := false
 var _t := 0.0
 var _blink_t := 0.0
 var _blink := 0.0
@@ -227,7 +240,7 @@ func set_detail(detail: float) -> void:
 ## Change de skin : nouveaux matériaux, puis reconstruction du personnage.
 ## Renvoie `false` (et ne change rien) si le skin est inconnu.
 func set_skin(name: String) -> bool:
-	if not SKINS.has(name):
+	if not has_skin(name):
 		return false
 	if name == skin:
 		return true
@@ -236,6 +249,59 @@ func set_skin(name: String) -> bool:
 		_make_materials()
 		_rebuild()
 	return true
+
+
+## Vrai si le skin existe, de base ou premium.
+func has_skin(name: String) -> bool:
+	return SKINS.has(name) or _premium_skins().has(name)
+
+
+## Palette du skin courant (base, sinon premium, sinon skin par défaut).
+func _palette() -> Dictionary:
+	if SKINS.has(skin):
+		return SKINS[skin]
+	return _premium_skins().get(skin, SKINS[SKIN_DEFAULT])
+
+
+## Lit les skins premium (un JSON par skin). Un fichier invalide est ignoré
+## avec un avertissement : il ne doit jamais empêcher l'avatar de s'afficher
+## (piège 72 : un skin cassé = avatar invisible).
+func _premium_skins() -> Dictionary:
+	if _premium_loaded:
+		return _premium_cache
+	_premium_loaded = true
+	var dir := DirAccess.open(PREMIUM_SKINS_DIR)
+	if dir == null:
+		return _premium_cache
+	for file in dir.get_files():
+		if not file.ends_with(".json"):
+			continue
+		var data = JSON.parse_string(FileAccess.get_file_as_string(PREMIUM_SKINS_DIR + "/" + file))
+		if typeof(data) != TYPE_DICTIONARY:
+			push_warning("[godot/jimmy] skin premium illisible : %s" % file)
+			continue
+		var palette := {}
+		var valid := true
+		for key in data:
+			# `_licence`, `label` : informatifs, pas des paramètres de rendu.
+			if str(key).begins_with("_") or key == "label":
+				continue
+			var value = data[key]
+			if key in SKIN_COLOR_KEYS:
+				if typeof(value) != TYPE_ARRAY or value.size() < 3:
+					valid = false
+					break
+				palette[key] = Color(float(value[0]), float(value[1]), float(value[2]))
+			else:
+				palette[key] = float(value)
+		for key in SKIN_COLOR_KEYS:
+			if not palette.has(key):
+				valid = false
+		if valid:
+			_premium_cache[file.get_basename()] = palette
+		else:
+			push_warning("[godot/jimmy] skin premium incomplet : %s" % file)
+	return _premium_cache
 
 
 func _rebuild() -> void:
@@ -484,7 +550,7 @@ func _make_materials() -> void:
 	_outline.grow = true
 	_outline.grow_amount = OUTLINE_WIDTH
 
-	var palette: Dictionary = SKINS.get(skin, SKINS[SKIN_DEFAULT])
+	var palette: Dictionary = _palette()
 	# Les variantes sans contour dérivent des matériaux : à régénérer aussi.
 	_plain_cache.clear()
 
@@ -514,6 +580,17 @@ func _make_materials() -> void:
 			mat.normal_texture = fur_normal
 			mat.normal_scale = 0.45
 			mat.uv1_scale = Vector3(3.0, 3.0, 1.0)
+
+	# Néon (skin premium) : fourrure, ventre et accents émettent leur propre
+	# lumière ; `glow` règle l'intensité (absent ou 0 = aucun effet). Les
+	# variantes sans contour sont des copies : elles héritent de l'émission.
+	var glow := float(palette.get("glow", 0.0))
+	if glow > 0.0:
+		for pair in [[_mat_fur, 0.22], [_mat_cream, 0.08], [_mat_accent, 2.2]]:
+			var mat: StandardMaterial3D = pair[0]
+			mat.emission_enabled = true
+			mat.emission = mat.albedo_color
+			mat.emission_energy_multiplier = glow * float(pair[1])
 
 
 ## Normal map de fourrure générée à partir d'un bruit : grain fin, sans
@@ -622,7 +699,7 @@ func _build_tail() -> void:
 	# Queue en chaîne de sphères : chaque maillon reçoit le mouvement du
 	# précédent avec un léger retard, ce qui donne un remuage naturel.
 	# `tail_scale` = 0 (robot) : pas de queue.
-	var tail_scale := float(SKINS.get(skin, SKINS[SKIN_DEFAULT]).get("tail_scale", 1.0))
+	var tail_scale := float(_palette().get("tail_scale", 1.0))
 	if tail_scale <= 0.0:
 		return
 	var parent: Node3D = _body
@@ -786,7 +863,7 @@ func _build_ears() -> void:
 		var ear := Node3D.new()
 		ear.name = "Ear%s" % ("L" if side < 0 else "R")
 		ear.position = Vector3(0.076 * side, 0.118, -0.005)
-		ear.scale = Vector3.ONE * float(SKINS.get(skin, SKINS[SKIN_DEFAULT])["ear_scale"])
+		ear.scale = Vector3.ONE * float(_palette().get("ear_scale", 1.0))
 		_head.add_child(ear)
 
 		var outer := _cone(0.050, 0.004, 0.145, _mat_fur)
