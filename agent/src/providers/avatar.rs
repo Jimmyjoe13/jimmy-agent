@@ -30,7 +30,7 @@ pub const DEFAULT_SKIN: &str = "renard";
 /// le `.glb` vit hors dépôt, dans `<données>/premium/models/`.
 /// Troisième champ : son **mot d'éveil**, le nom du skin (décision du
 /// 11 octobre : un skin premium répond à son nom, plus à « Jimy »).
-pub const PREMIUM_SKINS: &[(&str, &str, &str)] = &[("neon", "Renard Néon", "néon"), ("jeva", "JEVA", "jeva")];
+pub const PREMIUM_SKINS: &[(&str, &str, &str)] = &[("neon", "Renard Néon", "néon"), ("jeva", "JEVA", "jeva"), ("ark", "ARK", "ark")];
 
 /// Boutique où s'achètent les skins premium.
 pub const SHOP_URL: &str = "https://jimy-agent.me";
@@ -173,7 +173,7 @@ mod tests {
                 assert!(json.get(key).is_some_and(|v| v.as_array().is_some_and(|a| a.len() >= 3)), "{id} : couleur {key}");
             }
             let companion = json.get("companion").and_then(|c| c.as_str()).unwrap_or("lapin");
-            assert!(["lapin_neon", "sonde"].contains(&companion), "{id} : compagnon « {companion} »");
+            assert!(["lapin_neon", "sonde", "sonde_ark"].contains(&companion), "{id} : compagnon « {companion} »");
         }
     }
 }

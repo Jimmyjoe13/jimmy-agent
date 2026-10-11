@@ -469,6 +469,15 @@ pub fn phonetic(word: &str) -> String {
                 i += 1;
                 's'
             }
+            // « c » dur (pas devant e/i/y) et « qu » s'entendent « k » :
+            // « Arc », « Arque » et « Ark » se valent.
+            'c' if !matches!(next, Some('e' | 'i' | 'y')) => 'k',
+            'q' => {
+                if next == Some('u') {
+                    i += 1;
+                }
+                'k'
+            }
             'h' => {
                 i += 1;
                 continue;
@@ -480,6 +489,10 @@ pub fn phonetic(word: &str) -> String {
             out.push(mapped);
         }
         i += 1;
+    }
+    // « e » final muet (« Arque » → « ark »), sauf dans un mot très court.
+    if out.len() > 3 && out.last() == Some(&'e') {
+        out.pop();
     }
     out.into_iter().collect()
 }
@@ -863,6 +876,19 @@ mod tests {
             assert!(matches_wake_word(transcript, "néon"), "{transcript}");
         }
         assert!(!matches_wake_word("Jimmy, ouvre mes notes", "néon"));
+    }
+
+    /// ARK : trois lettres, donc aucune tolérance d'orthographe ; Whisper écrit
+    /// « Arc » ou « Arque » (même son). La clé phonétique les ramène à « ark ».
+    #[test]
+    fn mot_d_eveil_ark() {
+        for transcript in ["ARK, ouvre mes notes", "Ark, quelle heure est-il ?", "Arc, analyse ça", "Hé Arque !", "Arck, ouvre le dossier"] {
+            assert!(matches_wake_word(transcript, "ark"), "{transcript}");
+        }
+        assert_eq!(strip_wake_word("Arc, quelle heure est-il ?", "ark"), "quelle heure est-il ?");
+        for transcript in ["Art, ouvre mes notes", "Jimmy, ouvre mes notes", "Arbre", "Arcade géante"] {
+            assert!(!matches_wake_word(transcript, "ark"), "{transcript}");
+        }
     }
 
     #[test]

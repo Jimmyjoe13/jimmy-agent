@@ -165,6 +165,43 @@ void fragment() {
 }
 """
 
+## Tentacules d'un modèle mécanique (skin ARK), cible par état : enroulement
+## (rad par os, positif = plus enroulé), pente vers le bas, amplitude et
+## vitesse de l'onde qui court vers la pointe, part de visée vers
+## l'utilisateur, ouverture des pinces (rad).
+const TENTACLE_MOODS := {
+	"idle": {"curl": 0.0, "droop": 0.0, "amp": 0.075, "speed": 1.3, "aim": 0.0, "grip": 0.12},
+	"listening": {"curl": -0.03, "droop": -0.02, "amp": 0.055, "speed": 1.1, "aim": 1.0, "grip": 0.22},
+	"thinking": {"curl": 0.07, "droop": 0.0, "amp": 0.05, "speed": 0.8, "aim": 0.0, "grip": 0.0},
+	"speaking": {"curl": 0.0, "droop": -0.01, "amp": 0.10, "speed": 1.9, "aim": 0.5, "grip": 0.18},
+	"executing": {"curl": 0.02, "droop": 0.0, "amp": 0.13, "speed": 2.6, "aim": 0.0, "grip": 0.25},
+	"success": {"curl": -0.08, "droop": -0.05, "amp": 0.11, "speed": 2.4, "aim": 0.3, "grip": 0.35},
+	"error": {"curl": 0.03, "droop": 0.09, "amp": 0.03, "speed": 0.7, "aim": 0.0, "grip": 0.30},
+	"waiting": {"curl": 0.02, "droop": 0.0, "amp": 0.06, "speed": 1.0, "aim": 0.2, "grip": 0.10},
+}
+## Largeur d'une pupille fendue par état (skin premium `pupil_slit`) : elle
+## s'ouvre pour écouter, se pince pour réfléchir ou en cas d'échec.
+const PUPIL_SLIT := {"listening": 0.5, "speaking": 0.4, "thinking": 0.2, "error": 0.16}
+
+## Halo lumineux derrière un modèle (clé `aura` du skin, couleur [r, g, b]) :
+## disque toujours face à la caméra, qui s'efface vers le bord. Mélange alpha,
+## pas additif : sur la fenêtre transparente, un ajout sur un fond d'alpha 0
+## reste invisible (vérifié par capture).
+const AURA_SHADER := """
+shader_type spatial;
+render_mode blend_mix, unshaded, depth_draw_never, cull_disabled, shadows_disabled;
+uniform vec4 aura_color : source_color = vec4(0.3, 1.0, 0.4, 1.0);
+uniform float strength = 0.5;
+void vertex() {
+	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
+}
+void fragment() {
+	float f = pow(clamp(1.0 - length(UV - vec2(0.5)) * 2.0, 0.0, 1.0), 1.8);
+	ALBEDO = aura_color.rgb;
+	ALPHA = f * strength;
+}
+"""
+
 ## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
 ## tête est rapprochée du col pour une silhouette plus compacte.
 const HEAD_Y := 0.30
@@ -214,6 +251,25 @@ var _rig: Skeleton3D = null
 var _rig_ids: Dictionary = {}
 ## Os des câbles : [indice, côté (-1/+1), secteur, rang dans la chaîne].
 var _cable_bones: Array = []
+## Tentacules d'un modèle mécanique (os `tent_<k>_<i>`, griffes
+## `claw_<k>_<f>`) : une entrée par tentacule, voir `_setup_tentacles`.
+var _tentacles: Array = []
+## Réglages d'humeur lissés (`TENTACLE_MOODS`) et phase de l'onde, intégrée :
+## un changement de vitesse ne fait jamais sauter l'onde.
+var _tent_mix: Dictionary = {}
+var _tent_phase := 0.0
+## Rotation de la tête et hauteur à l'image précédente (inertie).
+var _last_head_rot := Vector3.ZERO
+var _last_lift := 0.0
+## Matériaux lumineux d'un modèle qui déclare `model_glow` (runes, liserés) :
+## ils pulsent doucement et s'allument avec la parole.
+var _glow_mats: Array = []
+var _glow_base := 1.0
+var _aura_mat: ShaderMaterial = null
+## Pupille fendue (`pupil_slit`) et débattement des pupilles (unités de
+## l'œil, proportionnel à son rayon ; 0,012 pour le renard).
+var _slit := false
+var _pupil_range := 0.012
 ## Part de « parole » (0 → 1), lissée : les gestes de main en dépendent.
 var _talk := 0.0
 var _t := 0.0
@@ -485,6 +541,9 @@ func _drive_rig(delta: float, breathe: float, sway: float, bounce: float) -> voi
 	_rig_rot("head", _head.rotation)
 	_rig_rot("chest", Vector3(0.03 * breathe * bounce, 0.04 * sway, 0.0))
 	_rig_rot("spine", Vector3(0.012 * breathe, 0.0, 0.02 * sway))
+	if not _tentacles.is_empty():
+		_drive_tentacles(delta)
+		return
 
 	# Bras : 0,10 = bras du renard au repos (POSES idle).
 	var raise_n := _arm_l.rotation.z + 0.10
@@ -522,6 +581,171 @@ func _drive_rig(delta: float, breathe: float, sway: float, bounce: float) -> voi
 		var phase := _t * speed - rank * 0.9 + sector * 0.35 + (0.0 if side > 0.0 else 0.7)
 		_rig.set_bone_pose_rotation(c[0], Quaternion.from_euler(Vector3(
 			0.0 if low else 0.04 * rank * sin(phase * 0.7 + 0.5), 0.0, side * amp * sin(phase))))
+
+
+## Prépare l'animation des tentacules d'un modèle mécanique (os
+## `tent_<k>_<i>`, rang 0 à la racine ; griffes `claw_<k>_<f>`). Pour chaque
+## os : sa direction de repos (vers l'os suivant) et ses axes de flexion,
+## dans les axes du modèle (os à base identité, comme ceux des .rig) :
+##   - `curl`  : plan de courbure naturel du tentacule (l'enrouler davantage) ;
+##   - `side`  : hors de ce plan (balayage latéral) ;
+##   - `droop` : vers le bas (pendre) ; `aim` : vers l'utilisateur (+Z).
+## Une griffe s'ouvre autour de `pointe × écart` (vers l'extérieur).
+func _setup_tentacles() -> void:
+	var chains := {}
+	var claws := {}
+	for bone_name in _rig_ids:
+		var parts := str(bone_name).split("_")
+		if parts.size() != 3:
+			continue
+		if parts[0] == "tent":
+			if not chains.has(parts[1]):
+				chains[parts[1]] = {}
+			chains[parts[1]][int(parts[2])] = _rig_ids[bone_name]
+		elif parts[0] == "claw":
+			if not claws.has(parts[1]):
+				claws[parts[1]] = []
+			claws[parts[1]].append(_rig_ids[bone_name])
+	for key in chains:
+		var ranks: Array = chains[key].keys()
+		ranks.sort()
+		var bones: Array = []
+		var origins: Array = []
+		for r in ranks:
+			bones.append(chains[key][r])
+			origins.append(_rig.get_bone_global_rest(chains[key][r]).origin)
+		var fingers: Array = claws.get(key, [])
+		# Le dernier os vise ses griffes ; celui d'une antenne prolonge l'avant-dernier.
+		var dirs: Array = []
+		for i in bones.size():
+			var d := Vector3.UP
+			if i + 1 < bones.size():
+				d = origins[i + 1] - origins[i]
+			elif not fingers.is_empty():
+				var mid := Vector3.ZERO
+				for f in fingers:
+					mid += _rig.get_bone_global_rest(f).origin
+				d = mid / fingers.size() - origins[i]
+			elif i > 0:
+				d = dirs[i - 1]
+			dirs.append(d.normalized())
+		# Courbure naturelle : somme des virages d'un os au suivant.
+		var curl := Vector3.ZERO
+		for i in range(1, dirs.size()):
+			curl += (dirs[i - 1] as Vector3).cross(dirs[i])
+		if curl.length() < 1e-4:
+			curl = (dirs[0] as Vector3).cross(Vector3.UP)
+		curl = curl.normalized()
+		var links: Array = []
+		for i in bones.size():
+			var d: Vector3 = dirs[i]
+			links.append({
+				"bone": bones[i], "dir": d,
+				"side": _axis_or_zero(d.cross(curl)),
+				"droop": _axis_or_zero(d.cross(Vector3.DOWN)),
+				"aim": _axis_or_zero(d.cross(Vector3.BACK)),
+				"rot": Vector3.ZERO, "vel": Vector3.ZERO,
+			})
+		var tip: Vector3 = dirs[dirs.size() - 1]
+		var grips: Array = []
+		for f in fingers:
+			var out: Vector3 = _rig.get_bone_global_rest(f).origin - origins[origins.size() - 1]
+			out -= tip * out.dot(tip)
+			grips.append({"bone": f, "axis": _axis_or_zero(tip.cross(out)), "open": 0.0})
+		# Phase propre (angle d'or) : deux tentacules ne sont jamais synchrones.
+		_tentacles.append({"links": links, "curl": curl, "grips": grips,
+			"phase": _tentacles.size() * 2.399, "sensor": fingers.is_empty()})
+
+
+func _axis_or_zero(v: Vector3) -> Vector3:
+	return v.normalized() if v.length() > 1e-3 else Vector3.ZERO
+
+
+## Anime les tentacules. Chaque os suit une **cible** (humeur de l'état, onde
+## qui court vers la pointe, dérive lente, gestes) au travers d'un ressort
+## amorti, plus souple vers la pointe : le mouvement se propage en cascade.
+## L'inertie déplace l'état du ressort (pas la cible) quand la sphère tourne
+## ou monte : les tentacules restent un instant en arrière, puis rattrapent
+## en dépassant un peu. C'est ce qui rend le mouvement fluide.
+func _drive_tentacles(delta: float) -> void:
+	var dt := minf(delta, 1.0 / 30.0)
+	var mood: Dictionary = TENTACLE_MOODS.get(state, TENTACLE_MOODS["idle"])
+	if _tent_mix.is_empty():
+		_tent_mix = mood.duplicate()
+		_last_head_rot = _head.rotation
+		_last_lift = _float.position.y + _body.position.y
+	for key in mood:
+		_tent_mix[key] = lerpf(_tent_mix[key], mood[key], clampf(dt * 2.5, 0.0, 1.0))
+	_tent_phase += dt * float(_tent_mix["speed"])
+	var amp: float = _tent_mix["amp"]
+
+	# Mouvement de la sphère depuis l'image précédente (un saut = reconstruction).
+	var spin := _head.rotation - _last_head_rot
+	_last_head_rot = _head.rotation
+	if spin.length() > 0.3:
+		spin = Vector3.ZERO
+	var lift := _float.position.y + _body.position.y
+	var rise := lift - _last_lift
+	_last_lift = lift
+	if absf(rise) > 0.05:
+		rise = 0.0
+
+	var env := _gesture_env()
+	var gk := clampf(_gesture_t / _gesture_dur, 0.0, 1.0) if _gesture != "" else 0.0
+	var jaw := float(_pose["jaw"])
+	for chain in _tentacles:
+		var links: Array = chain["links"]
+		var curl_axis: Vector3 = chain["curl"]
+		var ph: float = chain["phase"]
+		var n := links.size()
+		# Dérive lente propre à chaque tentacule : jamais deux fois le même geste.
+		var drift := 0.035 * sin(_t * 0.37 + ph * 2.1) + 0.025 * sin(_t * 0.61 + ph * 3.3)
+		var aim: float = float(_tent_mix["aim"]) * (1.0 if chain["sensor"] else 0.5)
+		for i in n:
+			var link: Dictionary = links[i]
+			var u := float(i) / maxf(1.0, n - 1.0)
+			var w := 0.45 + 0.55 * u
+			var curl: float = float(_tent_mix["curl"]) + drift * w \
+				+ amp * w * sin(_tent_phase * 1.6 - i * 0.75 + ph)
+			var side := amp * 0.8 * w * sin(_tent_phase * 1.3 - i * 0.6 + ph * 1.7 + 1.0)
+			var droop: float = float(_tent_mix["droop"]) * (1.0 - 0.5 * u)
+			match _gesture:
+				"nod":
+					curl += 0.12 * sin(gk * TAU) * env * w
+				"perk":
+					droop -= 0.08 * env
+				"cheer":
+					curl -= 0.10 * env
+				"shake":
+					side += 0.09 * sin(_gesture_t * 22.0 + i * 0.9 + ph) * env
+			var target: Vector3 = curl_axis * curl + link["side"] * side + link["droop"] * droop
+			if aim > 0.0 and i < 4:
+				target += link["aim"] * (0.07 * aim)
+			# Inertie, en cascade : ~1× le mouvement de la sphère au total.
+			var d: Vector3 = link["dir"]
+			var lag := 0.11 * (0.5 + u)
+			var rot: Vector3 = link["rot"] - (spin - d * spin.dot(d)) * lag \
+				+ link["droop"] * (rise * 1.5 * (0.5 + u))
+			var k := lerpf(140.0, 45.0, u)
+			var vel: Vector3 = link["vel"]
+			vel += (k * (target - rot) - 1.2 * sqrt(k) * vel) * dt
+			rot += vel * dt
+			link["rot"] = rot
+			link["vel"] = vel
+			var angle := rot.length()
+			_rig.set_bone_pose_rotation(link["bone"],
+				Quaternion(rot / angle, angle) if angle > 1e-5 else Quaternion.IDENTITY)
+
+		# Pinces : entrouvertes au repos, elles « parlent » avec la voix et
+		# claquent pendant la joie.
+		for g in chain["grips"]:
+			var want: float = float(_tent_mix["grip"]) + 0.10 * maxf(0.0, sin(_t * 0.5 + ph))
+			if state == SPEAKING:
+				want += 0.45 * jaw * (0.5 + 0.5 * sin(_t * 8.0 + ph * 3.0))
+			if _gesture == "cheer":
+				want += 0.45 * absf(sin(gk * PI * 3.0)) * env
+			g["open"] = lerpf(g["open"], want, clampf(dt * 10.0, 0.0, 1.0))
+			_rig.set_bone_pose_rotation(g["bone"], Quaternion(g["axis"], g["open"]))
 
 
 ## Lit les skins premium (un JSON par skin). Un fichier invalide est ignoré
@@ -584,6 +808,12 @@ func _rebuild() -> void:
 	_rig = null
 	_rig_ids.clear()
 	_cable_bones.clear()
+	_tentacles.clear()
+	_tent_mix = {}
+	_glow_mats.clear()
+	_aura_mat = null
+	_slit = false
+	_pupil_range = 0.012
 	_build_body()
 
 
@@ -749,6 +979,14 @@ func _apply_pose(delta: float) -> void:
 	if _iris_mat != null:
 		var listening := 0.35 if state == LISTENING else 0.0
 		_iris_mat.emission_energy_multiplier = 0.9 + listening + jaw * 2.2
+	if not _glow_mats.is_empty():
+		var pulse := 1.0 + 0.18 * sin(_t * 2.2) + 0.5 * jaw * absf(sin(_t * 9.0))
+		if state == "error":
+			pulse *= 0.45
+		for mat in _glow_mats:
+			(mat as BaseMaterial3D).emission_energy_multiplier = _glow_base * pulse
+		if _aura_mat != null:
+			_aura_mat.set_shader_parameter("strength", 0.75 * pulse)
 
 	# Bras.
 	_arm_l.rotation.z = -_pose["arm_l"] - deg_to_rad(4.0) * breathe * bounce
@@ -775,8 +1013,11 @@ func _apply_pose(delta: float) -> void:
 			var d := _eyes[i].to_local(_viewer.global_position).normalized()
 			look += Vector2(d.x, d.y) * eye_contact
 		var follow := clampf(delta * 10.0, 0.0, 1.0)
-		pupil.position.x = lerpf(pupil.position.x, clampf(look.x * 0.03, -0.012, 0.012), follow)
-		pupil.position.y = lerpf(pupil.position.y, clampf(look.y * 0.03, -0.008, 0.008), follow)
+		var reach := _pupil_range
+		pupil.position.x = lerpf(pupil.position.x, clampf(look.x * reach * 2.5, -reach, reach), follow)
+		pupil.position.y = lerpf(pupil.position.y, clampf(look.y * reach * 2.5, -reach * 0.67, reach * 0.67), follow)
+		if _slit:
+			pupil.scale.x = lerpf(pupil.scale.x, float(PUPIL_SLIT.get(state, 0.3)), clampf(delta * 6.0, 0.0, 1.0))
 
 	# Geste ponctuel : couche additive par-dessus la pose de fond. Chaque
 	# geste tient en une phrase lisible : hochement, redressement, saut,
@@ -1045,7 +1286,9 @@ func _build_model_body() -> void:
 	# accroché à l'os de la tête. Sans : modèle d'un bloc, œil sur `_head`.
 	var model_node := _torso.get_node_or_null("Model")
 	if model_node != null:
-		_rig = model_node.find_child("Skeleton", true, false) as Skeleton3D
+		var skeletons := model_node.find_children("*", "Skeleton3D", true, false)
+		if not skeletons.is_empty():
+			_rig = skeletons[0] as Skeleton3D
 	var eye_offset: Vector3 = p.get("eye_offset", Vector3(0.0, 0.003, 0.09))
 	if _rig != null:
 		for i in _rig.get_bone_count():
@@ -1055,6 +1298,7 @@ func _build_model_body() -> void:
 				# cable_<n|p><secteur>_<rang>
 				var tag := bone_name.trim_prefix("cable_")
 				_cable_bones.append([i, -1.0 if tag[0] == "n" else 1.0, int(tag[1]), int(tag.get_slice("_", 1))])
+		_setup_tentacles()
 		var attach := BoneAttachment3D.new()
 		attach.name = "HeadAttach"
 		_rig.add_child(attach)
@@ -1065,6 +1309,28 @@ func _build_model_body() -> void:
 	else:
 		_build_model_eye(p, _head, eye_offset * s, s)
 	_build_data_bits(p)
+	if p.has("aura"):
+		_build_aura(p, model_pos + center * s, s)
+
+
+## Halo derrière la sphère (`AURA_SHADER`), un peu en retrait pour ne pas
+## voiler l'œil ; il pulse avec les runes (`_apply_pose`).
+func _build_aura(p: Dictionary, at: Vector3, s: float) -> void:
+	_aura_mat = ShaderMaterial.new()
+	var shader := Shader.new()
+	shader.code = AURA_SHADER
+	_aura_mat.shader = shader
+	_aura_mat.set_shader_parameter("aura_color", p["aura"])
+	var quad := QuadMesh.new()
+	var size := float(p.get("aura_size", 0.8)) * s
+	quad.size = Vector2(size, size)
+	quad.material = _aura_mat
+	var aura := MeshInstance3D.new()
+	aura.name = "Aura"
+	aura.mesh = quad
+	aura.position = at - Vector3(0.0, 0.0, 0.12)
+	aura.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_torso.add_child(aura)
 
 
 ## Matériaux du modèle : copies (le modèle en cache reste intact), métal un
@@ -1087,6 +1353,12 @@ func _dress_model(model: Node3D, p: Dictionary) -> void:
 				var base := mat as BaseMaterial3D
 				base.metallic = minf(base.metallic, float(p.get("model_metallic", 0.55)))
 				base.roughness = maxf(base.roughness, 0.28)
+				# Runes et liserés : intensité réglée par le skin, puis pulsation
+				# (`_apply_pose`). Sans `model_glow`, l'émission du .glb est gardée.
+				if base.emission_enabled and p.has("model_glow"):
+					_glow_base = float(p["model_glow"])
+					base.emission_energy_multiplier = _glow_base
+					_glow_mats.append(base)
 			mat.next_pass = rim
 			mi.set_surface_override_material(i, mat)
 
@@ -1121,7 +1393,11 @@ func _build_model_eye(p: Dictionary, parent: Node3D, at: Vector3, s: float) -> v
 	var pupil := _sphere(r * 0.30, _mat_pupil, 14)
 	pupil.position = Vector3(0.0, 0.0, r * 0.27)
 	pupil.scale = Vector3(1.0, 1.0, 0.5)
+	if float(p.get("pupil_slit", 0.0)) > 0.0:
+		_slit = true
+		pupil.scale = Vector3(0.3, 1.3, 0.5)
 	eye.add_child(pupil)
+	_pupil_range = r * 0.33
 
 	_eyes.append(eye)
 	_pupils.append(pupil)

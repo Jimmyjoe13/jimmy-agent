@@ -574,6 +574,31 @@ let stepPage = null;
     return "débloqué : néon puis renard";
   });
 
+  // ARK : modèle 3D à squelette natif (.glb). Godot refuse un skin dont le
+  // modèle manque : un bouton « primary » prouve que le .glb est chargé.
+  await step("Skin : ARK (modèle 3D) appliqué puis renard", async () => {
+    await nav("Skin");
+    const ark = p.locator(".card", { hasText: "Skins premium" }).locator("button", { hasText: "ARK" });
+    expect((await ark.count()) === 1, "bouton ARK absent");
+    if (await ark.isDisabled()) return "verrouillé (machine sans licence)";
+    const primary = (label) =>
+      p
+        .waitForFunction(
+          (l) => [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === l && b.className === "primary"),
+          label,
+          { timeout: 20000, polling: 200 },
+        )
+        .catch(() => {});
+    await ark.click();
+    await primary("ARK");
+    expect((await ark.getAttribute("class")) === "primary", "ARK non appliqué");
+    await p.locator("button", { hasText: "Renard roux" }).click();
+    await primary("Renard roux");
+    const back = await p.locator("button", { hasText: "Renard roux" }).getAttribute("class");
+    expect(back === "primary", `retour renard : ${back}`);
+    return "ARK puis renard";
+  });
+
   await step("Skin : skin de l'utilisateur restauré", async () => {
     await nav("Skin");
     if (!initialSkin || initialSkin === "Renard roux") return "renard (rien à restaurer)";

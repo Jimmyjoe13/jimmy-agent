@@ -14,6 +14,10 @@ extends Node3D
 ##
 ## Tout est généré (primitives, matériaux) : seul le modèle de JEVA est un
 ## fichier, la sonde n'en a pas besoin.
+##
+## Thème « ark » (compagnon du skin ARK, `sonde_ark`) : coque de métal sombre,
+## œil vert à pupille fendue, et trois petits tentacules articulés qui
+## ondulent sous la sphère à la place des ailettes.
 
 const HIDDEN := "hidden"
 const WORKING := "working"
@@ -35,6 +39,14 @@ const FACE_PITCH := -16.0
 const IRIS := Color(0.20, 0.90, 1.00)
 const RING := Color(1.00, 0.22, 0.75)
 const ALERT := Color(1.00, 0.18, 0.12)
+const ARK_GREEN := Color(0.30, 1.00, 0.38)
+
+## Thème (posé avant l'entrée dans l'arbre) : "" = sonde de JEVA, "ark".
+var theme := ""
+## Couleurs de l'œil selon le thème (voir `_build`).
+var _iris := IRIS
+## Petits tentacules du thème « ark » : une chaîne de maillons chacun.
+var _legs: Array = []
 
 var state: String = HIDDEN
 var _t := 0.0
@@ -93,6 +105,7 @@ func _process(delta: float) -> void:
 		state = HIDDEN
 		return
 
+	_animate_legs()
 	match state:
 		WORKING:
 			_animate_working()
@@ -102,6 +115,20 @@ func _process(delta: float) -> void:
 			_animate_error()
 
 
+## Tentacules du thème « ark » : onde qui descend vers la pointe, plus vive
+## au travail, pendants et mous après un échec.
+func _animate_legs() -> void:
+	var speed := 3.2 if state == WORKING else 2.0
+	var amp := 0.10 if state == ERROR else 0.28
+	for l in _legs.size():
+		var chain: Array = _legs[l]
+		for i in chain.size():
+			var seg: Node3D = chain[i]
+			var phase := _t * speed - i * 0.8 + l * 2.1
+			seg.rotation.x = amp * sin(phase) * (0.5 + 0.2 * i)
+			seg.rotation.z = amp * 0.6 * cos(phase * 0.9) * (0.5 + 0.2 * i)
+
+
 func _animate_working() -> void:
 	# Vol stationnaire, l'œil balaie l'écran de gauche à droite.
 	_core.position.y = HOVER_Y + 0.025 * sin(_t * 2.1)
@@ -109,8 +136,8 @@ func _animate_working() -> void:
 	_pupil.position.x = 0.012 * sin(_t * 3.2)
 	_orbit.rotation.y += 0.045
 	_orbit.rotation.x = deg_to_rad(18.0)
-	_iris_mat.albedo_color = IRIS
-	_iris_mat.emission = IRIS
+	_iris_mat.albedo_color = _iris
+	_iris_mat.emission = _iris
 	_iris_mat.emission_energy_multiplier = 0.9 + 0.3 * absf(sin(_t * 4.0))
 	_screen.visible = true
 	_screen_mat.emission_energy_multiplier = 0.9 + 0.5 * absf(sin(_t * 7.3)) * absf(sin(_t * 2.9))
@@ -152,21 +179,24 @@ func _build() -> void:
 	_outline.grow = true
 	_outline.grow_amount = 0.005
 
-	var chrome := _material(Color(0.80, 0.84, 0.90), 0.22)
+	var ark := theme == "ark"
+	_iris = ARK_GREEN if ark else IRIS
+	var ring_color := Color(0.20, 0.95, 0.35) if ark else RING
+	var chrome := _material(Color(0.16, 0.17, 0.16) if ark else Color(0.80, 0.84, 0.90), 0.32 if ark else 0.22)
 	chrome.metallic = 0.55
 	chrome.rim_enabled = true
 	chrome.rim = 0.5
 	chrome.rim_tint = 0.2
-	var dark := _material(Color(0.07, 0.08, 0.13), 0.4)
+	var dark := _material(Color(0.04, 0.045, 0.04) if ark else Color(0.07, 0.08, 0.13), 0.4)
 	# Boîtes sans contour « inverted hull » (piège 18 : il les déforme).
 	var dark_plain := _material(Color(0.07, 0.08, 0.13), 0.4, false)
 	var pupil := _material(Color(0.03, 0.03, 0.05), 0.3, false)
-	var ring := _glow(RING, 1.2)
-	_iris_mat = _glow(IRIS, 0.9)
-	var orbit := _glow(IRIS, 0.8)
-	_screen_mat = _glow(IRIS, 1.0)
+	var ring := _glow(ring_color, 1.2)
+	_iris_mat = _glow(_iris, 0.9)
+	var orbit := _glow(_iris, 0.8)
+	_screen_mat = _glow(_iris, 1.0)
 	_screen_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_screen_mat.albedo_color = Color(IRIS.r, IRIS.g, IRIS.b, 0.45)
+	_screen_mat.albedo_color = Color(_iris.r, _iris.g, _iris.b, 0.45)
 
 	_root = Node3D.new()
 	_root.name = "Probe"
@@ -206,11 +236,13 @@ func _build() -> void:
 	_eye.add_child(iris)
 	_pupil = _sphere(0.017, pupil)
 	_pupil.position = Vector3(0.0, 0.0, 0.016)
-	_pupil.scale = Vector3(1.0, 1.0, 0.5)
+	_pupil.scale = Vector3(0.32, 1.3, 0.5) if ark else Vector3(1.0, 1.0, 0.5)
 	_eye.add_child(_pupil)
 
-	# Ailettes latérales : stabilisateurs de vol.
-	for side in [-1.0, 1.0]:
+	if ark:
+		_build_legs(dark_plain, ring)
+	# Ailettes latérales : stabilisateurs de vol (sonde de JEVA).
+	for side in ([] if ark else [-1.0, 1.0]):
 		var fin := _box(Vector3(0.10, 0.018, 0.06), dark_plain)
 		fin.position = Vector3(0.15 * side, -0.01, -0.01)
 		fin.rotation.z = deg_to_rad(-12.0 * side)
@@ -246,6 +278,32 @@ func _build() -> void:
 		var line := _box(Vector3(0.05 + 0.03 * (i % 3), 0.008, 0.002), ring if i == 1 else orbit)
 		line.position = Vector3(-0.05, 0.045 - i * 0.03, 0.004)
 		_screen.add_child(line)
+
+
+## Trois tentacules sous la sphère (thème « ark ») : chaque maillon est
+## l'enfant du précédent, la rotation se cumule jusqu'à la pointe lumineuse.
+func _build_legs(metal: StandardMaterial3D, glow: StandardMaterial3D) -> void:
+	for l in 3:
+		var a := TAU * l / 3.0 + 0.5
+		var parent: Node3D = Node3D.new()
+		parent.position = Vector3(0.09 * cos(a), -0.10, 0.09 * sin(a))
+		parent.rotation = Vector3(0.35 * sin(a), 0.0, -0.35 * cos(a))
+		_core.add_child(parent)
+		var chain: Array = []
+		for i in 4:
+			var seg := Node3D.new()
+			seg.position = Vector3(0.0, -0.045 if i > 0 else 0.0, 0.0)
+			parent.add_child(seg)
+			seg.add_child(_sphere(0.016 - i * 0.002, metal))
+			var link := _box(Vector3(0.016 - i * 0.002, 0.04, 0.016 - i * 0.002), metal)
+			link.position.y = -0.022
+			seg.add_child(link)
+			chain.append(seg)
+			parent = seg
+		var tip := _sphere(0.010, glow)
+		tip.position.y = -0.045
+		parent.add_child(tip)
+		_legs.append(chain)
 
 
 # ── Primitives (même principe que helper_rabbit.gd) ─────────────────────────

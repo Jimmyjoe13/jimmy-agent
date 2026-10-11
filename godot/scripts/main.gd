@@ -241,8 +241,9 @@ func _apply_companion() -> void:
 		remove_child(_helper)
 		_helper.queue_free()
 	match kind:
-		"sonde":
+		"sonde", "sonde_ark":
 			_helper = preload("res://scripts/helper_probe.gd").new()
+			_helper.set("theme", "ark" if kind == "sonde_ark" else "")
 		_:
 			_helper = preload("res://scripts/helper_rabbit.gd").new()
 			_helper.set("theme", "neon" if kind == "lapin_neon" else "")
