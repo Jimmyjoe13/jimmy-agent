@@ -134,6 +134,10 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 11 octobre 2026 (soir) : `main` = `e853a65` poussé (skin
+  premium ARK) ; dépôt privé `jimy-premium` = `da87e18` poussé (modèle
+  `ark.glb`, manifeste resigné). Prochaine session : skin JEVA OMEGA
+  (HANDOFF, « Prochaine session »).
 - État au 8 octobre 2026 (soir) : `main` = `49a2b95`, tout est poussé
   (mécanisme MAJ multi-PC, masquage des secrets au journal, docs
   installeur et deuxième PC). Reprise le 9 au matin : voir HANDOFF.

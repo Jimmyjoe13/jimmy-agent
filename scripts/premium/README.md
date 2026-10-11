@@ -14,3 +14,9 @@ Les modèles produits ne vont **jamais** dans le dépôt : ils vivent dans
    `rig`, `head_center`, `eye_offset`…), versionné dans le dépôt privé
    `jimy-premium` (jamais ici), et dans `providers::avatar::PREMIUM_SKINS`
    (identifiant, libellé, mot d'éveil).
+
+Autre voie, pour une mécanique (skin ARK) : un modèle **généré par code**
+avec son squelette glTF natif (pièces rigides, une rotule par articulation,
+pas de `.rig`). Le générateur vit dans le dépôt privé
+(`jimy-premium/tools/build_ark.py`) ; `jimmy.gd` anime les os `tent_*` et
+`claw_*` (`_setup_tentacles`, `_drive_tentacles`).

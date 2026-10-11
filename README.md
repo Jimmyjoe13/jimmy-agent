@@ -237,7 +237,7 @@ Limites :
   à l'accueil ;
 - données dans `%APPDATA%\Jimmy`, **pas de mise à jour automatique** depuis
   un installeur (`/update` exige un clone git) ;
-- les skins premium en modèle 3D (JEVA) ne sont pas fournis : leur modèle se
+- les skins premium en modèle 3D (JEVA, ARK) ne sont pas fournis : leur modèle se
   livre après achat.
 
 Pour développer Jimy (et les mises à jour automatiques), passez par les
