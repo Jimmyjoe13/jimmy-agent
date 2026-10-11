@@ -131,11 +131,15 @@ const SKIN_DEFAULT := "renard"
 ## Skins premium : données sous licence propriétaire (godot/premium/LICENSE.md),
 ## hors MIT ; ce code de chargement, lui, reste MIT. Un fichier JSON par skin
 ## (nom du fichier = identifiant), mêmes clés que `SKINS`, couleurs en
-## [r, g, b]. Paramètre de forme en plus : `glow` (0 = aucun, 1 = néon).
+## [r, g, b]. Paramètres en plus : `glow` (émission, 0 = aucune),
+## `outline` (couleur du contour, [r, g, b]) et `outline_scale` (épaisseur
+## du contour, 1 = normal) — le contour lumineux fait le skin Néon.
 ## L'appli ne les propose pas encore : Tauri n'accepte que les skins de
 ## `providers::avatar::SKINS` (Rust) ; l'activation par licence viendra ensuite.
 const PREMIUM_SKINS_DIR := "res://premium/skins"
 const SKIN_COLOR_KEYS := ["fur", "cream", "dark", "shirt", "accent"]
+## Couleurs facultatives d'un skin premium (absentes = valeurs par défaut).
+const SKIN_OPTIONAL_COLOR_KEYS := ["outline"]
 
 ## Hauteur de la tête au-dessus du cou. 0,42 donnait un cou de girafe : la
 ## tête est rapprochée du col pour une silhouette plus compacte.
@@ -287,7 +291,7 @@ func _premium_skins() -> Dictionary:
 			if str(key).begins_with("_") or key == "label":
 				continue
 			var value = data[key]
-			if key in SKIN_COLOR_KEYS:
+			if key in SKIN_COLOR_KEYS or key in SKIN_OPTIONAL_COLOR_KEYS:
 				if typeof(value) != TYPE_ARRAY or value.size() < 3:
 					valid = false
 					break
@@ -546,11 +550,12 @@ func _make_materials() -> void:
 	_outline = StandardMaterial3D.new()
 	_outline.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_outline.cull_mode = BaseMaterial3D.CULL_FRONT
-	_outline.albedo_color = OUTLINE_COLOR
-	_outline.grow = true
-	_outline.grow_amount = OUTLINE_WIDTH
-
 	var palette: Dictionary = _palette()
+	# Contour : brun foncé par défaut ; un skin premium peut le colorer et
+	# l'épaissir (Néon : contour orange vif, sans ombrage, qui « brille »).
+	_outline.albedo_color = palette.get("outline", OUTLINE_COLOR)
+	_outline.grow = true
+	_outline.grow_amount = OUTLINE_WIDTH * float(palette.get("outline_scale", 1.0))
 	# Les variantes sans contour dérivent des matériaux : à régénérer aussi.
 	_plain_cache.clear()
 
@@ -586,7 +591,7 @@ func _make_materials() -> void:
 	# variantes sans contour sont des copies : elles héritent de l'émission.
 	var glow := float(palette.get("glow", 0.0))
 	if glow > 0.0:
-		for pair in [[_mat_fur, 0.22], [_mat_cream, 0.08], [_mat_accent, 2.2]]:
+		for pair in [[_mat_fur, 0.15], [_mat_cream, 0.6], [_mat_accent, 2.2]]:
 			var mat: StandardMaterial3D = pair[0]
 			mat.emission_enabled = true
 			mat.emission = mat.albedo_color
