@@ -453,6 +453,19 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
   const voiceSelect = h("select", { class: "field" }) as HTMLSelectElement;
   const qualitySelect = h("select", { class: "field" }) as HTMLSelectElement;
   const languageSelect = h("select", { class: "field" }) as HTMLSelectElement;
+  // Accès : une nouvelle installation part de « tout refusé ». Seule la
+  // lecture est cochée d'office ; le reste est un choix explicite.
+  const grant = (label: string, note: string, checked: boolean) => {
+    const box = h("input", { type: "checkbox" }) as HTMLInputElement;
+    box.checked = checked;
+    return { box, row: h("label", { class: "grant-row" }, box, h("span", {}, h("strong", {}, label), ` — ${note}`)) };
+  };
+  const grants = {
+    read: grant("Lire tes fichiers", "dossier utilisateur et C:\\Dev, pour comprendre tes projets", true),
+    write: grant("Créer et modifier des fichiers", "un fichier sensible (.env, clé) demande toujours ton accord", false),
+    execute: grant("Lancer des commandes", "git, npm, scripts… les commandes destructrices restent interdites", false),
+    network: grant("Accéder au réseau", "requêtes web en dehors du modèle et de la voix", false),
+  };
 
   qualitySelect.append(...["low", "medium", "high"].map((level) => h("option", { value: level }, QUALITY_LABEL[level])));
   qualitySelect.value = status.avatar.quality;
@@ -488,7 +501,7 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       title: "Bonjour.",
       body: [
         h("p", {}, "Je suis Jimy. Je vais vivre sur ton bureau et t'aider surtout à la voix."),
-        h("p", { class: "note" }, "Ça prend quatre minutes. Chaque étape peut être corrigée plus tard dans les paramètres."),
+        h("p", { class: "note" }, "Ça prend cinq minutes. Chaque étape peut être corrigée plus tard dans les paramètres."),
       ],
     },
     {
@@ -548,6 +561,14 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
       body: [h("p", {}, "La langue attendue quand tu me parles."), h("div", { class: "row" }, languageSelect)],
     },
     {
+      title: "Ce que je peux faire",
+      body: [
+        h("p", {}, "Par défaut, je n'ai accès à rien. Coche ce que tu m'autorises."),
+        ...Object.values(grants).map((g) => g.row),
+        h("p", { class: "note" }, "Modifiable à tout moment dans Paramètres → Permissions."),
+      ],
+    },
+    {
       title: "C'est prêt.",
       body: [
         h("p", {}, "En terminant, j'active l'écoute : j'ouvrirai le micro et resterai en veille."),
@@ -595,6 +616,12 @@ export function onboardingView(ctx: AppContext, onDone: () => void): HTMLElement
                     voice: (voiceSelect as HTMLSelectElement).value,
                     quality: (qualitySelect as HTMLSelectElement).value,
                     language: (languageSelect as HTMLSelectElement).value,
+                    grants: {
+                      read: grants.read.box.checked,
+                      write: grants.write.box.checked,
+                      execute: grants.execute.box.checked,
+                      network: grants.network.box.checked,
+                    },
                   }),
                 "finalisation",
               );

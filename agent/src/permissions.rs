@@ -186,6 +186,41 @@ impl Permissions {
         )))
     }
 
+    /// Accès « standard » : ceux qu'avait toute installation avant le refus
+    /// par défaut (10 octobre) — lecture, écriture et exécution dans le
+    /// dossier utilisateur et `C:\Dev`, réseau ouvert — en gardant les
+    /// interdits (commandes destructrices, ports locaux de l'avatar et du
+    /// pont). Sert à la migration des installations existantes et aux cases
+    /// cochées de l'écran d'accueil.
+    pub fn standard() -> Self {
+        let refused = Permissions::default();
+        let open = |rule: AccessRule| AccessRule {
+            granted: true,
+            allow_paths: vec!["C:\\Users\\**".into(), "C:\\Dev\\**".into()],
+            allow_commands: vec!["*".into()],
+            ..rule
+        };
+        Permissions {
+            read: open(refused.read),
+            write: open(refused.write),
+            execute: open(refused.execute),
+            network: AccessRule { granted: true, ..refused.network },
+        }
+    }
+
+    /// Accès choisis à l'écran d'accueil : chaque capacité cochée reçoit les
+    /// accès standard, les autres restent refusées.
+    pub fn from_grants(read: bool, write: bool, execute: bool, network: bool) -> Self {
+        let standard = Permissions::standard();
+        let refused = Permissions::default();
+        Permissions {
+            read: if read { standard.read } else { refused.read },
+            write: if write { standard.write } else { refused.write },
+            execute: if execute { standard.execute } else { refused.execute },
+            network: if network { standard.network } else { refused.network },
+        }
+    }
+
     /// Résumé lisible pour l'interface.
     pub fn summary(&self) -> Vec<(Capability, bool)> {
         vec![
@@ -194,6 +229,36 @@ impl Permissions {
             (Capability::Execute, self.execute.granted),
             (Capability::Network, self.network.granted),
         ]
+    }
+}
+
+/// Crée `permissions.json` s'il manque (piège 104). Sans lui, les défauts
+/// s'appliquent, et depuis le refus par défaut une installation existante
+/// se retrouvait sans aucun accès. Installation existante (accueil déjà
+/// terminé) : accès standard, comme avant. Nouvelle installation : tout
+/// refusé, l'écran d'accueil demande les accords. Un fichier présent n'est
+/// jamais touché. Renvoie `true` si le fichier a été créé.
+pub fn ensure_file(path: &std::path::Path, existing_install: bool) -> bool {
+    if path.is_file() {
+        return false;
+    }
+    let (permissions, why) = if existing_install {
+        (Permissions::standard(), "installation existante : accès standard conservés")
+    } else {
+        (Permissions::default(), "nouvelle installation : tout refusé jusqu'à l'accueil")
+    };
+    let written = serde_json::to_string_pretty(&permissions)
+        .map_err(|e| e.to_string())
+        .and_then(|raw| std::fs::write(path, raw).map_err(|e| e.to_string()));
+    match written {
+        Ok(()) => {
+            log::info!("[permissions] {} créé — {why}", path.display());
+            true
+        }
+        Err(e) => {
+            log::warn!("[permissions] {} non créé : {e}", path.display());
+            false
+        }
     }
 }
 
@@ -252,6 +317,44 @@ pub fn path_match(pattern: &str, target: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Piège 104 : une installation existante sans `permissions.json` garde
+    /// ses accès ; une nouvelle reste tout refusé ; un fichier présent n'est
+    /// jamais écrasé.
+    #[test]
+    fn migration_du_fichier_de_permissions() {
+        let dir = std::env::temp_dir().join(format!("perms-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("dossier");
+        let existing = dir.join("existante.json");
+        assert!(ensure_file(&existing, true));
+        let raw = std::fs::read_to_string(&existing).expect("lu");
+        let loaded: Permissions = serde_json::from_str(&raw).expect("json");
+        assert!(loaded.check(Capability::Write, r"C:\Users\user\Projet\a.txt").is_ok());
+        assert!(loaded.check(Capability::Execute, "git status").is_ok());
+        assert!(loaded.check(Capability::Execute, "diskpart").is_err());
+        assert!(loaded.check(Capability::Network, "127.0.0.1:8787").is_err());
+
+        let fresh = dir.join("neuve.json");
+        assert!(ensure_file(&fresh, false));
+        let raw = std::fs::read_to_string(&fresh).expect("lu");
+        let loaded: Permissions = serde_json::from_str(&raw).expect("json");
+        assert!(loaded.check(Capability::Read, r"C:\Users\user\notes.txt").is_err());
+
+        // Le choix de l'utilisateur n'est jamais écrasé.
+        std::fs::write(&fresh, r#"{"choix":"utilisateur"}"#).expect("écriture");
+        assert!(!ensure_file(&fresh, true));
+        assert_eq!(std::fs::read_to_string(&fresh).expect("lu"), r#"{"choix":"utilisateur"}"#);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn accueil_accorde_seulement_les_cases_cochees() {
+        let perms = Permissions::from_grants(true, false, false, false);
+        assert!(perms.check(Capability::Read, r"C:\Users\user\notes.txt").is_ok());
+        assert!(perms.check(Capability::Write, r"C:\Users\user\notes.txt").is_err());
+        assert!(perms.check(Capability::Execute, "git status").is_err());
+        assert!(!perms.network.granted);
+    }
 
     #[test]
     fn lecture_bloquee_refuse() {

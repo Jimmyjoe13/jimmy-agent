@@ -261,6 +261,9 @@ impl App {
     pub fn new(paths: Paths, secrets: Secrets) -> Result<Arc<Self>> {
         paths.ensure()?;
         let settings = Settings::load(&paths);
+        // Avant tout usage des permissions : une installation existante sans
+        // `permissions.json` garde ses accès (piège 104).
+        permissions::ensure_file(&paths.data.join("permissions.json"), settings.ui.first_run_done);
         let db: Shared<Db> = Arc::new(std::sync::Mutex::new(Db::open(&paths.db_file())?));
         let history = Arc::new(History::new(db.clone()));
         let memory = Arc::new(MemoryStore::with_semantic(

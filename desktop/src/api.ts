@@ -518,6 +518,8 @@ export const api = {
     voice: string;
     quality: string;
     language: string;
+    /** Accès cochés à l'accueil (une nouvelle installation part de « tout refusé »). */
+    grants: { read: boolean; write: boolean; execute: boolean; network: boolean };
   }) => invoke<Status>("complete_onboarding", payload),
   setStartup: (mode: StartupMode) => invoke<void>("set_startup", { mode }),
   getPermissions: () => invoke<Permissions>("get_permissions"),

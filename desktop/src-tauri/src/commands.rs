@@ -665,6 +665,15 @@ pub async fn llm_check_provider(
     Ok(models.len())
 }
 
+/// Cases « ce que Jimy peut faire » de l'écran d'accueil.
+#[derive(Debug, Deserialize)]
+pub struct OnboardingGrants {
+    pub read: bool,
+    pub write: bool,
+    pub execute: bool,
+    pub network: bool,
+}
+
 #[tauri::command]
 pub async fn complete_onboarding(
     state: State<'_, AppState>,
@@ -673,8 +682,14 @@ pub async fn complete_onboarding(
     voice: String,
     quality: String,
     language: String,
+    grants: OnboardingGrants,
 ) -> std::result::Result<serde_json::Value, String> {
     let app = state.app.clone();
+    // Accès cochés à l'accueil : une nouvelle installation part de « tout
+    // refusé » (piège 104), c'est ici que l'utilisateur ouvre ce qu'il veut.
+    let permissions =
+        jimmy_agent::permissions::Permissions::from_grants(grants.read, grants.write, grants.execute, grants.network);
+    app.save_permissions(&permissions).map_err(err)?;
     let mut settings = app.settings();
     if !user_name.trim().is_empty() {
         settings.ui.user_name = user_name.trim().to_string();

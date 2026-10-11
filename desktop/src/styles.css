@@ -2130,6 +2130,20 @@ button.small {
   margin: 0;
 }
 
+/* Étape « Ce que je peux faire » : une case par accès. */
+.grant-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 10px 0;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.grant-row input {
+  margin-top: 3px;
+}
+
 .onboarding-footer {
   display: flex;
   justify-content: space-between;
