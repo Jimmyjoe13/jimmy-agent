@@ -1,4 +1,4 @@
-﻿// Suite de tests UI de bout en bout, sur la vraie application (CDP).
+// Suite de tests UI de bout en bout, sur la vraie application (CDP).
 // Chaque parcours affiche OK / ÉCHEC avec le détail ; code de sortie 1 si un
 // parcours échoue.
 const { chromium } = require("playwright-core");
@@ -500,8 +500,15 @@ let stepPage = null;
     return "prêt après relance";
   });
 
+  // Skin actif de l'utilisateur au départ : restauré à la fin des parcours
+  // Skin (INSTRUCTIONS §6 : un test rend le réglage qu'il a trouvé).
+  let initialSkin = "";
   await step("Skin : changement appliqué et bouton actif mis à jour", async () => {
     await nav("Skin");
+    initialSkin = await p.$$eval(".card button.primary", (els) => {
+      const skin = els.find((b) => b.closest(".card")?.textContent.includes("Skin"));
+      return skin ? skin.textContent.trim() : "";
+    });
     // Le changement de skin relance Godot : sa durée varie (1,5 s fixes ont
     // échoué le 6 octobre). On attend l'état du bouton, 15 s au plus.
     const actif = async (label) => {
@@ -565,6 +572,22 @@ let stepPage = null;
     const back = await p.locator("button", { hasText: "Renard roux" }).getAttribute("class");
     expect(back === "primary", `retour renard : ${back}`);
     return "débloqué : néon puis renard";
+  });
+
+  await step("Skin : skin de l'utilisateur restauré", async () => {
+    await nav("Skin");
+    if (!initialSkin || initialSkin === "Renard roux") return "renard (rien à restaurer)";
+    await p.locator(".card button", { hasText: initialSkin }).first().click();
+    await p
+      .waitForFunction(
+        (label) => [...document.querySelectorAll(".card button")].some((b) => b.textContent.trim() === label && b.className === "primary"),
+        initialSkin,
+        { timeout: 15000, polling: 200 },
+      )
+      .catch(() => {});
+    const cls = await p.locator(".card button", { hasText: initialSkin }).first().getAttribute("class");
+    expect(cls === "primary", `restauration de « ${initialSkin} » : ${cls}`);
+    return `« ${initialSkin} » restauré`;
   });
 
   await step("Paramètres : enregistrement confirmé", async () => {
