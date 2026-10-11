@@ -128,15 +128,15 @@ const SKINS := {
 }
 const SKIN_DEFAULT := "renard"
 
-## Skins premium : données sous licence propriétaire (godot/premium/LICENSE.md),
-## hors MIT ; ce code de chargement, lui, reste MIT. Un fichier JSON par skin
+## Skins premium : données sous licence propriétaire, **hors du dépôt
+## public** (dépôt privé `jimy-premium`, livrées dans `<données>/premium/`) ;
+## ce code de chargement, lui, reste MIT. Un fichier JSON par skin
 ## (nom du fichier = identifiant), mêmes clés que `SKINS`, couleurs en
 ## [r, g, b]. Paramètres en plus : `glow` (émission, 0 = aucune),
 ## `outline` (couleur du contour, [r, g, b]) et `outline_scale` (épaisseur
 ## du contour, 1 = normal) — le contour lumineux fait le skin Néon.
 ## L'appli ne les propose pas encore : Tauri n'accepte que les skins de
 ## `providers::avatar::SKINS` (Rust) ; l'activation par licence viendra ensuite.
-const PREMIUM_SKINS_DIR := "res://premium/skins"
 const SKIN_COLOR_KEYS := ["fur", "cream", "dark", "shirt", "accent"]
 ## Couleurs facultatives d'un skin premium (absentes = valeurs par défaut).
 ## `eye_ring` : anneau de l'œil, `rim` : liseré lumineux d'un modèle 3D.
@@ -320,6 +320,14 @@ func _palette_of(name: String) -> Dictionary:
 	return _premium_skins().get(name, SKINS[SKIN_DEFAULT])
 
 
+## Dossier des données premium : celui passé par Tauri, sinon (lancement
+## direct de Godot, tests) `data/premium` du dépôt.
+func _premium_root() -> String:
+	if premium_dir != "":
+		return premium_dir
+	return ProjectSettings.globalize_path("res://").path_join("../data/premium").simplify_path()
+
+
 ## Compagnon des tâches de fond du skin courant : le lapin pour les skins de
 ## base, celui que le skin premium déclare sinon (`companion`).
 func companion() -> String:
@@ -329,10 +337,7 @@ func companion() -> String:
 ## Scène du modèle 3D d'un skin (lue une fois, puis en cache), ou null si le
 ## fichier manque ou ne se lit pas.
 func _load_model(palette: Dictionary) -> Node3D:
-	var dir := premium_dir
-	if dir == "":
-		# Lancement direct de Godot (tests) : `data/premium` du dépôt.
-		dir = ProjectSettings.globalize_path("res://").path_join("../data/premium").simplify_path()
+	var dir := _premium_root()
 	var path := dir.path_join("models").path_join(str(palette.get("model", "")))
 	if _model_cache.has(path):
 		return _model_cache[path]
@@ -520,13 +525,14 @@ func _premium_skins() -> Dictionary:
 	if _premium_loaded:
 		return _premium_cache
 	_premium_loaded = true
-	var dir := DirAccess.open(PREMIUM_SKINS_DIR)
+	var skins_dir := _premium_root().path_join("skins")
+	var dir := DirAccess.open(skins_dir)
 	if dir == null:
 		return _premium_cache
 	for file in dir.get_files():
 		if not file.ends_with(".json"):
 			continue
-		var data = JSON.parse_string(FileAccess.get_file_as_string(PREMIUM_SKINS_DIR + "/" + file))
+		var data = JSON.parse_string(FileAccess.get_file_as_string(skins_dir.path_join(file)))
 		if typeof(data) != TYPE_DICTIONARY:
 			push_warning("[godot/jimmy] skin premium illisible : %s" % file)
 			continue

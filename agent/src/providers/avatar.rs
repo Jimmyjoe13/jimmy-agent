@@ -23,9 +23,9 @@ pub const SKINS: &[(&str, &str)] = &[
 /// Skin appliqué quand le skin demandé n'est pas autorisé.
 pub const DEFAULT_SKIN: &str = "renard";
 
-/// Skins premium (identifiant, libellé). Leurs palettes vivent dans
-/// `godot/premium/skins/<id>.json` (licence propriétaire, hors MIT) : garder
-/// les deux alignés. Débloqués par une licence (`crate::licence`).
+/// Skins premium (identifiant, libellé). Leurs palettes vivent **hors du
+/// dépôt public** (dépôt privé `jimy-premium`, licence propriétaire), dans
+/// `<données>/premium/skins/<id>.json` : garder les deux alignés. Débloqués par une licence (`crate::licence`).
 /// Un skin premium peut aussi porter un modèle 3D (`"model"` dans son JSON) :
 /// le `.glb` vit hors dépôt, dans `<données>/premium/models/`.
 /// Troisième champ : son **mot d'éveil**, le nom du skin (décision du
@@ -122,11 +122,29 @@ impl AvatarClient {
 mod tests {
     use super::*;
 
-    /// Chaque skin premium proposé a sa palette côté Godot : sinon un achat
-    /// débloquerait un skin que l'avatar refuse (« skin inconnu »).
+    /// La liste des skins premium est cohérente : identifiants distincts des
+    /// skins de base, mot d'éveil renseigné, skin par défaut existant.
     #[test]
-    fn skins_premium_ont_leur_palette_godot() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../godot/premium/skins");
+    fn liste_des_skins_premium_coherente() {
+        for (id, label, wake) in PREMIUM_SKINS {
+            assert!(!id.is_empty() && !label.is_empty(), "{id}");
+            assert!(!wake.trim().is_empty(), "{id} : mot d'éveil vide");
+        }
+        assert!(PREMIUM_SKINS.iter().all(|(p, _, _)| !SKINS.iter().any(|(b, _)| b == p)));
+        assert!(SKINS.iter().any(|(id, _)| *id == DEFAULT_SKIN));
+    }
+
+    /// Les palettes premium vivent hors du dépôt public (dépôt privé
+    /// `jimy-premium`, copié dans `data/premium/`). Quand elles sont là (la
+    /// machine de l'auteur), chaque skin proposé a la sienne et son compagnon
+    /// (le lapin blanc est réservé aux skins de base) ; sinon (clone public,
+    /// compilation GitHub), rien à vérifier.
+    #[test]
+    fn skins_premium_ont_leur_palette_si_presentes() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/premium/skins");
+        if !dir.is_dir() {
+            return;
+        }
         for (id, _, _) in PREMIUM_SKINS {
             let file = dir.join(format!("{id}.json"));
             let raw = std::fs::read_to_string(&file).unwrap_or_else(|_| panic!("palette absente : {}", file.display()));
@@ -134,18 +152,8 @@ mod tests {
             for key in ["fur", "cream", "dark", "shirt", "accent"] {
                 assert!(json.get(key).is_some_and(|v| v.as_array().is_some_and(|a| a.len() >= 3)), "{id} : couleur {key}");
             }
-        }
-        // Un skin premium a son compagnon de tâches de fond (le lapin blanc
-        // est réservé aux skins de base, décision du 11 octobre).
-        for (id, _, wake) in PREMIUM_SKINS {
-            assert!(!wake.trim().is_empty(), "{id} : mot d'éveil vide");
-            let raw = std::fs::read_to_string(dir.join(format!("{id}.json"))).expect("palette");
-            let json: serde_json::Value = serde_json::from_str(&raw).expect("JSON valide");
             let companion = json.get("companion").and_then(|c| c.as_str()).unwrap_or("lapin");
             assert!(["lapin_neon", "sonde"].contains(&companion), "{id} : compagnon « {companion} »");
         }
-        // Un identifiant ne peut pas être à la fois de base et premium.
-        assert!(PREMIUM_SKINS.iter().all(|(p, _, _)| !SKINS.iter().any(|(b, _)| b == p)));
-        assert!(SKINS.iter().any(|(id, _)| *id == DEFAULT_SKIN));
     }
 }

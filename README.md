@@ -492,7 +492,7 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
 
 MIT — voir [LICENSE](LICENSE). Prototype personnel.
 
-**Exception : les contenus premium.** Tout dossier nommé `premium/` (aujourd'hui
-`godot/premium/`, les skins payants) est sous licence propriétaire, **pas** sous
-MIT : voir [godot/premium/LICENSE.md](godot/premium/LICENSE.md). Le code de Jimy
-et les cinq skins de base restent sous MIT.
+Tout ce dépôt est sous MIT, y compris le code qui charge les skins premium.
+Les **contenus** premium (palettes et modèles 3D des skins payants) ne sont
+**pas** dans ce dépôt : ils vivent dans un dépôt privé, sous licence
+propriétaire, et sont livrés après achat dans `<données>/premium/`.

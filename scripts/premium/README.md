@@ -10,6 +10,7 @@ Les modèles produits ne vont **jamais** dans le dépôt : ils vivent dans
    (os du corps sur repères mesurés, chaînes d'os des câbles, poids lissés le
    long du maillage). `jimmy.gd` lit le `.rig` (`_attach_rig`) et anime les
    os (`_drive_rig`).
-3. Déclarer le skin dans `godot/premium/skins/<id>.json` (`model`, `rig`,
-   `head_center`, `eye_offset`…) et dans `providers::avatar::PREMIUM_SKINS`
+3. Déclarer le skin dans `<données>/premium/skins/<id>.json` (`model`,
+   `rig`, `head_center`, `eye_offset`…), versionné dans le dépôt privé
+   `jimy-premium` (jamais ici), et dans `providers::avatar::PREMIUM_SKINS`
    (identifiant, libellé, mot d'éveil).

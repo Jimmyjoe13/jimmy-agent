@@ -1,0 +1,76 @@
+# Installeur Windows de Jimy, construit par GitHub à partir du code du dépôt
+# (build vérifiable : condition de la signature gratuite SignPath Foundation).
+#
+# - À la demande (onglet Actions → Run workflow) : l'installeur est un
+#   artefact téléchargeable de l'exécution.
+# - Sur un tag `v*` : il est en plus attaché à la release du tag (créée si
+#   besoin), sous le nom stable `Jimy-setup.exe` (lien du site :
+#   releases/latest/download/Jimy-setup.exe).
+#
+# Signature : une fois SignPath Foundation accepté, une étape de signature
+# (action signpath/github-action-submit-signing-request, approbation
+# manuelle) viendra entre « Installeur » et la publication.
+name: Installeur Windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dépendances de l'interface
+        working-directory: desktop
+        run: npm ci
+
+      # Godot n'est pas sur la machine de GitHub : le script le télécharge
+      # depuis les releases officielles de Godot.
+      - name: Installeur
+        shell: pwsh
+        run: ./scripts/build-installer.ps1
+
+      - name: Nom stable et empreinte
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          Copy-Item $setup.FullName Jimy-setup.exe
+          (Get-FileHash Jimy-setup.exe -Algorithm SHA256).Hash | Out-File Jimy-setup.exe.sha256 -Encoding ascii
+          Get-Content Jimy-setup.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jimy-setup
+          path: |
+            Jimy-setup.exe
+            Jimy-setup.exe.sha256
+
+      - name: Publier sur la release du tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Jimy $tag" --notes "Installeur Windows construit par GitHub Actions à partir du code de ce tag."
+          }
+          gh release upload $tag Jimy-setup.exe Jimy-setup.exe.sha256 --clobber
