@@ -208,6 +208,14 @@ var _iris_mat: StandardMaterial3D = null
 ## Part du regard appliquée à la tête : l'œil d'un casque glisse sur sa
 ## surface, un regard complet le ferait sortir de la visière.
 var _gaze_scale := 1.0
+## Squelette d'un skin à modèle 3D (fichier `.rig`, voir `_attach_rig`) :
+## null si le modèle n'en a pas (il bouge alors d'un bloc).
+var _rig: Skeleton3D = null
+var _rig_ids: Dictionary = {}
+## Os des câbles : [indice, côté (-1/+1), secteur, rang dans la chaîne].
+var _cable_bones: Array = []
+## Part de « parole » (0 → 1), lissée : les gestes de main en dépendent.
+var _talk := 0.0
 var _t := 0.0
 var _blink_t := 0.0
 var _blink := 0.0
@@ -336,9 +344,173 @@ func _load_model(palette: Dictionary) -> Node3D:
 		push_warning("[godot/jimmy] modèle illisible : %s" % path)
 		return null
 	var scene := doc.generate_scene(state) as Node3D
+	if palette.has("rig"):
+		_attach_rig(scene, dir.path_join("models").path_join(str(palette["rig"])))
 	_model_cache[path] = scene
 	print("[godot/jimmy] modèle chargé : %s" % path.get_file())
 	return scene
+
+
+## Pose un squelette sur un modèle d'un seul bloc, à partir d'un fichier
+## `.rig` calculé hors ligne (outil d'auto-squelette) : « JRIG », taille de
+## l'en-tête (u32), en-tête JSON (os : nom, parent, origine ; nombre de
+## sommets), puis par sommet sa position (3 float32), ses 4 os (int32) et
+## ses 4 poids (float32). Correspondance des sommets : par indice quand le
+## nombre concorde (même ordre que le fichier), contrôlée par la distance ;
+## sinon par position arrondie au millième. Pas d'égalité exacte : l'import
+## glTF de Godot **compresse** les positions (écarts ~1e-5).
+## Les os ont une base identité (seule l'origine compte) : leurs rotations
+## s'expriment donc dans les axes du modèle.
+func _attach_rig(scene: Node3D, path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		push_warning("[godot/jimmy] squelette absent : %s" % path)
+		return false
+	if f.get_buffer(4).get_string_from_ascii() != "JRIG":
+		push_warning("[godot/jimmy] squelette illisible : %s" % path)
+		return false
+	var header = JSON.parse_string(f.get_buffer(f.get_32()).get_string_from_utf8())
+	if typeof(header) != TYPE_DICTIONARY:
+		return false
+	var n := int(header["count"])
+	var pos := f.get_buffer(n * 12).to_float32_array()
+	var ids := f.get_buffer(n * 16).to_int32_array()
+	var wts := f.get_buffer(n * 16).to_float32_array()
+	if pos.size() != n * 3 or ids.size() != n * 4 or wts.size() != n * 4:
+		push_warning("[godot/jimmy] squelette tronqué : %s" % path)
+		return false
+	var lookup := {}
+	for i in n:
+		lookup[_position_key(Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]))] = i
+	var rig_pos := func(j: int) -> Vector3: return Vector3(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2])
+
+	var skel := Skeleton3D.new()
+	skel.name = "Skeleton"
+	var skin := Skin.new()
+	var bones: Array = header["bones"]
+	for b in bones:
+		var origin := Vector3(float(b["origin"][0]), float(b["origin"][1]), float(b["origin"][2]))
+		var idx := skel.add_bone(str(b["name"]))
+		var parent := int(b["parent"])
+		var rest := origin
+		if parent >= 0:
+			skel.set_bone_parent(idx, parent)
+			var po: Array = bones[parent]["origin"]
+			rest = origin - Vector3(float(po[0]), float(po[1]), float(po[2]))
+		skel.set_bone_rest(idx, Transform3D(Basis(), rest))
+		skin.add_bind(idx, Transform3D(Basis(), -origin))
+	skel.reset_bone_poses()
+	scene.add_child(skel)
+
+	var chest := skel.find_bone("chest")
+	var misses := 0
+	for node in scene.find_children("*", "MeshInstance3D", true, false):
+		var mi := node as MeshInstance3D
+		# Le maillage passe dans le repère du modèle (celui du squelette).
+		var xf := Transform3D()
+		var walker: Node = mi
+		while walker != scene and walker is Node3D:
+			xf = (walker as Node3D).transform * xf
+			walker = walker.get_parent()
+		var skinned := ArrayMesh.new()
+		for surface in mi.mesh.get_surface_count():
+			var arrays := mi.mesh.surface_get_arrays(surface)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var normals = arrays[Mesh.ARRAY_NORMAL]
+			var bone_arr := PackedInt32Array()
+			bone_arr.resize(verts.size() * 4)
+			var weight_arr := PackedFloat32Array()
+			weight_arr.resize(verts.size() * 4)
+			var by_index := verts.size() == n
+			for i in verts.size():
+				verts[i] = xf * verts[i]
+				if normals != null and i < normals.size():
+					normals[i] = (xf.basis * normals[i]).normalized()
+				var j := -1
+				if by_index and verts[i].distance_squared_to(rig_pos.call(i)) < 1e-6:
+					j = i
+				else:
+					j = lookup.get(_position_key(verts[i]), -1)
+				if j < 0:
+					misses += 1
+					bone_arr[i * 4] = chest
+					weight_arr[i * 4] = 1.0
+					continue
+				for k in 4:
+					bone_arr[i * 4 + k] = ids[j * 4 + k]
+					weight_arr[i * 4 + k] = wts[j * 4 + k]
+			arrays[Mesh.ARRAY_VERTEX] = verts
+			if normals != null:
+				arrays[Mesh.ARRAY_NORMAL] = normals
+			arrays[Mesh.ARRAY_BONES] = bone_arr
+			arrays[Mesh.ARRAY_WEIGHTS] = weight_arr
+			skinned.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			skinned.surface_set_material(surface, mi.mesh.surface_get_material(surface))
+		mi.mesh = skinned
+		mi.transform = Transform3D()
+		mi.skin = skin
+		mi.skeleton = mi.get_path_to(skel)
+	print("[godot/jimmy] squelette : %d os, %d sommets sans poids" % [bones.size(), misses])
+	return true
+
+
+func _position_key(p: Vector3) -> Vector3i:
+	return Vector3i(roundi(p.x * 1000.0), roundi(p.y * 1000.0), roundi(p.z * 1000.0))
+
+
+func _rig_rot(bone: String, euler: Vector3) -> void:
+	var i: int = _rig_ids.get(bone, -1)
+	if i >= 0:
+		_rig.set_bone_pose_rotation(i, Quaternion.from_euler(euler))
+
+
+## Mouvements du squelette, à partir des mêmes nœuds que le renard : la
+## tête reprend `_head` (regard, hochements), les bras l'écart de `_arm_l` /
+## `_arm_r` avec la pose de repos (gestes compris), le reste est de la vie :
+## respiration, mains qui accompagnent la parole, jambes qui battent en
+## lévitation, câbles qui ondulent chacun avec un décalage.
+func _drive_rig(delta: float, breathe: float, sway: float, bounce: float) -> void:
+	_talk = move_toward(_talk, 1.0 if state == SPEAKING else 0.0, delta * 3.0)
+	_rig_rot("head", _head.rotation)
+	_rig_rot("chest", Vector3(0.03 * breathe * bounce, 0.04 * sway, 0.0))
+	_rig_rot("spine", Vector3(0.012 * breathe, 0.0, 0.02 * sway))
+
+	# Bras : 0,10 = bras du renard au repos (POSES idle).
+	var raise_n := _arm_l.rotation.z + 0.10
+	var raise_p := _arm_r.rotation.z - 0.10
+	_rig_rot("upperarm_n", Vector3(0.0, 0.0, raise_n * 0.8))
+	_rig_rot("upperarm_p", Vector3(0.0, 0.0, raise_p * 0.6))
+	var g := _talk
+	_rig_rot("forearm_n", Vector3(0.10 * sin(_t * 1.3) + 0.18 * g * sin(_t * 2.7), 0.0, -0.15 * g * absf(sin(_t * 2.1))))
+	_rig_rot("forearm_p", Vector3(0.28 * g * sin(_t * 3.1), 0.15 * g * sin(_t * 1.9), 0.06 * sin(_t * 1.1) + 0.12 * g * sin(_t * 2.3)))
+	_rig_rot("hand_n", Vector3(0.15 * sin(_t * 1.7), 0.0, 0.1 * sin(_t * 1.2)))
+	_rig_rot("hand_p", Vector3(0.12 * sin(_t * 1.5 + 1.0), 0.2 * g * sin(_t * 3.3), 0.1 * sin(_t * 1.4)))
+
+	# Jambes : battement lent, décalé entre les deux, le tibia suit la cuisse.
+	_rig_rot("thigh_n", Vector3(0.08 * sin(_t * 0.9), 0.0, 0.0))
+	_rig_rot("shin_n", Vector3(0.10 * sin(_t * 0.9 - 0.7), 0.0, 0.0))
+	_rig_rot("foot_n", Vector3(0.08 * sin(_t * 0.9 - 1.3), 0.0, 0.0))
+	_rig_rot("thigh_p", Vector3(0.08 * sin(_t * 0.9 + PI), 0.0, 0.0))
+	_rig_rot("shin_p", Vector3(0.10 * sin(_t * 0.9 + PI - 0.7), 0.0, 0.0))
+	_rig_rot("foot_p", Vector3(0.08 * sin(_t * 0.9 + PI - 1.3), 0.0, 0.0))
+
+	# Câbles : onde qui court vers la pointe ; plus vive quand Jimy travaille.
+	var speed := 2.4 if state == "executing" or state == THINKING else 1.4
+	for c in _cable_bones:
+		var side: float = c[1]
+		var sector: int = c[2]
+		var rank: int = c[3]
+		var amp := 0.05 + 0.03 * rank
+		# Secteur 0 = chaîne la plus basse : elle pend derrière les jambes ;
+		# une grande ondulation lui ferait traverser le tibia.
+		var low := sector == 0
+		if low:
+			amp *= 0.3
+		# Décalage faible entre secteurs voisins : des chaînes voisines qui
+		# bougent en sens opposé étirent les brins qui les relient.
+		var phase := _t * speed - rank * 0.9 + sector * 0.35 + (0.0 if side > 0.0 else 0.7)
+		_rig.set_bone_pose_rotation(c[0], Quaternion.from_euler(Vector3(
+			0.0 if low else 0.04 * rank * sin(phase * 0.7 + 0.5), 0.0, side * amp * sin(phase))))
 
 
 ## Lit les skins premium (un JSON par skin). Un fichier invalide est ignoré
@@ -397,6 +569,9 @@ func _rebuild() -> void:
 	_pupils.clear()
 	_float = null
 	_iris_mat = null
+	_rig = null
+	_rig_ids.clear()
+	_cable_bones.clear()
 	_build_body()
 
 
@@ -557,6 +732,8 @@ func _apply_pose(delta: float) -> void:
 	if _float != null:
 		_float.position.y = 0.035 * sin(_t * 1.3)
 		_float.rotation.z = deg_to_rad(1.5) * sin(_t * 0.8)
+	if _rig != null:
+		_drive_rig(delta, breathe, sway, bounce)
 	if _iris_mat != null:
 		var listening := 0.35 if state == LISTENING else 0.0
 		_iris_mat.emission_energy_multiplier = 0.9 + listening + jaw * 2.2
@@ -852,7 +1029,29 @@ func _build_model_body() -> void:
 	_head.add_child(_ear_r)
 	_gaze_scale = 0.45
 
-	_build_model_eye(p, s)
+	# Avec squelette : les membres bougent chacun (`_drive_rig`), l'œil est
+	# accroché à l'os de la tête. Sans : modèle d'un bloc, œil sur `_head`.
+	var model_node := _torso.get_node_or_null("Model")
+	if model_node != null:
+		_rig = model_node.find_child("Skeleton", true, false) as Skeleton3D
+	var eye_offset: Vector3 = p.get("eye_offset", Vector3(0.0, 0.003, 0.09))
+	if _rig != null:
+		for i in _rig.get_bone_count():
+			var bone_name := _rig.get_bone_name(i)
+			_rig_ids[bone_name] = i
+			if bone_name.begins_with("cable_"):
+				# cable_<n|p><secteur>_<rang>
+				var tag := bone_name.trim_prefix("cable_")
+				_cable_bones.append([i, -1.0 if tag[0] == "n" else 1.0, int(tag[1]), int(tag.get_slice("_", 1))])
+		var attach := BoneAttachment3D.new()
+		attach.name = "HeadAttach"
+		_rig.add_child(attach)
+		attach.bone_name = "head"
+		var head_origin := _rig.get_bone_global_rest(_rig_ids["head"]).origin
+		_build_model_eye(p, attach, center + eye_offset - head_origin, 1.0)
+		_gaze_scale = 0.8
+	else:
+		_build_model_eye(p, _head, eye_offset * s, s)
 	_build_data_bits(p)
 
 
@@ -882,13 +1081,12 @@ func _dress_model(model: Node3D, p: Dictionary) -> void:
 
 ## Œil unique : anneau, iris lumineux et pupille mobile, face à l'utilisateur.
 ## Il cligne (échelle) et regarde comme les yeux du renard (`_apply_pose`).
-func _build_model_eye(p: Dictionary, s: float) -> void:
-	var offset: Vector3 = p.get("eye_offset", Vector3(0.0, 0.003, 0.09))
+func _build_model_eye(p: Dictionary, parent: Node3D, at: Vector3, s: float) -> void:
 	var r := float(p.get("eye_radius", 0.036)) * s
 	var eye := Node3D.new()
 	eye.name = "Eye"
-	eye.position = offset * s
-	_head.add_child(eye)
+	eye.position = at
+	parent.add_child(eye)
 
 	var torus := TorusMesh.new()
 	torus.inner_radius = r * 0.80
