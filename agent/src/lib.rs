@@ -1447,7 +1447,7 @@ impl App {
             "version": env!("CARGO_PKG_VERSION"),
             "dev": self.paths.dev,
             "update": {
-                "pending": update::load_state(&self.paths.data).pending,
+                "pending": update::load_state(&self.paths.data).pending_now(),
             },
             "data_dir": self.paths.data,
             "workspace": settings.workspace,

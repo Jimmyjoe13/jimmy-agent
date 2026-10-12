@@ -82,6 +82,125 @@ pub async fn remote_head(app_dir: &Path) -> Option<String> {
     parse_ls_remote(&out)
 }
 
+/// `true` si `sha` est déjà contenu dans le commit local (`HEAD` égal ou en
+/// avance). Un SHA inconnu du dépôt local (jamais récupéré) renvoie `false` :
+/// c'est justement du nouveau code distant.
+pub async fn local_contains(app_dir: &Path, sha: &str) -> bool {
+    if !is_valid_sha(sha) {
+        return false;
+    }
+    let child = tokio::process::Command::new("git")
+        .args(["merge-base", "--is-ancestor", sha, "HEAD"])
+        .current_dir(app_dir)
+        .kill_on_drop(true)
+        .output();
+    matches!(
+        tokio::time::timeout(LOCAL_TIMEOUT, child).await,
+        Ok(Ok(output)) if output.status.success()
+    )
+}
+
+/// Jimy tourne-t-il depuis un clone git ? Sinon (installeur, zip) : pas de
+/// `pull` possible, la détection passe par les releases GitHub.
+pub fn is_git_clone(app_dir: &Path) -> bool {
+    app_dir.join(".git").exists()
+}
+
+// ── Version installée : comparaison avec la dernière release GitHub ─────────
+
+/// Dernière release publiée (non préversion) du dépôt public.
+const RELEASE_API: &str = "https://api.github.com/repos/Jimmyjoe13/jimmy-agent/releases/latest";
+/// Lien stable de l'installeur de la dernière release (même lien que le site).
+pub const INSTALLER_URL: &str =
+    "https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe";
+/// Version de ce binaire (`workspace.package.version`).
+pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// `"v0.1.4"` ou `"0.1.4"` → `(0, 1, 4)`. Suffixe `-beta`/`+build` ignoré ;
+/// tout autre format → `None` (jamais de fausse alerte).
+pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
+    let version = (parts.next()??, parts.next()??, parts.next()??);
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(version)
+}
+
+/// `true` seulement si `latest` est strictement plus récente que `current`.
+pub fn release_newer(current: &str, latest: &str) -> bool {
+    matches!((parse_version(current), parse_version(latest)), (Some(c), Some(l)) if l > c)
+}
+
+/// Tag de la dernière release, sans le `v` (`None` : réseau, quota, format).
+async fn latest_release() -> Option<String> {
+    let http = reqwest::Client::builder()
+        .timeout(REMOTE_TIMEOUT)
+        // L'API GitHub refuse les requêtes sans User-Agent.
+        .user_agent("jimmy/0.1 (desktop agent)")
+        .build()
+        .ok()?;
+    let value: serde_json::Value = http
+        .get(RELEASE_API)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let tag = value.get("tag_name")?.as_str()?;
+    parse_version(tag).map(|_| tag.trim_start_matches('v').to_string())
+}
+
+/// Contrôle d'une version installée : `local` = version du binaire,
+/// `remote` = dernière release. Réseau coupé : l'état précédent est gardé.
+async fn check_release(app: &crate::App) -> UpdateState {
+    let latest = latest_release().await;
+    let mut state = load_state(&app.paths.data);
+    state.release = true;
+    state.last_check = Some(chrono::Utc::now().to_rfc3339());
+    state.local = Some(CURRENT_VERSION.to_string());
+    match latest {
+        Some(latest) => {
+            state.pending = release_newer(CURRENT_VERSION, &latest);
+            if state.pending {
+                log::info!("[update] nouvelle version publiée : {CURRENT_VERSION} → {latest}");
+            } else {
+                log::info!("[update] à jour (version {CURRENT_VERSION})");
+            }
+            state.remote = Some(latest);
+        }
+        None => log::info!("[update] vérification impossible (releases GitHub injoignables)"),
+    }
+    save_state(&app.paths.data, &state);
+    state
+}
+
+/// `/update` sur une version installée : ouvre le téléchargement de
+/// l'installeur dans le navigateur (il s'installe par-dessus, données
+/// conservées dans `%APPDATA%\Jimmy`).
+async fn apply_release(app: &crate::App) -> String {
+    let state = check_release(app).await;
+    let Some(latest) = state.remote.filter(|_| state.pending) else {
+        return format!("Déjà à jour : tu as la dernière version publiée ({CURRENT_VERSION}).");
+    };
+    #[cfg(windows)]
+    let opened = std::process::Command::new("explorer.exe").arg(INSTALLER_URL).spawn().is_ok();
+    #[cfg(not(windows))]
+    let opened = false;
+    if opened {
+        format!(
+            "Téléchargement de Jimy {latest} lancé dans ton navigateur (tu as {CURRENT_VERSION}). \
+             Ouvre Jimy-setup.exe : il s'installe par-dessus, ta configuration est conservée."
+        )
+    } else {
+        format!("Jimy {latest} est disponible (tu as {CURRENT_VERSION}) : télécharge-le ici {INSTALLER_URL}")
+    }
+}
+
 /// État persisté (`data/update_state.json`) : une alerte levée survit au
 /// redémarrage au lieu d'attendre le premier contrôle.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -99,6 +218,23 @@ pub struct UpdateState {
     /// abandonnée) : l'alerte reste levée et `/update` recompile.
     #[serde(default)]
     pub unbuilt: Option<String>,
+    /// Version installée (sans `.git`) : `local`/`remote` sont des numéros de
+    /// version et non des SHA.
+    #[serde(default)]
+    pub release: bool,
+}
+
+impl UpdateState {
+    /// Alerte à afficher maintenant. Version installée : l'alerte écrite avant
+    /// une réinstallation retombe dès le lancement de la nouvelle version, sans
+    /// attendre le premier contrôle (5 min).
+    pub fn pending_now(&self) -> bool {
+        if self.release {
+            self.pending && self.remote.as_deref().is_some_and(|r| release_newer(CURRENT_VERSION, r))
+        } else {
+            self.pending
+        }
+    }
 }
 
 pub fn state_file(data_dir: &Path) -> PathBuf {
@@ -125,14 +261,26 @@ fn save_state(data_dir: &Path, state: &UpdateState) {
 /// Un cycle de vérification : lit les deux bouts, met l'état à jour,
 /// journalise. La notification suit dans `update_loop`.
 pub async fn check(app: &crate::App) -> UpdateState {
+    if !is_git_clone(&app.paths.app) {
+        return check_release(app).await;
+    }
     let local = local_head(&app.paths.app).await;
     let remote = remote_head(&app.paths.app).await;
+    // Commits locaux pas encore poussés : le distant est DANS le local, ce
+    // n'est pas une mise à jour (faux positif du 12 octobre 2026, où seule
+    // l'égalité des SHA était testée).
+    let ahead = match (local.as_deref(), remote.as_deref()) {
+        (Some(l), Some(r)) if l != r => local_contains(&app.paths.app, r).await,
+        _ => false,
+    };
     let mut state = load_state(&app.paths.data);
+    state.release = false;
     state.last_check = Some(chrono::Utc::now().to_rfc3339());
     state.local = local.clone();
     state.remote = remote.clone();
+    let compared = if ahead { local.as_deref() } else { remote.as_deref() };
     // Code tiré mais jamais compilé : les SHA se rejoignent, le binaire non.
-    state.pending = next_pending(state.pending, local.as_deref(), remote.as_deref())
+    state.pending = next_pending(state.pending, local.as_deref(), compared)
         || still_unbuilt(state.unbuilt.as_deref(), local.as_deref());
     save_state(&app.paths.data, &state);
     let short = |s: Option<&String>| {
@@ -142,6 +290,12 @@ pub async fn check(app: &crate::App) -> UpdateState {
     if state.pending {
         log::info!(
             "[update] mise à jour disponible : local {} → distant {}",
+            short(state.local.as_ref()),
+            short(state.remote.as_ref())
+        );
+    } else if ahead {
+        log::info!(
+            "[update] à jour, en avance sur le distant ({} contient {})",
             short(state.local.as_ref()),
             short(state.remote.as_ref())
         );
@@ -400,6 +554,11 @@ pub async fn apply(
         duration_ms: started.elapsed().as_millis() as u64,
     };
 
+    // Version installée : ni pull ni compilation, on renvoie vers l'installeur.
+    if !is_git_clone(&app.paths.app) {
+        return Ok(answer(apply_release(&app).await));
+    }
+
     let before = local_head(&app.paths.app).await;
     let _ = tx
         .send(AgentEvent::ToolStart {
@@ -641,7 +800,15 @@ fn short_sha(sha: &str) -> String {
     sha.chars().take(7).collect()
 }
 
-fn announce_text(local: Option<&str>, remote: &str) -> String {
+fn announce_text(local: Option<&str>, remote: &str, release: bool) -> String {
+    if release {
+        return format!(
+            "Jimy {remote} est disponible (tu as {}). Tape /update dans le Chat : \
+             j'ouvre le téléchargement de l'installeur, qui s'installe par-dessus \
+             en gardant ta configuration.",
+            local.unwrap_or("?")
+        );
+    }
     format!(
         "Une mise à jour de Jimy est disponible (local {} → distant {}). \
          Tape /update dans le Chat pour l'appliquer : \
@@ -668,11 +835,11 @@ pub fn should_announce(notified: Option<&str>, remote: Option<&str>) -> bool {
 pub async fn notify_if_pending(app: &crate::App) {
     let mut state = load_state(&app.paths.data);
     let remote = match state.remote.clone() {
-        Some(remote) if state.pending => remote,
+        Some(remote) if state.pending_now() => remote,
         _ => return,
     };
     if should_announce(state.notified.as_deref(), Some(&remote)) {
-        let text = announce_text(state.local.as_deref(), &remote);
+        let text = announce_text(state.local.as_deref(), &remote, state.release);
         match app.history.create_session("Mise à jour") {
             Ok(session) => {
                 let message = crate::core::types::Message::assistant(text);
@@ -763,10 +930,79 @@ mod tests {
         let text = announce_text(
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            false,
         );
         assert!(text.contains("/update"));
         assert!(text.contains("aaaaaaa"));
         assert!(text.contains("bbbbbbb"));
+        // Version installée : on parle de versions et d'installeur, pas de compilation.
+        let text = announce_text(Some("0.1.4"), "0.1.5", true);
+        assert!(text.contains("0.1.5") && text.contains("0.1.4") && text.contains("/update"));
+        assert!(!text.contains("recompile"));
+    }
+
+    #[test]
+    fn versions_comparees_numeriquement() {
+        assert_eq!(parse_version("v0.1.4"), Some((0, 1, 4)));
+        assert_eq!(parse_version("0.1.10-beta"), Some((0, 1, 10)));
+        assert_eq!(parse_version("0.1"), None);
+        assert_eq!(parse_version("v0.1.4.2"), None);
+        assert_eq!(parse_version("latest"), None);
+        assert!(release_newer("0.1.4", "0.1.5"));
+        // 10 > 9 : comparaison numérique, pas alphabétique.
+        assert!(release_newer("0.1.9", "0.1.10"));
+        assert!(!release_newer("0.1.4", "0.1.4"));
+        // Release plus ancienne que le binaire (build local en avance) : rien.
+        assert!(!release_newer("0.1.5", "0.1.4"));
+        // Tag illisible : jamais de fausse alerte.
+        assert!(!release_newer("0.1.4", "n'importe quoi"));
+    }
+
+    /// Après réinstallation de la nouvelle version, l'alerte enregistrée par
+    /// l'ancienne ne doit plus s'afficher (le premier contrôle n'a lieu qu'au
+    /// bout de 5 minutes).
+    #[test]
+    fn alerte_de_release_retombe_apres_installation() {
+        let mut state = UpdateState {
+            release: true,
+            pending: true,
+            remote: Some(CURRENT_VERSION.to_string()),
+            ..Default::default()
+        };
+        assert!(!state.pending_now(), "la version installée est déjà celle annoncée");
+        state.remote = Some("999.0.0".into());
+        assert!(state.pending_now());
+        // Mode git : l'état brut est gardé tel quel.
+        let git = UpdateState { pending: true, remote: Some("b".repeat(40)), ..Default::default() };
+        assert!(git.pending_now());
+    }
+
+    /// Faux positif du 12 octobre 2026 : un commit local pas encore poussé
+    /// (local en avance) était annoncé comme une mise à jour.
+    #[tokio::test]
+    async fn local_en_avance_n_est_pas_une_mise_a_jour() {
+        let dir = std::env::temp_dir().join(format!("jimmy-update-ahead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .expect("git introuvable");
+            assert!(out.status.success(), "git {args:?} : {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "poussé"]);
+        let pushed = git(&["rev-parse", "HEAD"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "pas encore poussé"]);
+        // Le distant (ancien commit) est contenu dans le local : pas de mise à jour.
+        assert!(local_contains(&dir, &pushed).await);
+        // Un commit inconnu du dépôt local (nouveau sur le distant) : mise à jour.
+        assert!(!local_contains(&dir, &"c".repeat(40)).await);
+        let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
     fn commande_reconnue_avec_tolerance() {

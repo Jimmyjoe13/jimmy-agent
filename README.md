@@ -460,12 +460,14 @@ Ces points sont assumés pour la V1 et documentés plutôt que masqués :
    intermédiaire qui ne nomme pas le fichier y échappe. Ce n'est pas un bac à
    sable.
 
-4. **Mise à jour depuis un installeur.** Le mécanisme de mise à jour
-   (pastille + `/update` : `pull` fast-forward, recompilation,
-   redémarrage) exige un clone git : ni le zip GitHub ni l'installeur
-   NSIS ne peuvent s'auto-mettre à jour. Sans `.git`, la vérification
-   se tait. L'ancienne commande `check_update` (source
-   `JIMMY_UPDATE_ENDPOINT`, jamais configurée ni appelée) ne sert plus.
+4. **Mise à jour depuis un installeur.** La mise à jour automatique
+   (`/update` : `pull` fast-forward, recompilation, redémarrage) exige un
+   clone git. Sans `.git` (installeur, zip), Jimy compare sa version à la
+   dernière release GitHub : la pastille et la bulle préviennent, et
+   `/update` ouvre le téléchargement de l'installeur, qu'il faut lancer
+   soi-même (il s'installe par-dessus, configuration conservée).
+   L'ancienne commande `check_update` (source `JIMMY_UPDATE_ENDPOINT`,
+   jamais configurée ni appelée) ne sert plus.
 
 5. **Pas d'export Godot.** L'avatar tourne depuis le projet en mode
    développement. L'export (gabarits ~1 Go) n'a pas été fait : le prototype
