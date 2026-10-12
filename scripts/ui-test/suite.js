@@ -997,6 +997,45 @@ let stepPage = null;
     return servers.map((s) => `${s.name} (${s.state}, ${s.tools.length} outils)`).join(", ");
   });
 
+  // Secrets (12 octobre) : une clé du coffre `.secrets` que Jimy croise par
+  // accident (fichier anodin, liste de processus…) arrive masquée au modèle et
+  // dans l'historique. Canari déposé dans le coffre par `test-ui.ps1` : une
+  // lecture volontaire d'un fichier de clé, le modèle la masque déjà lui-même.
+  await step("Sécurité : une clé du coffre lue par Jimy arrive masquée", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    const cle = process.env.JIMMY_UI_CANARI;
+    expect(Boolean(cle), "canari absent (lancer par test-ui.ps1)");
+    const fichier = path.join(OUT, "notes-reunion.txt");
+    require("fs").writeFileSync(fichier, `Compte rendu\nréférence du dossier : ${cle}\nfin\n`);
+    await nav("Chat");
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".composer-input").fill(`Lis le fichier ${fichier} avec read_file, puis réponds uniquement : lu.`);
+    await p.keyboard.press("Enter");
+    await p.waitForSelector(".bubble.pending", { timeout: 5000 });
+    await attendreReponse(120_000);
+    const session = (await invoke("sessions"))[0];
+    // `session_messages` n'expose pas les résultats d'outils : lecture seule
+    // de la base (la clé passe par l'environnement, jamais en argument).
+    const { execFileSync } = require("child_process");
+    const db = path.resolve(__dirname, "..", "..", "data", "jimmy.db");
+    const script = [
+      "import os, sqlite3, sys",
+      "con = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)",
+      "rows = [c or '' for (c,) in con.execute(\"SELECT content FROM messages WHERE session_id = ? AND role = 'tool'\", (sys.argv[2],))]",
+      "print(len(rows), sum(os.environ['CLE'] in c for c in rows), sum('secret masqué' in c for c in rows))",
+    ].join("\n");
+    const sortie = execFileSync("python", ["-I", "-c", script, db, session.id], { env: { ...process.env, CLE: cle, PYTHONIOENCODING: "utf-8" } })
+      .toString()
+      .trim();
+    const [outils, fuites, masques] = sortie.split(/\s+/).map(Number);
+    if (session?.title?.startsWith("Lis le fichier")) await invoke("delete_session", { sessionId: session.id });
+    require("fs").rmSync(fichier, { force: true });
+    expect(outils > 0, "aucun outil appelé");
+    expect(fuites === 0, "la clé est en clair dans l'historique");
+    expect(masques > 0, "pas de marque de masquage");
+    return `${outils} résultat(s) d'outil, clé masquée`;
+  });
+
   await step("Diagnostic : toutes les vérifications passent", async () => {
     await nav("Diagnostic");
     await p.waitForSelector(".ok-note, .warn-note", { timeout: 15000 });

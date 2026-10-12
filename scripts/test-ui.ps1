@@ -31,6 +31,11 @@ if (-not (Test-Path (Join-Path $suite 'node_modules'))) {
 }
 
 Stop-Jimmy
+# Canari du parcours « Sécurité » : fausse clé déposée dans le coffre avant le
+# lancement (Jimmy retient les clés du coffre au démarrage), retirée à la fin.
+$canariFile = Join-Path $env:USERPROFILE '.secrets\jimmy-ui-test-canari.json'
+$env:JIMMY_UI_CANARI = 'canari-' + [guid]::NewGuid().ToString('N')
+[System.IO.File]::WriteAllText($canariFile, "{`"api_key`": `"$($env:JIMMY_UI_CANARI)`"}")
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
 Start-Process -FilePath $exe -WorkingDirectory $root | Out-Null
 Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
@@ -43,6 +48,8 @@ $ErrorActionPreference = 'Continue'
 node (Join-Path $suite 'suite.js')
 $code = $LASTEXITCODE
 node (Join-Path $suite 'cleanup.js')
+Remove-Item -LiteralPath $canariFile -Force -ErrorAction SilentlyContinue
+Remove-Item Env:JIMMY_UI_CANARI -ErrorAction SilentlyContinue
 
 # Relance normale, sans port de débogage.
 Stop-Jimmy

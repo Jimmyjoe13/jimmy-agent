@@ -7,7 +7,7 @@
 //!  /journalisés.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -825,6 +825,90 @@ fn env(key: &str) -> String {
     std::env::var(key).unwrap_or_default()
 }
 
+// ── Coffre de secrets de l'utilisateur ──────────────────────────────────────
+// (12 octobre : la clé du serveur MCP `aggregate` était écrite en clair dans
+// `config.json` et dans la ligne de commande de `mcp-remote`, lisibles par
+// Jimmy lui-même — `read_file`, liste des processus.) Une valeur `secret:nom`
+// dans la configuration renvoie à `%USERPROFILE%\.secrets\nom.json`
+// (champ `api_key`, convention déjà utilisée pour les autres clés), lue au
+// moment du lancement seulement.
+
+/// Préfixe d'une valeur rangée dans le coffre au lieu d'être écrite en clair.
+pub const SECRET_REF_PREFIX: &str = "secret:";
+
+/// Dossier du coffre : `JIMMY_SECRETS_DIR`, sinon `%USERPROFILE%\.secrets`.
+pub fn secrets_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("JIMMY_SECRETS_DIR").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(|home| PathBuf::from(home).join(".secrets"))
+}
+
+/// Lit le secret `nom` dans `dir` : `nom.json` (champ `api_key`, sinon
+/// `token` ou `value`), sinon le fichier texte `nom`. Un nom hors
+/// `[A-Za-z0-9_-]` est refusé (pas de chemin glissé dans la config).
+pub fn read_secret_in(dir: &Path, name: &str) -> Option<String> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    if let Ok(text) = std::fs::read_to_string(dir.join(format!("{name}.json"))) {
+        let value: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+        return ["api_key", "token", "value"]
+            .iter()
+            .find_map(|field| value.get(field).and_then(|v| v.as_str()))
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+    }
+    std::fs::read_to_string(dir.join(name))
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Valeur de configuration prête à l'emploi : `secret:nom` → contenu du
+/// coffre (vide et avertissement s'il manque) ; toute autre valeur telle quelle.
+pub fn resolve_secret_ref(value: &str) -> String {
+    let Some(name) = value.strip_prefix(SECRET_REF_PREFIX) else {
+        return value.to_string();
+    };
+    match secrets_dir().and_then(|dir| read_secret_in(&dir, name.trim())) {
+        Some(secret) => secret,
+        None => {
+            log::warn!("[config] secret « {} » introuvable dans le coffre (.secrets)", name.trim());
+            String::new()
+        }
+    }
+}
+
+/// Toutes les valeurs du coffre (chaînes des fichiers `.json`), pour les
+/// masquer si un outil les fait remonter (`sensitive::register_secrets`).
+pub fn vault_secret_values(dir: &Path) -> Vec<String> {
+    fn leaves(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::String(s) => out.push(s.trim().to_string()),
+            serde_json::Value::Array(items) => items.iter().for_each(|v| leaves(v, out)),
+            serde_json::Value::Object(fields) => fields.values().for_each(|v| leaves(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return out };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
+                leaves(&value, &mut out);
+            }
+        }
+    }
+    out
+}
+
 /// Liste des clés manquantes, pour l'onboarding. Ne renvoie jamais les valeurs.
 pub fn missing_secrets(secrets: &Secrets) -> Vec<&'static str> {
     let mut missing = Vec::new();
@@ -848,6 +932,24 @@ pub fn require(value: &str, name: &str) -> Result<()> {
 #[cfg(test)]
 mod env_tests {
     use super::*;
+
+    /// Coffre de secrets : `nom.json` (champ `api_key`) ou fichier texte ;
+    /// un nom qui ressemble à un chemin est refusé.
+    #[test]
+    fn le_coffre_lit_les_secrets_par_nom() {
+        let dir = std::env::temp_dir().join(format!("jimmy-coffre-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("aggregate.json"), "\u{feff}{\"api_key\": \" cle-de-test-123456 \"}").unwrap();
+        std::fs::write(dir.join("brut"), "valeur-brute\n").unwrap();
+        assert_eq!(read_secret_in(&dir, "aggregate").as_deref(), Some("cle-de-test-123456"));
+        assert_eq!(read_secret_in(&dir, "brut").as_deref(), Some("valeur-brute"));
+        assert_eq!(read_secret_in(&dir, "absent"), None);
+        assert_eq!(read_secret_in(&dir, "..\\aggregate"), None);
+        assert!(vault_secret_values(&dir).contains(&"cle-de-test-123456".to_string()));
+        // Une valeur ordinaire passe telle quelle.
+        assert_eq!(resolve_secret_ref("stdio"), "stdio");
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     /// La mémoire suit le modèle principal tant qu'aucun modèle dédié n'est
     /// réglé ; une config sans le champ (antérieure au 10 octobre) se lit.

@@ -119,9 +119,15 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
   (`C:\Users\user`, `203.0.113.10`, `vps.key`).
 - `data/` (base, journaux, audio) ne se committe jamais et ne se recopie pas
   dans une réponse.
-- **Ouvert** : les clés du serveur MCP `aggregate` et de SynaptiQ figurent
-  en clair dans `data/logs/jimmy.log` (arguments d'outils journalisés tels
-  quels) → à masquer dans ce journal, puis à régénérer (HANDOFF, « Ensuite »).
+- **Clé d'un serveur MCP** : jamais en clair dans `config.json` ni dans la
+  ligne de commande. Valeur `secret:nom` dans `env` (fichier
+  `%USERPROFILE%\.secrets
+om.json`, champ `api_key`) et `${VAR}` dans
+  l'argument si le lanceur sait le lire (`mcp-remote`). Les clés connues sont
+  masquées dans tout résultat d'outil (`sensitive::redact_known`, piège 108).
+- Clé `aggregate` **régénérée le 12 octobre** (l'ancienne est morte). **Ouvert** :
+  SynaptiQ et skillsmp ont encore leur clé en clair dans `config.json`
+  (`env`) → même migration, puis rotation (HANDOFF, « Ensuite »).
 
 ## 8. Git
 

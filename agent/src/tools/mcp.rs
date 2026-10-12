@@ -140,12 +140,23 @@ impl Tool for McpCall {
 
 /// Convertit l'entrée de configuration en serveur MCP.
 pub fn server_from_settings(config: &McpServerConfig) -> McpServer {
+    // `secret:nom` → coffre `.secrets` (la clé n'est ni dans `config.json`
+    // ni dans la ligne de commande : `mcp-remote` lit `${VAR}` lui-même).
+    let env: HashMap<String, String> = config
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), crate::config::resolve_secret_ref(v)))
+        .collect();
+    // Les valeurs secrètes sont masquées si un outil les fait remonter.
+    crate::sensitive::register_secrets(
+        env.iter().filter(|(k, _)| crate::mcp::is_secret_name(k)).map(|(_, v)| v.clone()),
+    );
     McpServer {
         name: config.name.clone(),
         transport: config.transport.clone(),
         command: config.command.clone(),
         url: config.url.clone(),
-        env: config.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<HashMap<_, _>>(),
+        env,
     }
 }
 

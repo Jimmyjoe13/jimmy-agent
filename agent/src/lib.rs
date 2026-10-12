@@ -287,6 +287,18 @@ async fn kill_orphan_avatar(port: u16) {
 /// au lieu de continuer la conversation courante.
 pub const CONVERSATION_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
 
+/// Retient les clés que Jimmy connaît pour les masquer dans les résultats
+/// d'outils (`sensitive::redact_known`) : coffre `.secrets`, `.env`, clés des
+/// fournisseurs saisies dans l'interface.
+fn register_known_secrets(settings: &Settings, secrets: &Secrets) {
+    let mut values = vec![secrets.opencode_api_key.clone(), secrets.openrouter_api_key.clone()];
+    values.extend(settings.llm.providers.iter().map(|p| p.api_key.clone()));
+    if let Some(dir) = config::secrets_dir() {
+        values.extend(config::vault_secret_values(&dir));
+    }
+    sensitive::register_secrets(values);
+}
+
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.
 pub type Mutex<T> = std::sync::Mutex<T>;
 
@@ -310,6 +322,10 @@ impl App {
             ),
         ));
         let skills = Arc::new(SkillStore::new(paths.skills_dir())?);
+
+        // Clés à masquer dans les résultats d'outils : coffre `.secrets`, `.env`
+        // et fournisseurs (les serveurs MCP ajoutent les leurs au lancement).
+        register_known_secrets(&settings, &secrets);
 
         let session_id = uuid::Uuid::new_v4().to_string();
         let llm = Arc::new(LlmClient::new(
@@ -735,6 +751,7 @@ impl App {
         // modèle ou de clé dans l'interface s'applique sans redémarrage.
         let current = self.settings();
         self.llm.update_providers(&current.llm, &self.secrets);
+        register_known_secrets(&current, &self.secrets);
         result
     }
 

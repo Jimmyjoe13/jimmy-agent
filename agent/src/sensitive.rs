@@ -815,6 +815,44 @@ pub async fn authorize(
     }
 }
 
+// ── Valeurs secrètes connues, masquées dans les résultats d'outils ───────────
+// (12 octobre : la clé `aggregate` remontait en clair au modèle par une simple
+// liste des processus ou une lecture de `config.json`.) Les clés que Jimmy
+// connaît — coffre `.secrets`, fournisseurs, variables secrètes des serveurs
+// MCP — sont remplacées partout où un outil les fait remonter. Précis : seules
+// ces valeurs exactes sont touchées, le reste du résultat garde sa forme.
+
+/// Marque qui remplace une valeur secrète connue.
+pub const REDACTED: &str = "••••(secret masqué)";
+
+static KNOWN_SECRETS: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Ajoute des valeurs à masquer. Les valeurs courtes (< 12 caractères) ou
+/// avec des espaces sont ignorées : trop de faux positifs.
+pub fn register_secrets<I: IntoIterator<Item = String>>(values: I) {
+    let mut known = KNOWN_SECRETS.write().unwrap_or_else(|e| e.into_inner());
+    for value in values {
+        let value = value.trim().to_string();
+        if value.chars().count() >= 12 && !value.chars().any(char::is_whitespace) && !known.contains(&value) {
+            known.push(value);
+        }
+    }
+    // Les plus longues d'abord : une clé qui en contient une autre reste entière.
+    known.sort_by_key(|v| std::cmp::Reverse(v.len()));
+}
+
+/// Remplace toute valeur secrète connue par [`REDACTED`].
+pub fn redact_known(text: &str) -> String {
+    let known = KNOWN_SECRETS.read().unwrap_or_else(|e| e.into_inner());
+    let mut out = text.to_string();
+    for value in known.iter() {
+        if out.contains(value.as_str()) {
+            out = out.replace(value.as_str(), REDACTED);
+        }
+    }
+    out
+}
+
 // ── Masquage des secrets avant journalisation ou affichage ───────────────────
 // (HANDOFF « Ensuite » 3 : les arguments d'outils partaient en clair dans
 // `jimmy.log`, clés `aggregate` et SynaptiQ comprises. Même règle que
@@ -959,6 +997,19 @@ fn mask_userinfo(word: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Cas réel du 12 octobre : la clé `aggregate` dans une liste de
+    /// processus. La valeur connue est masquée, la ligne garde sa forme ; une
+    /// valeur trop courte n'est pas retenue (faux positifs).
+    #[test]
+    fn une_cle_connue_est_masquee_dans_un_resultat_d_outil() {
+        register_secrets(["cle-agregat-test-0123456789".to_string(), "court".to_string()]);
+        let sortie = "node proxy.js http://127.0.0.1:8010/mcp --header X-API-Key:cle-agregat-test-0123456789\n  suite";
+        let masque = redact_known(sortie);
+        assert!(!masque.contains("cle-agregat-test-0123456789"), "{masque}");
+        assert!(masque.contains(&format!("X-API-Key:{REDACTED}\n  suite")), "{masque}");
+        assert_eq!(redact_known("un mot court"), "un mot court");
+    }
 
     /// Navigation en son nom : seules les actions qui engagent demandent
     /// l'accord (formes réelles des arguments de Playwright MCP 0.0.83).

@@ -569,6 +569,9 @@ pub async fn run_with_images(
             };
             let _ = duration_ms;
 
+            // Clés connues masquées (coffre, fournisseurs, serveurs MCP) : une
+            // liste de processus ou un fichier de config lu ne les livre plus.
+            let text = crate::sensitive::redact_known(&text);
             messages.push(Message::tool_result(call.id.clone(), call.name.clone(), text.clone()));
             deps.history
                 .append(&session_id, &Message::tool_result(call.id, call.name, text))
