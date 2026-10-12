@@ -1245,7 +1245,7 @@ impl App {
 
         let synth = |part: String| {
             let tts = self.tts.clone();
-            let key = self.secrets.openrouter_api_key.clone();
+            let key = settings.tts_key(&self.secrets);
             let model = settings.tts.model.clone();
             let voice_id = settings.tts.voice.clone();
             let cpm = settings.tts.chars_per_minute;
@@ -1464,7 +1464,7 @@ impl App {
                 "enabled": settings.tts.enabled,
                 "model": settings.tts.model,
                 "voice": settings.tts.voice,
-                "has_key": !self.secrets.openrouter_api_key.is_empty(),
+                "has_key": !settings.tts_key(&self.secrets).is_empty(),
                 // Voix prédéfinies puis celles de la bibliothèque.
                 "voices": TtsVoice::PRESETS.iter().map(|v| v.info())
                     .chain(settings.tts.library.iter().cloned())

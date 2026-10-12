@@ -644,6 +644,37 @@ let stepPage = null;
     return `${follow} s, ${pause} ms, langue ${lang}`;
   });
 
+  await step("Voix : synthèse vocale (clé OpenRouter, modèle TTS enregistré puis restauré)", async () => {
+    // La clé n'est jamais saisie ici (ce serait la vraie) : on vérifie son
+    // état affiché et l'enregistrement du modèle, remis ensuite.
+    const before = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).tts);
+    await nav("Voix");
+    await p.waitForSelector(".tts-model", { timeout: 10000 });
+    const shown = await p.locator(".tts-model").inputValue();
+    expect(shown === before.model, `modèle affiché « ${shown} », attendu « ${before.model} »`);
+    const keyState = await p.locator(".tts-key-state").textContent();
+    expect(before.has_key === !keyState.includes("Aucune clé"), `état de clé incohérent : has_key=${before.has_key}, « ${keyState} »`);
+    const save = () => p.locator(".card", { hasText: "Synthèse vocale" }).locator("button.primary", { hasText: "Enregistrer" }).click();
+    try {
+      await p.locator(".tts-model").fill("fish-audio/test-ui");
+      await save();
+      await p.waitForFunction(
+        async () => (await window.__TAURI_INTERNALS__.invoke("status")).tts.model === "fish-audio/test-ui",
+        null,
+        { timeout: 10000 },
+      );
+    } finally {
+      await p.locator(".tts-model").fill(before.model);
+      await save();
+      await p.waitForFunction(
+        async (m) => (await window.__TAURI_INTERNALS__.invoke("status")).tts.model === m,
+        before.model,
+        { timeout: 10000 },
+      );
+    }
+    return `modèle ${before.model}, clé ${before.has_key ? "présente" : "absente"}`;
+  });
+
   await step("Paramètres : bibliothèque de modèles (liste, test, refus)", async () => {
     // Le modèle vocal se choisit désormais dans l'onglet Voix (parcours
     // dédié plus bas) : ici, seuls la liste, le test et le refus.

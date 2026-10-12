@@ -211,7 +211,7 @@ impl Tts {
         chars_per_minute: f32,
     ) -> Result<Speech> {
         if api_key.trim().is_empty() {
-            return Err(Error::Tts("clé OPENROUTER_API_KEY absente".into()));
+            return Err(Error::Tts("clé OpenRouter absente : saisis-la dans l'onglet Voix".into()));
         }
         let prepared = prepare_for_speech(text);
         if prepared.is_empty() {

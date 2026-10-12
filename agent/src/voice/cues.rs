@@ -90,7 +90,7 @@ async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
     let speech = app
         .tts
         .speak(
-            &app.secrets.openrouter_api_key,
+            &settings.tts_key(&app.secrets),
             &settings.tts.model,
             &settings.tts.voice,
             cue.phrase(),

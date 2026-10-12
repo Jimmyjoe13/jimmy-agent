@@ -13,6 +13,9 @@ import { card, field, toggle, FOLLOW_UP_CHOICES, LANGUAGES } from "./settings";
 import { modelsPanel } from "./models";
 import { voicesPanel } from "./voices";
 
+/** Modèle TTS par défaut, aligné sur `TtsSettings::default()` côté Rust. */
+const DEFAULT_TTS_MODEL = "fish-audio/s2.1-pro-free:free";
+
 export function voiceView(ctx: AppContext): HTMLElement {
   const recorder = new Recorder();
   let meterTimer = 0;
@@ -335,6 +338,42 @@ export function voiceView(ctx: AppContext): HTMLElement {
 
   void loadVoiceSettings();
 
+  // ── Synthèse vocale : clé OpenRouter et modèle TTS ───────────────────────
+  // La clé est celle du fournisseur OpenRouter (partagée avec Paramètres →
+  // LLM) : Rust la lit via `Settings::tts_key`, saisie d'abord, `.env` ensuite.
+  const openrouter = ctx.status.llm.providers.find((p) => p.id === "openrouter");
+  const ttsKeyState = h(
+    "p",
+    { class: "note tts-key-state" },
+    openrouter?.key_from === "interface"
+      ? `Clé OpenRouter enregistrée (••••${openrouter.key_hint ?? ""}).`
+      : openrouter?.key_from === "environnement"
+        ? "Clé OpenRouter lue dans le fichier .env : une saisie ici la remplace."
+        : "Aucune clé OpenRouter : Jimy ne peut pas parler tant qu'elle manque.",
+  );
+  const ttsKeyInput = h("input", {
+    class: "field tts-key",
+    type: "password",
+    autocomplete: "off",
+    placeholder: openrouter?.key_from === "interface" ? "inchangée si vide" : "sk-or-…",
+  }) as HTMLInputElement;
+  const ttsModelInput = h("input", { class: "field tts-model", type: "text", value: ctx.status.tts.model }) as HTMLInputElement;
+
+  async function persistTts() {
+    // Clé d'abord : une erreur garde la saisie à l'écran.
+    const key = ttsKeyInput.value.trim();
+    if (key && !(await attempt(() => api.llmSetProviderKey("openrouter", key), "clé OpenRouter"))) return;
+    // Copie fraîche de Rust : la clé vient d'y être écrite, ne pas l'écraser.
+    const fresh = await guard(() => api.getSettings(), "réglages voix");
+    if (!fresh) return;
+    fresh.tts.model = ttsModelInput.value.trim() || DEFAULT_TTS_MODEL;
+    if (!(await attempt(() => api.saveSettings(fresh), "enregistrement"))) return;
+    ttsKeyInput.value = "";
+    ttsModelInput.value = fresh.tts.model;
+    await ctx.refreshStatus();
+    toast("Synthèse vocale enregistrée — « Lire » pour l'essayer");
+  }
+
   // Installation neuve : whisper.cpp se télécharge au premier lancement.
   // Tant qu'il manque, l'écoute ne peut pas démarrer : on dit où on en est.
   const comp = ctx.status.stt.components;
@@ -440,6 +479,28 @@ export function voiceView(ctx: AppContext): HTMLElement {
       voices,
       h("h4", {}, "Lire un texte avec la voix actuelle"),
       h("div", { class: "row" }, ttsInput, ttsButton),
+    ),
+    card(
+      "Synthèse vocale",
+      h(
+        "p",
+        { class: "note" },
+        "Jimy parle via OpenRouter. La clé est la même que celle du fournisseur OpenRouter dans Paramètres → LLM : la saisir ici la met aussi là-bas.",
+      ),
+      ttsKeyState,
+      field("Clé OpenRouter", ttsKeyInput),
+      field("Modèle TTS", ttsModelInput, DEFAULT_TTS_MODEL),
+      h(
+        "p",
+        { class: "note" },
+        "Les voix de la bibliothèque sont des voix Fish Audio : un modèle d'une autre famille peut ne pas les reconnaître.",
+      ),
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "ghost", onclick: () => (ttsModelInput.value = DEFAULT_TTS_MODEL) }, "Modèle par défaut"),
+        h("button", { class: "primary", onclick: () => void persistTts() }, "Enregistrer"),
+      ),
     ),
     card(
       "Tester la reconnaissance",

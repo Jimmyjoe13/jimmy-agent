@@ -697,6 +697,16 @@ impl Settings {
         }
     }
 
+    /// Clé de la synthèse vocale (Fish Audio via OpenRouter) : la clé du
+    /// fournisseur OpenRouter, saisie dans l'interface, sinon `.env`.
+    /// Avant, seul `.env` comptait : une installation neuve restait muette.
+    pub fn tts_key(&self, secrets: &Secrets) -> String {
+        match self.llm.provider(PROVIDER_OPENROUTER) {
+            Some(openrouter) => self.llm.resolve_key(openrouter, secrets),
+            None => secrets.openrouter_api_key.clone(),
+        }
+    }
+
     pub fn load(paths: &Paths) -> Self {
         let path = paths.config_file();
         let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
@@ -982,6 +992,25 @@ mod env_tests {
         // Un fournisseur sans variable d'environnement (DeepSeek) n'a que sa clé saisie.
         let deepseek = s.llm.provider(PROVIDER_DEEPSEEK).unwrap().clone();
         assert!(s.llm.resolve_key(&deepseek, &secrets).is_empty());
+    }
+
+    /// La voix partage la clé OpenRouter du fournisseur de modèles : une clé
+    /// saisie dans l'interface doit la faire parler même sans `.env`
+    /// (installeur), et gagner sur l'environnement (piège 62).
+    #[test]
+    fn la_voix_utilise_la_cle_openrouter_saisie() {
+        let mut s = Settings::default();
+        let sans_env = Secrets::default();
+        // Rien nulle part : pas de clé.
+        assert!(s.tts_key(&sans_env).is_empty());
+        // Seulement l'environnement : repli.
+        let avec_env = Secrets { opencode_api_key: String::new(), openrouter_api_key: "cle-du-env".into() };
+        assert_eq!(s.tts_key(&avec_env), "cle-du-env");
+        // Clé saisie dans l'interface (installeur, pas de `.env`) : elle sert.
+        s.llm.providers.iter_mut().find(|p| p.id == PROVIDER_OPENROUTER).unwrap().api_key = "cle-saisie".into();
+        assert_eq!(s.tts_key(&sans_env), "cle-saisie");
+        // Les deux : la saisie gagne.
+        assert_eq!(s.tts_key(&avec_env), "cle-saisie");
     }
 
     /// Un fournisseur en mode abonnement garde sa méthode d'accès à travers

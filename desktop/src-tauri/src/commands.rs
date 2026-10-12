@@ -952,7 +952,7 @@ pub async fn tts_preview(
     let speech = app
         .tts
         .speak(
-            &app.secrets.openrouter_api_key,
+            &settings.tts_key(&app.secrets),
             &settings.tts.model,
             &voice,
             &text,
@@ -1252,8 +1252,8 @@ pub async fn doctor(state: State<'_, AppState>) -> std::result::Result<serde_jso
     ));
     checks.push(check(
         "Clé OpenRouter (voix)",
-        !app.secrets.openrouter_api_key.is_empty(),
-        "OPENROUTER_API_KEY absent de .env",
+        !settings.tts_key(&app.secrets).is_empty(),
+        "aucune clé OpenRouter (onglet Voix ou .env)",
     ));
     checks.push(check(
         "whisper.cpp",
