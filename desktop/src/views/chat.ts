@@ -228,11 +228,20 @@ export function chatView(ctx: AppContext): HTMLElement {
         {
           class: "danger small tasks-band-stop",
           title: "Arrêter cette tâche de fond",
-          onclick: () => void attempt(() => api.taskStop(task.id), "arrêt de la tâche"),
+          onclick: () => void stopBackground(task.id),
         },
         "Arrêter",
       ),
     );
+  }
+
+  /** Arrêt de la tâche de fond : relecture immédiate du registre, le bandeau
+   *  disparaît même si la fin de la tâche n'arrive jamais par événement. */
+  async function stopBackground(id: string) {
+    const stopped = await guard(() => api.taskStop(id), "arrêt de la tâche");
+    // `undefined` : échec, déjà signalé par `guard`.
+    if (stopped !== undefined) toast(stopped ? "Tâche de fond arrêtée." : "Cette tâche était déjà terminée.", "info");
+    await refreshTasks();
   }
 
   async function refreshTasks() {
@@ -242,9 +251,10 @@ export function chatView(ctx: AppContext): HTMLElement {
     renderTasks();
   }
 
-  // La durée du bandeau avance toute seule ; minuterie détruite avec la vue.
+  // Bandeau tenu à jour depuis le registre (durée, fin manquée) ; minuterie
+  // détruite avec la vue.
   const tasksTimer = window.setInterval(() => {
-    if (backgroundTask) renderTasks();
+    if (backgroundTask) void refreshTasks();
   }, 5000);
   ctx.onCleanup(() => window.clearInterval(tasksTimer));
 
@@ -584,7 +594,10 @@ export function chatView(ctx: AppContext): HTMLElement {
     );
     // Échap ferme l'aperçu (l'écouteur vit dans la fenêtre, retirée avec elle).
     fileModal.addEventListener("keydown", (event) => {
-      if ((event as KeyboardEvent).key === "Escape") closeModal();
+      if ((event as KeyboardEvent).key === "Escape") {
+        event.preventDefault();
+        closeModal();
+      }
     });
     fileModal.setAttribute("tabindex", "-1");
     // Ajout AVANT le focus : un élément hors du document ne prend pas le
@@ -1029,6 +1042,8 @@ export function chatView(ctx: AppContext): HTMLElement {
         // une bulle d'attente en dessous, comme pour un message écrit.
         if (event.sessionId) void adoptVoiceSession(event.sessionId);
         append(bubble("voice", event.text ?? ""));
+        // « Arrêter » visible aussi pour une commande vocale.
+        setBusy(true);
         if (!pending) {
           pending = h(
             "div",
@@ -1174,6 +1189,9 @@ export function chatView(ctx: AppContext): HTMLElement {
   void loadHistory().then(() => ctx.approvals.forEach((event) => showApproval(event)));
   void loadProject();
   void refreshTasks();
+  // Conversation affichée (Historique, retour sur le Chat) : la voix la
+  // continuera. Sans conversation affichée, l'état de la voix est gardé.
+  if (sessionId) void attempt(() => api.conversationFocus(sessionId), "conversation");
   window.setTimeout(() => input.focus(), 0);
 
   const newSessionButton = h(
@@ -1184,6 +1202,8 @@ export function chatView(ctx: AppContext): HTMLElement {
       onclick: () => {
         sessionId = null;
         ctx.lastSessionId = null;
+        // La voix ne continue plus l'ancienne conversation.
+        void attempt(() => api.conversationFocus(null), "nouvelle conversation");
         // Nouveau fil dans le même projet, comme chez Codex.
         ctx.pendingProject = project;
         mount(activity);

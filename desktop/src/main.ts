@@ -59,6 +59,12 @@ async function main() {
       route = "history";
       render();
     }
+    // Échap : arrêt d'urgence quand Jimy travaille ou parle. Un menu ou un
+    // aperçu ouvert consomme Échap avant (`preventDefault`).
+    if (event.key === "Escape" && !event.defaultPrevented && !globalStop.hidden) {
+      event.preventDefault();
+      void stopNow();
+    }
   });
 
 
@@ -98,6 +104,29 @@ async function main() {
   const content = h("main", { class: "content" });
   const stateChip = h("span", { class: "chip state-idle", title: "État de Jimy" }, STATE_LABEL.idle);
 
+  // Arrêt d'urgence visible depuis toutes les vues, dès que Jimy travaille ou
+  // parle (Chat comme voix). Même effet que « STOP », Échap ou Ctrl+Maj+Espace.
+  const globalStop = h(
+    "button",
+    {
+      class: "danger global-stop",
+      hidden: true,
+      title: "Arrêter ce que fait Jimy (Échap, ou Ctrl+Maj+Espace partout dans Windows)",
+      onclick: () => void stopNow(),
+    },
+    icon("stop", 15, 2),
+    "Arrêter",
+  );
+  // États où Jimy est occupé au premier plan.
+  const BUSY = new Set(["thinking", "executing", "speaking", "waiting", "transcribing"]);
+  function showStop(state: string) {
+    globalStop.hidden = !BUSY.has(state);
+  }
+  async function stopNow() {
+    if (await attempt(() => api.agentStop(), "arrêt")) toast("Arrêt demandé.", "info");
+    globalStop.hidden = true;
+  }
+
   // Compte à rebours de « à toi » : le temps qu'il reste pour parler.
   let countdown = 0;
 
@@ -105,6 +134,7 @@ async function main() {
     window.clearInterval(countdown);
     stateChip.textContent = STATE_LABEL[state] ?? state;
     stateChip.className = `chip state-${state}`;
+    showStop(state);
   }
 
   /** Étape de l'écoute (événement `listen`) : plus fine que l'état de l'avatar. */
@@ -112,6 +142,7 @@ async function main() {
     window.clearInterval(countdown);
     window.clearTimeout(idleTimer);
     stateChip.className = `chip phase-${phase}`;
+    showStop(phase);
     if (phase === "your_turn" && remaining > 0) {
       const end = Date.now() + remaining;
       const tick = () => {
@@ -315,6 +346,7 @@ async function main() {
       h(
         "div",
         { class: "topbar-actions" },
+        globalStop,
         stateChip,
         h(
           "button",

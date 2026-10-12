@@ -542,6 +542,8 @@ export const api = {
   skillsList: () => invoke<Skill[]>("skills_list"),
   skillRead: (name: string) => invoke<string>("skill_read", { name }),
   mcpServers: () => invoke<McpServerStatus[]>("mcp_servers"),
+  /** Conversation affichée par le Chat (`null` = nouvelle) : la voix la continue. */
+  conversationFocus: (sessionId: string | null) => invoke<void>("conversation_focus", { sessionId }),
   /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimy). */
   agentStop: () => invoke<boolean>("agent_stop"),
   tasksList: () => invoke<TaskInfo[]>("tasks_list"),

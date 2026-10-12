@@ -90,11 +90,12 @@ pub struct App {
     avatar_spawning: tokio::sync::Mutex<()>,
     /// Le chien de garde de l'avatar n'est démarré qu'une fois.
     avatar_watchdog: std::sync::atomic::AtomicBool,
-    /// Session vocale courante et instant du dernier échange. Portée par
-    /// `App`, et non par la boucle d'écoute : un arrêt puis une reprise de
-    /// l'écoute (bouton, réglage, micro) créait auparavant une boucle neuve
-    /// dont la session repartait de zéro — Jimmy « oubliait » la conversation
-    /// en cours. Voir `VOICE_SESSION_IDLE` (10 min).
+    /// Conversation courante (Chat **et** voix) et instant du dernier
+    /// échange. Portée par `App`, et non par la boucle d'écoute : un arrêt
+    /// puis une reprise de l'écoute créait auparavant une session neuve. Le
+    /// Chat la met à jour (`focus_conversation`) : passer de l'écrit à la voix
+    /// continue la même discussion (cas du 12 octobre). Voir
+    /// `CONVERSATION_IDLE` (10 min).
     pub voice_session: std::sync::Mutex<Option<(String, std::time::Instant)>>,
     /// Arrêt d'urgence (« STOP », bouton « Arrêter ») : chaque demande
     /// incrémente le compteur, les tâches en cours l'observent.
@@ -281,6 +282,10 @@ async fn kill_orphan_avatar(port: u16) {
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     }
 }
+
+/// Silence au-delà duquel une commande vocale ouvre une nouvelle conversation
+/// au lieu de continuer la conversation courante.
+pub const CONVERSATION_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.
 pub type Mutex<T> = std::sync::Mutex<T>;
@@ -1340,6 +1345,27 @@ impl App {
             .as_ref()
             .ok_or_else(|| Error::Stt("la reconnaissance vocale n'est pas démarrée".into()))?;
         stt.transcribe_wav(wav).await
+    }
+
+    /// Le Chat affiche (ou vient d'utiliser) cette conversation : la voix la
+    /// continuera. `None` = « Nouvelle session » : la prochaine commande
+    /// vocale en ouvrira une neuve.
+    pub fn focus_conversation(&self, session_id: Option<&str>) {
+        let mut guard = self.voice_session.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = session_id.filter(|id| !id.is_empty()).map(|id| (id.to_string(), std::time::Instant::now()));
+    }
+
+    /// Conversation où va une commande vocale : la conversation courante si
+    /// elle a servi depuis moins de `CONVERSATION_IDLE`, sinon une neuve
+    /// (« Session vocale »). Relance le délai.
+    pub fn conversation_for_voice(&self) -> String {
+        let mut guard = self.voice_session.lock().unwrap_or_else(|e| e.into_inner());
+        let id = match guard.as_ref() {
+            Some((id, last)) if last.elapsed() < CONVERSATION_IDLE => id.clone(),
+            _ => self.history.create_session("Session vocale").unwrap_or_else(|_| String::from("vocale")),
+        };
+        *guard = Some((id.clone(), std::time::Instant::now()));
+        id
     }
 
     /// Contexte d'outils prêt à l'emploi pour une demande.

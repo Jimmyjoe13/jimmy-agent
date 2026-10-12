@@ -8,6 +8,9 @@ require("fs").mkdirSync(OUT, { recursive: true });
 
 const results = [];
 async function step(name, fn) {
+  // `UI_ONLY=texte` : ne rejoue que les étapes dont le nom le contient
+  // (relance ciblée d'un échec, sans la suite entière).
+  if (process.env.UI_ONLY && !name.includes(process.env.UI_ONLY)) return;
   try {
     const detail = await fn();
     results.push(`OK     ${name}${detail ? ` — ${detail}` : ""}`);
@@ -425,6 +428,55 @@ let stepPage = null;
     const session = (await invoke("sessions"))[0];
     if (session?.title?.startsWith("Exécute avec run_command")) await invoke("delete_session", { sessionId: session.id });
     return `fond après ${detachedAfter} s, « ${parallel.trim()} » en parallèle, fin : « ${fin.slice(0, 40)} »`;
+  });
+
+  // Arrêt d'une tâche de fond (12 octobre) : le bouton du bandeau l'arrête et
+  // le bandeau disparaît aussitôt (avant, il restait affiché si la fin de la
+  // tâche n'arrivait pas par événement : clics « sans effet »).
+  await step("Chat : « Arrêter » du bandeau arrête la tâche de fond et retire le bandeau", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    for (let i = 0; i < 180 && (await invoke("tasks_list")).some((t) => t.background); i++) await p.waitForTimeout(1000);
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".composer-input").fill(
+      "Exécute avec run_command la commande : Start-Sleep -Seconds 120; 'fond-stop'. Puis réponds uniquement par ce qu'elle affiche.",
+    );
+    await p.keyboard.press("Enter");
+    await p.waitForFunction(
+      () => document.querySelector(".tasks-band:not([hidden]) .tasks-band-title")?.textContent?.includes("fond-stop"),
+      null,
+      { timeout: 120_000, polling: 200 },
+    );
+    const t0 = Date.now();
+    await p.locator(".tasks-band-stop").click();
+    await p.waitForSelector(".tasks-band[hidden]", { state: "attached", timeout: 6000 });
+    const ms = Date.now() - t0;
+    const tasks = await invoke("tasks_list");
+    expect(!tasks.some((t) => t.background), "la tâche de fond tourne encore");
+    const session = (await invoke("sessions"))[0];
+    if (session?.title?.startsWith("Exécute avec run_command")) await invoke("delete_session", { sessionId: session.id });
+    return `bandeau retiré ${ms} ms après le clic`;
+  });
+
+  // Arrêt d'urgence global (12 octobre) : bouton de la barre du haut visible
+  // pendant le travail, Échap l'actionne depuis n'importe où dans la fenêtre.
+  await step("Arrêt d'urgence : bouton de la barre du haut et touche Échap", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".composer-input").fill("Lis un par un tous les fichiers du dossier agent et résume chacun en détail.");
+    await p.keyboard.press("Enter");
+    await p.waitForSelector(".global-stop:not([hidden])", { timeout: 15_000 });
+    await p.waitForTimeout(1500);
+    const t0 = Date.now();
+    // Échap hors de la zone de saisie : depuis n'importe où dans la fenêtre.
+    await p.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+    await p.keyboard.press("Escape");
+    await attendreReponse(15_000);
+    const ms = Date.now() - t0;
+    const text = ((await p.locator(".stream .bubble.assistant").last().textContent()) ?? "").trim();
+    expect(/Arrêté/.test(text), `réponse après Échap : « ${text} »`);
+    const latest = (await invoke("sessions"))[0];
+    if (latest?.title?.startsWith("Lis un par un")) await invoke("delete_session", { sessionId: latest.id });
+    return `arrêté par Échap en ${ms} ms`;
   });
 
   // Vision (7 octobre) : le bouton capture la fenêtre active (hors Jimmy),

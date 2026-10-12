@@ -75,6 +75,28 @@ fn init_logging(paths: &Paths) {
     builder.init();
 }
 
+/// Raccourci d'arrêt d'urgence, actif même fenêtre cachée.
+pub const STOP_SHORTCUT: &str = "ctrl+shift+space";
+
+/// Ctrl+Maj+Espace, partout dans Windows : arrête ce que fait Jimmy au
+/// premier plan (tâche et parole), comme « STOP » ou le bouton « Arrêter ».
+/// Un raccourci déjà pris par une autre application est seulement journalisé.
+fn register_stop_shortcut(handle: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+    let result = handle.global_shortcut().on_shortcut(STOP_SHORTCUT, |app, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            if let Some(state) = app.try_state::<AppState>() {
+                log::info!("[agent] arrêt d'urgence par le raccourci Ctrl+Maj+Espace");
+                state.app.request_stop();
+            }
+        }
+    });
+    match result {
+        Ok(()) => log::info!("[agent] raccourci d'arrêt d'urgence actif : Ctrl+Maj+Espace"),
+        Err(error) => log::warn!("[agent] raccourci d'arrêt d'urgence indisponible : {error}"),
+    }
+}
+
 pub fn run() {
     let paths = Paths::discover().expect("chemins Jimy introuvables");
     init_logging(&paths);
@@ -116,6 +138,9 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             }))
+            // Raccourci global d'arrêt d'urgence (enregistré dans `setup`,
+            // sans faire échouer le démarrage s'il est déjà pris).
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
@@ -143,6 +168,7 @@ pub fn run() {
 
                 let window_for_voice = state.window.clone();
                 handle.manage(state);
+                register_stop_shortcut(&app_handle);
                 let runtime = Arc::new(VoiceRuntime::new(settings.voice.input_sample_rate));
                 handle.manage(runtime.clone());
 
@@ -280,6 +306,7 @@ pub fn run() {
                 commands::skill_read,
                 commands::mcp_servers,
                 commands::agent_stop,
+                commands::conversation_focus,
                 commands::tasks_list,
                 commands::screen_capture,
                 commands::screen_discard,

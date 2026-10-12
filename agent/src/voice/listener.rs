@@ -77,8 +77,6 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(20);
 const STILL_WORKING_AFTER: Duration = Duration::from_secs(45);
 /// Délai au-delà duquel Jimmy dit « Un instant. » pendant que l'agent travaille.
 const THINKING_CUE_AFTER: Duration = Duration::from_secs(5);
-/// Silence au-delà duquel une nouvelle commande ouvre une nouvelle session.
-const VOICE_SESSION_IDLE: Duration = Duration::from_secs(600);
 
 impl App {
     /// Démarre la boucle d'écoute. Ne rend pas la main : elle tourne jusqu'à
@@ -402,26 +400,10 @@ async fn answer_command(
     // un guetteur écoute le micro pour l'arrêt d'urgence (« STOP »).
     let stop_generation = app.stop_generation();
     let watcher = tokio::spawn(watch_for_stop(app.clone(), runtime.clone(), rate, threshold));
-    // Conversation : même session tant que le dernier échange est récent.
-    // L'état vit sur `App` : une relance de l'écoute ne coupe plus le fil.
-    let session = {
-        let mut guard = app.voice_session.lock().unwrap_or_else(|e| e.into_inner());
-        match guard.as_ref() {
-            Some((id, last)) if last.elapsed() < VOICE_SESSION_IDLE => {
-                let id = id.clone();
-                *guard = Some((id.clone(), Instant::now()));
-                id
-            }
-            _ => {
-                let id = app
-                    .history
-                    .create_session("Session vocale")
-                    .unwrap_or_else(|_| String::from("vocale"));
-                *guard = Some((id.clone(), Instant::now()));
-                id
-            }
-        }
-    };
+    // Conversation : celle du Chat ou de la voix si le dernier échange est
+    // récent (`App::conversation_for_voice`). L'état vit sur `App` : passer
+    // de l'écrit à la voix, ou relancer l'écoute, ne coupe plus le fil.
+    let session = app.conversation_for_voice();
 
     // Affichée dans le chat comme un message de l'utilisateur ; le Chat adopte
     // la session vocale (projet compris).

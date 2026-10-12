@@ -88,6 +88,10 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         }
     };
 
+    // Conversation courante : une commande vocale qui suit la continue
+    // (passer de l'écrit à la voix ne perd plus le fil).
+    app.focus_conversation(Some(&session_id));
+
     // `/update` : mise à jour déterministe, pas un tour d'agent (le modèle
     // n'a rien à y décider : récupérer, recompiler, redémarrer).
     if jimmy_agent::update::is_update_command(&message) {
@@ -848,6 +852,14 @@ pub async fn tts_remove_voice(state: State<'_, AppState>, id: String) -> std::re
     Ok(current)
 }
 
+/// Le Chat affiche une conversation (ouverte depuis l'Historique, reprise
+/// après navigation) ou en commence une neuve (`None`) : la voix suivra.
+#[tauri::command]
+pub async fn conversation_focus(state: State<'_, AppState>, session_id: Option<String>) -> std::result::Result<(), String> {
+    state.app.focus_conversation(session_id.as_deref());
+    Ok(())
+}
+
 /// Arrêt d'urgence (bouton « Arrêter » du Chat) : la tâche au premier plan
 /// est abandonnée et Jimmy se tait ; une tâche de fond continue (`task_stop`).
 /// Renvoie `true` s'il y avait quelque chose à arrêter.
@@ -1056,10 +1068,14 @@ pub async fn start_listening(
         }
     });
 
+    // Le relais n'est pas coupé à l'arrêt de l'écoute : il se termine seul
+    // quand plus personne n'émet. Une tâche de fond lancée à la voix garde
+    // ainsi son canal — avant, couper le micro perdait sa fin (réponse ou
+    // arrêt) et le bandeau « En arrière-plan » restait affiché (12 octobre).
     let app_for_loop = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = app_for_loop.spawn_voice_listener(runtime, tx).await;
-        relay.abort();
+        let _ = relay.await;
     });
     Ok(())
 }

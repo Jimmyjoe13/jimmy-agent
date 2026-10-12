@@ -2599,6 +2599,25 @@ button.small {
   display: none;
 }
 
+/* Arrêt d'urgence de la barre du haut, visible dans toutes les vues. */
+.global-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ko);
+  background: rgba(248, 113, 113, 0.16);
+  color: var(--ko);
+  font-weight: 700;
+}
+
+.global-stop:hover {
+  background: rgba(248, 113, 113, 0.28);
+}
+
+.global-stop[hidden] {
+  display: none;
+}
+
 /* Tâche de fond : bandeau au-dessus de la saisie (le Chat reste libre). */
 .tasks-band {
   display: flex;
