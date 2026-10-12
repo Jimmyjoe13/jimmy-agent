@@ -1,4 +1,4 @@
-﻿# Crée le raccourci « Jimy » sur le Bureau.
+﻿# Crée le raccourci « Jimy (dev&personnal) » sur le Bureau.
 #
 #   .\scripts\shortcut.ps1            # crée ou met à jour le raccourci
 #   .\scripts\shortcut.ps1 -Remove    # supprime le raccourci
@@ -45,21 +45,28 @@ function New-JimmyRaccourci([string]$dossier, [string]$nom) {
     return $chemin
 }
 
-# Ancien nom (« Jimmy », avant le 9 octobre 2026) : retiré seulement s'il
-# pointe sur ce lanceur, pour ne pas laisser deux raccourcis.
+# Nom distinct de celui de l'installeur (« Jimy ») : l'installeur écrasait
+# Jimy.lnk et sa désinstallation emportait le raccourci de dev (12 octobre 2026).
+$nom = 'Jimy (dev&personnal)'
+
+# Anciens noms (« Jimmy » avant le 9 octobre, « Jimy » avant le 12) : retirés
+# seulement s'ils pointent sur ce lanceur, pour ne jamais toucher au
+# raccourci de l'appli installée.
 foreach ($dossier in $desktop, $startup) {
-    $ancien = Join-Path $dossier 'Jimmy.lnk'
-    if (Test-Path $ancien) {
-        $cible = (New-Object -ComObject WScript.Shell).CreateShortcut($ancien).Arguments
-        if ($cible -like "*$launcher*") {
-            Remove-Item $ancien -Force
-            Write-Host "Ancien raccourci retiré : $ancien" -ForegroundColor Yellow
+    foreach ($ancienNom in 'Jimmy', 'Jimy') {
+        $ancien = Join-Path $dossier "$ancienNom.lnk"
+        if (Test-Path $ancien) {
+            $cible = (New-Object -ComObject WScript.Shell).CreateShortcut($ancien).Arguments
+            if ($cible -like "*$launcher*") {
+                Remove-Item $ancien -Force
+                Write-Host "Ancien raccourci retiré : $ancien" -ForegroundColor Yellow
+            }
         }
     }
 }
 
 if ($Remove) {
-    $lnk = Join-Path $desktop 'Jimy.lnk'
+    $lnk = Join-Path $desktop "$nom.lnk"
     if (Test-Path $lnk) {
         Remove-Item $lnk -Force
         Write-Host "Raccourci supprimé : $lnk" -ForegroundColor Yellow
@@ -69,18 +76,18 @@ if ($Remove) {
     exit 0
 }
 
-$cree = New-JimmyRaccourci $desktop 'Jimy'
+$cree = New-JimmyRaccourci $desktop $nom
 Write-Host "Raccourci créé : $cree" -ForegroundColor Green
 
 if ($Autostart) {
     if (-not (Test-Path $startup)) {
         New-Item -ItemType Directory -Force -Path $startup | Out-Null
     }
-    $lnk = New-JimmyRaccourci $startup 'Jimy'
+    $lnk = New-JimmyRaccourci $startup $nom
     Write-Host "Démarrage avec Windows activé : $lnk" -ForegroundColor Green
 } else {
     Write-Host "Pour démarrer avec Windows : .\scripts\shortcut.ps1 -Autostart"
 }
 
 Write-Host ''
-Write-Host 'Un double-clic sur « Jimy » lance l''application.' -ForegroundColor Cyan
+Write-Host "Un double-clic sur « $nom » lance l'application." -ForegroundColor Cyan
