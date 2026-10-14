@@ -257,6 +257,10 @@ pub async fn run_with_images(
     let mut reads = 0usize;
     let mut acts = 0usize;
     let mut nudges = 0u32;
+    // Cibles lues depuis la dernière action (détecteur de relecture en
+    // boucle, 13 octobre) et erreurs d'outil consécutives (hors refus).
+    let mut read_targets: Vec<String> = Vec::new();
+    let mut consec_errors = 0u32;
     // Appels d'outil arrivés coupés ou en texte : redemandés au plus 2 fois.
     let mut repairs = 0u32;
     let mut final_text = String::new();
@@ -454,8 +458,14 @@ pub async fn run_with_images(
         for call in &reply.tool_calls {
             if is_read_call(&call.name, &call.arguments) {
                 reads += 1;
+                // Relecture en boucle (13 octobre) : on retient quoi, pas qui.
+                // Une vraie action vide la liste (le contexte a changé).
+                if let Some(target) = reread_target(&call.name, &call.arguments) {
+                    read_targets.push(target);
+                }
             } else {
                 acts += 1;
+                read_targets.clear();
             }
         }
 
@@ -521,6 +531,7 @@ pub async fn run_with_images(
                 let started_tool = Instant::now();
                 match execute(&deps, &call, &tool_context).await {
                     Ok(text) => {
+                        consec_errors = 0;
                         cache.insert(key, text.clone());
                         let elapsed = started_tool.elapsed().as_millis() as u64;
                         tools_used.push(call.name.clone());
@@ -546,6 +557,9 @@ pub async fn run_with_images(
                         // Une erreur d'outil n'est pas une erreur de Jimmy : on
                         // la renvoie au modèle pour qu'il se corrige. Et elle
                         // alimente le journal d'expérience (leçon après coup).
+                        // Trop d'erreurs d'affilée sans inflexion (13 octobre :
+                        // 6 requêtes en 404) : le rappel suit après la boucle.
+                        consec_errors += 1;
                         tool_errors.push((call.name.clone(), error.to_string()));
                         log::warn!(
                             "[agent] outil « {} » en erreur en {} ms : {error}",
@@ -595,6 +609,18 @@ pub async fn run_with_images(
                 log::info!("[agent] point d'étape n°{nudges} : {reads} lectures sans action, rappel d'agir");
                 messages.push(Message::user(text.to_string()));
             }
+        }
+        // Relecture en boucle et erreurs en chaîne (13 octobre) : rappels
+        // ciblés, une fois par fenêtre (la liste/le compteur repartent après).
+        if let Some(text) = reread_notice(&read_targets) {
+            log::info!("[agent] relecture en boucle : {text}");
+            messages.push(Message::user(text));
+            read_targets.clear();
+        }
+        if let Some(text) = consecutive_error_notice(consec_errors) {
+            log::info!("[agent] {consec_errors} erreurs d'outil consécutives, rappel de méthode");
+            messages.push(Message::user(text.to_string()));
+            consec_errors = 0;
         }
     }
 
@@ -839,6 +865,64 @@ fn cut_degenerate(reply: &str) -> String {
 const REPAIR_NOTE: &str = "Ton dernier appel d'outil est arrivé coupé ou sous forme de texte (réponse \
 trop longue). Refais-le avec un vrai appel d'outil. Pour un gros fichier, écris-le en plusieurs fois : \
 write_file pour le début, puis write_file avec append=true pour chaque suite.";
+
+/// Cible d'une lecture pour le détecteur de relecture en boucle : `read_file`
+/// et `list_directory` avec leur chemin (`start_line` inclus : paginer un gros
+/// fichier n'est pas relire). `None` : pas une lecture ciblée.
+fn reread_target(name: &str, arguments: &serde_json::Value) -> Option<String> {
+    let path = arguments.get("path")?.as_str()?;
+    let slot = match name {
+        "read_file" => {
+            let start = arguments.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("read_file:{path}:{start}")
+        }
+        "list_directory" => format!("list_directory:{path}"),
+        _ => return None,
+    };
+    Some(slot)
+}
+
+/// Seuil de relecture en boucle : à la 3e lecture identique sans action
+/// entre-temps, un rappel ciblé (cas réel du 13 octobre).
+const REREAD_THRESHOLD: usize = 3;
+
+/// Rappel de relecture en boucle : `Some(texte)` quand une même cible a été
+/// lue `REREAD_THRESHOLD` fois sans action entre-temps (l'appelant vide la
+/// liste à chaque action et après chaque rappel).
+fn reread_notice(targets: &[String]) -> Option<String> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for target in targets {
+        let n = counts.entry(target.as_str()).or_insert(0);
+        *n += 1;
+        if *n >= REREAD_THRESHOLD {
+            let file = target.split(':').nth(1).unwrap_or(target.as_str());
+            return Some(format!(
+                "Rappel automatique : tu as déjà lu « {file} » {n} fois sans rien en faire. \
+                 N'ouvre plus ce fichier : agis avec ce que tu sais, ou conclus."
+            ));
+        }
+    }
+    None
+}
+
+/// Seuil d'erreurs d'outil consécutives avant de changer de méthode (cas réel
+/// du 13 octobre : 6 requêtes en 404 d'affilée sans inflexion).
+const CONSEC_ERRORS_THRESHOLD: u32 = 4;
+
+/// Rappel après trop d'erreurs d'outil consécutives (les refus d'accord ne
+/// comptent pas : ils ne passent jamais par ici).
+fn consecutive_error_notice(consec: u32) -> Option<&'static str> {
+    if consec >= CONSEC_ERRORS_THRESHOLD {
+        Some(
+            "Rappel automatique : 4 outils d'affilée en erreur sans changer de méthode. \
+             Relis le message d'erreur au lieu de réessayer pareil : vérifie les arguments \
+             attendus (schéma de l'outil, `mcp_list_tools`), ou conclus avec ce qui marche.",
+        )
+    } else {
+        None
+    }
+}
 
 /// Étape à partir de laquelle on rappelle d'agir, si rien n'a été fait.
 const EXPLORATION_NUDGE_AT: u32 = 6;
@@ -1129,6 +1213,46 @@ mod degenerate_tests {
     fn les_lectures_ne_comptent_pas_comme_des_actions() {
         assert!(is_read_tool("read_file") && is_read_tool("search_files") && is_read_tool("mcp_list_tools"));
         assert!(!is_read_tool("write_file") && !is_read_tool("run_command") && !is_read_tool("mcp_call"));
+    }
+
+    /// Cas réel du 13 octobre : `campaigns.py` relu 4 fois et `mcp_server.py`
+    /// 5 fois en 48 appels, sans rien écrire. À la 3e lecture identique sans
+    /// action entre-temps, un rappel ciblé nomme le fichier. Paginer un gros
+    /// fichier (`start_line` différent) n'est pas relire.
+    #[test]
+    fn la_meme_lecture_trois_fois_declenche_un_rappel_cible() {
+        let target = |name: &str, args: serde_json::Value| reread_target(name, &args).unwrap_or_default();
+        assert_eq!(reread_notice(&[]), None);
+        let lus = vec![target("read_file", serde_json::json!({"path": "a.py"})), target("read_file", serde_json::json!({"path": "b.py"}))];
+        assert_eq!(reread_notice(&lus), None);
+        // Pagination : suite du même fichier, pas une relecture.
+        assert_ne!(
+            target("read_file", serde_json::json!({"path": "gros.py"})),
+            target("read_file", serde_json::json!({"path": "gros.py", "start_line": 101}))
+        );
+        // `list_directory` compte aussi ; un autre outil, non.
+        assert!(target("list_directory", serde_json::json!({"path": "d"})).contains('d'));
+        assert_eq!(reread_target("run_command", &serde_json::json!({"command": "dir"})), None);
+        let boucle = vec![
+            target("read_file", serde_json::json!({"path": "campaigns.py"})),
+            target("read_file", serde_json::json!({"path": "mcp_server.py"})),
+            target("read_file", serde_json::json!({"path": "campaigns.py"})),
+            target("read_file", serde_json::json!({"path": "campaigns.py"})),
+        ];
+        let rappel = reread_notice(&boucle).expect("3e lecture identique : rappel");
+        assert!(rappel.contains("campaigns.py"), "{rappel}");
+    }
+
+    /// Cas réel du 13 octobre : 6 requêtes `/stats` en 404 d'affilée sans
+    /// inflexion. Après 4 erreurs d'outil consécutives, un rappel demande de
+    /// changer de méthode ou de conclure (les refus d'accord ne comptent pas :
+    /// ils ne passent jamais par ici).
+    #[test]
+    fn quatre_erreurs_d_affilee_demandent_de_changer_de_methode() {
+        assert_eq!(consecutive_error_notice(0), None);
+        assert_eq!(consecutive_error_notice(3), None);
+        assert!(consecutive_error_notice(4).is_some());
+        assert!(consecutive_error_notice(9).is_some());
     }
 
     /// Cas réel du 4 octobre : « HTTP 500 Internal Server Error — Unknown Error ».
