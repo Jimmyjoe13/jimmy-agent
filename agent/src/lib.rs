@@ -287,16 +287,59 @@ async fn kill_orphan_avatar(port: u16) {
 /// au lieu de continuer la conversation courante.
 pub const CONVERSATION_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Retient les clés que Jimmy connaît pour les masquer dans les résultats
-/// d'outils (`sensitive::redact_known`) : coffre `.secrets`, `.env`, clés des
-/// fournisseurs saisies dans l'interface.
-fn register_known_secrets(settings: &Settings, secrets: &Secrets) {
+/// Toutes les valeurs à masquer dans les résultats d'outils : clés des
+/// fournisseurs et coffre `.secrets`. Les valeurs d'environnement connues
+/// suivent (`extra_env`) : un dump de l'environnement ne doit jamais
+/// remonter une clé au modèle (cas réel du 13 octobre).
+fn collect_known_secrets(
+    settings: &Settings,
+    secrets: &Secrets,
+    extra_env: Vec<String>,
+) -> Vec<String> {
     let mut values = vec![secrets.opencode_api_key.clone(), secrets.openrouter_api_key.clone()];
     values.extend(settings.llm.providers.iter().map(|p| p.api_key.clone()));
     if let Some(dir) = config::secrets_dir() {
         values.extend(config::vault_secret_values(&dir));
     }
-    sensitive::register_secrets(values);
+    values.extend(extra_env);
+    values
+}
+
+/// Retient les clés que Jimmy connaît pour les masquer dans les résultats
+/// d'outils (`sensitive::redact_known`) : coffre `.secrets`, `.env`, clés des
+/// fournisseurs saisies dans l'interface.
+fn register_known_secrets(settings: &Settings, secrets: &Secrets) {
+    sensitive::register_secrets(collect_known_secrets(settings, secrets, sensitive::env_secret_values()));
+}
+
+#[cfg(test)]
+mod secrets_tests {
+    use super::*;
+
+    /// Cas réel du 13 octobre : `Get-ChildItem Env:` a remonté une clé
+    /// d'environnement au modèle, et l'envoi suivant a été bloqué
+    /// (« secret detecte dans le corps »). Les valeurs d'environnement
+    /// connues doivent être collectées et masquées comme les autres.
+    #[test]
+    fn les_valeurs_d_environnement_sont_collectees_et_masquees() {
+        let settings = Settings::default();
+        let secrets = Secrets::default();
+        let collected = collect_known_secrets(
+            &settings,
+            &secrets,
+            vec!["valeur-env-factice-0123456789".to_string()],
+        );
+        assert!(collected.contains(&"valeur-env-factice-0123456789".to_string()));
+        sensitive::register_secrets(collected);
+        let dump = "OPENROUTER_API_KEY = valeur-env-factice-0123456789";
+        let masque = sensitive::redact_known(dump);
+        assert!(!masque.contains("valeur-env-factice-0123456789"), "{masque}");
+        let body = serde_json::json!({"input": masque});
+        assert!(!sensitive::body_contains_secret(
+            &body,
+            &["valeur-env-factice-0123456789".to_string()]
+        ));
+    }
 }
 
 /// Mutex synchrone, pour les champs qui ne franchissent jamais un `await`.

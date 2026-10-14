@@ -138,6 +138,86 @@ impl Tool for McpCall {
     }
 }
 
+/// Motifs d'arguments qui portent une clé (`--header`, `--token`…).
+fn is_secret_flag(arg: &str) -> bool {
+    let low = arg.to_lowercase();
+    low == "--header"
+        || low == "-h"
+        || low == "--token"
+        || low == "--api-key"
+        || low == "--auth"
+        || low.starts_with("--header=")
+        || low.starts_with("--token=")
+        || low.starts_with("--api-key=")
+        || low.starts_with("--auth=")
+}
+
+/// Un nom de paramètre parle-t-il d'un secret (`Authorization`, `X-API-Key`) ?
+fn is_secret_param(name: &str) -> bool {
+    let low = name.to_lowercase();
+    low.contains("key") || low.contains("token") || low.contains("auth") || low.contains("secret") || low.contains("bearer")
+}
+
+/// Une valeur ressemble-t-elle à une clé en clair (longue, sans blanc, pas
+/// une référence `${VAR}` ni `secret:nom`) ?
+fn looks_like_clear_secret(value: &str) -> bool {
+    let v = value.trim().trim_matches(|c| c == '"' || c == '\'');
+    v.chars().count() >= 12
+        && !v.chars().any(char::is_whitespace)
+        && !v.contains("${")
+        && !v.starts_with("secret:")
+}
+
+/// Repère une clé d'API écrite en clair dans la commande ou l'environnement
+/// d'un serveur MCP à brancher (cas réel du 13 octobre : `emile` recréé avec
+/// `Authorization: Bearer <clé>` en clair, piège 108 contourné).
+/// Convention attendue : `${VAR}` dans la commande, `secret:nom` dans `env`
+/// (coffre `%USERPROFILE%\.secrets`, comme `aggregate`).
+/// `None` = rien de secret, rien à signaler.
+pub fn secret_in_server_args(command: &[String], env: &BTreeMap<String, String>) -> Option<String> {
+    let mut i = 0;
+    while i < command.len() {
+        let arg = command[i].trim();
+        // Forme `--flag=valeur` : la valeur est dans le même argument.
+        let inline = arg.split_once('=').filter(|(flag, _)| is_secret_flag(flag));
+        let value = if let Some((_, v)) = inline {
+            Some(v.to_string())
+        } else if is_secret_flag(arg) {
+            command.get(i + 1).cloned()
+        } else {
+            None
+        };
+        if let Some(v) = value {
+            // `Nom: valeur` ou `Nom=valeur` : seul un nom qui parle d'un
+            // secret compte (`Content-Type: application/json` reste libre).
+            let param = v.split([':', '=']).next().unwrap_or("").trim();
+            let token = v.rsplit([':', '=', ' ']).next().unwrap_or("").trim();
+            if (is_secret_param(param) || is_secret_flag(arg)) && looks_like_clear_secret(token) {
+                return Some(format!(
+                    "clé en clair dans la commande (« …{} ») : jamais de secret dans `config.json` ni sur la ligne de commande (piège 108). \
+                     Demande à l'utilisateur de ranger la clé dans le coffre `%USERPROFILE%\\.secrets\\<nom>.json` (champ `api_key`), \
+                     puis déclare `--header \"Authorization: Bearer ${{VAR}}\"` avec `\"env\": {{\"VAR\": \"secret:<nom>\"}}` comme le serveur `aggregate`",
+                    &token.chars().take(4).collect::<String>()
+                ));
+            }
+        }
+        // Jeton connu, n'importe où dans la ligne (clé déjà exposée ailleurs).
+        let low = arg.to_lowercase();
+        if ["sk-or-", "xoxb-", "ghp_", "gsk_"].iter().any(|p| low.contains(p)) {
+            return Some("jeton connu dans la commande : même règle, coffre + `${VAR}`, jamais en clair".to_string());
+        }
+        i += 1;
+    }
+    for (key, value) in env {
+        if crate::mcp::is_secret_name(key) && looks_like_clear_secret(value) {
+            return Some(format!(
+                "clé en clair dans `env` ({key}) : utilise `\"{key}\": \"secret:<nom>\"` avec la clé dans le coffre, comme `aggregate`"
+            ));
+        }
+    }
+    None
+}
+
 /// Convertit l'entrée de configuration en serveur MCP.
 pub fn server_from_settings(config: &McpServerConfig) -> McpServer {
     // `secret:nom` → coffre `.secrets` (la clé n'est ni dans `config.json`
@@ -252,7 +332,10 @@ impl Tool for McpAddServer {
     fn description(&self) -> &str {
         "Branche un serveur MCP (transport stdio) et rend ses outils disponibles \
          immédiatement. Exemple de commande : [\"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"C:/Users/user/Documents\"]. \
-         Le serveur est enregistré dans la configuration et relancé aux prochains démarrages."
+         Le serveur est enregistré dans la configuration et relancé aux prochains démarrages. \
+         Clé d'API : jamais en clair dans la commande ni dans `env` (piège 108) — \
+         `--header \"Authorization: Bearer ${NOM_VAR}\"` avec `\"env\": {\"NOM_VAR\": \"secret:nom\"}`, \
+         la clé rangée par l'utilisateur dans `%USERPROFILE%\\.secrets\\nom.json` (champ `api_key`), comme le serveur `aggregate`."
     }
 
     fn parameters(&self) -> Value {
@@ -302,6 +385,13 @@ impl Tool for McpAddServer {
             // Lancer un serveur = exécuter une commande : même permission.
             ctx.check(Capability::Execute, &command.join(" "))?;
 
+            // Piège 108 : une clé passée en argument ou écrite dans
+            // `config.json` est lisible par Jimmy lui-même et part au modèle.
+            // On refuse avant de persister, avec la convention à suivre.
+            if let Some(problem) = secret_in_server_args(&command, &env) {
+                return Err(Error::Tool(format!("REFUSÉ : {problem}")));
+            }
+
             let config = McpServerConfig {
                 name: name.clone(),
                 transport: "stdio".into(),
@@ -342,5 +432,47 @@ impl Tool for McpAddServer {
                 listing.join("\n")
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod server_secret_tests {
+    use super::*;
+
+    fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// Cas réel du 13 octobre : `emile` recréé avec sa clé en clair dans
+    /// `--header` (piège 108 contourné par `mcp_add_server` lui-même).
+    /// Une clé en clair dans la commande est refusée ; la convention
+    /// `${VAR}` + `secret:nom` passe.
+    #[test]
+    fn une_cle_en_clair_dans_la_commande_est_signalee() {
+        let clair = vec![
+            "npx".to_string(),
+            "-y".to_string(),
+            "mcp-remote".to_string(),
+            "https://exemple.fr/mcp".to_string(),
+            "--header".to_string(),
+            "Authorization: Bearer cle-emile-factice-0123456789".to_string(),
+        ];
+        assert!(secret_in_server_args(&clair, &env(&[])).is_some());
+        // Convention coffre : `${VAR}` dans la commande, `secret:nom` dans l'env.
+        let propre = vec![
+            "npx".to_string(),
+            "-y".to_string(),
+            "mcp-remote".to_string(),
+            "https://exemple.fr/mcp".to_string(),
+            "--header".to_string(),
+            "Authorization: Bearer ${EMILE_API_KEY}".to_string(),
+        ];
+        assert_eq!(
+            secret_in_server_args(&propre, &env(&[("EMILE_API_KEY", "secret:emile")])),
+            None
+        );
+        // Ni clé ni en-tête : rien à signaler.
+        let simple = vec!["npx".to_string(), "-y".to_string(), "server-fichiers".to_string()];
+        assert_eq!(secret_in_server_args(&simple, &env(&[])), None);
     }
 }
