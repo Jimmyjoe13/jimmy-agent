@@ -332,7 +332,23 @@ fn words_read_only(words: &[&str]) -> bool {
     };
     let verb = verb.to_lowercase();
     let verb = verb.rsplit(['/', '\\']).next().unwrap_or(&verb).trim_end_matches(".exe");
+    // Aide ou version seule : lecture, quel que soit le programme
+    // (`tailscale serve --help`, `python3 --version`).
+    if rest.iter().any(|w| *w == "--help") || matches!(rest, ["--version"] | ["-V"] | ["version"]) {
+        return true;
+    }
     match verb {
+        // `sed -n '1,120p' f` lit ; `sed -i` réécrit le fichier.
+        "sed" => !rest.iter().any(|w| w.starts_with("-i") || w.starts_with("--in-place")),
+        // `tailscale status`, `tailscale serve status` ; pas `up`, `serve --bg`.
+        "tailscale" => {
+            let args: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).collect();
+            match args.as_slice() {
+                ["status" | "ip" | "version" | "whois" | "netcheck" | "ping", ..] => true,
+                ["serve" | "funnel", "status", ..] => true,
+                _ => false,
+            }
+        }
         "find" => !rest.iter().any(|w| ["-delete", "-exec", "-execdir", "-ok", "-fprint"].contains(w)),
         // `systemctl status`, pas `systemctl restart`.
         "systemctl" => rest.first().is_some_and(|w| ["status", "is-active", "list-units", "show"].contains(w)),
@@ -450,6 +466,42 @@ fn inner_args(value: Option<&serde_json::Value>) -> serde_json::Value {
         None => serde_json::Value::Null,
     }
 }
+
+/// Un `mcp_call` qui ne fait que **consulter** ? Sert au rappel « agis ou
+/// conclus » de la boucle d'agent, pas à la sécurité. Outil qui exécute une
+/// commande (`vps_exec`…) : la commande décide. Sinon le nom de l'outil : un
+/// mot de consultation (`get`, `list`, `stats`, `ps`…) et aucun mot qui agit.
+/// Dans le doute, une action (cas réel du 14 octobre : tous les `mcp_call`
+/// passaient pour des actions, 43 étapes d'inspection du VPS sans rappel).
+pub fn mcp_call_is_read(arguments: &serde_json::Value) -> bool {
+    let Some(tool) = arguments.get("tool").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let args = inner_args(arguments.get("arguments"));
+    for key in ["command", "cmd", "script"] {
+        if let Some(command) = args.get(key).and_then(|v| v.as_str()) {
+            return command_is_read_only(command);
+        }
+    }
+    let tool = tool.to_lowercase();
+    let words: Vec<&str> = tool.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    !is_write_tool(&tool)
+        && !words.iter().any(|w| MCP_ACTION_WORDS.contains(w))
+        && words.iter().any(|w| MCP_READ_WORDS.contains(w))
+}
+
+/// Mots d'un nom d'outil MCP qui consultent seulement.
+const MCP_READ_WORDS: &[&str] = &[
+    "get", "list", "read", "search", "query", "find", "show", "describe", "stats", "status", "health", "info",
+    "sysinfo", "ps", "logs", "inspect", "count", "check", "view", "lookup", "fetch",
+];
+
+/// Mots d'un nom d'outil MCP qui agissent (en plus de `is_write_tool`).
+const MCP_ACTION_WORDS: &[&str] = &[
+    "send", "post", "set", "add", "start", "stop", "pause", "resume", "restart", "kill", "run", "exec", "deploy",
+    "archive", "trash", "untrash", "unarchive", "mark", "modify", "enable", "disable", "trigger", "download",
+    "launch", "activate", "schedule", "batch", "respond", "star",
+];
 
 /// Un appel d'outil MCP (`tool` sur le serveur) modifie-t-il un fichier
 /// sensible ?
@@ -1219,6 +1271,59 @@ mod tests {
             "",
         ] {
             assert!(!command_is_read_only(command), "« {command} » ne doit pas être une lecture");
+        }
+    }
+
+    /// Cas réel du 14 octobre (tâche « dashboard », 43 étapes, rien d'écrit) :
+    /// ces inspections du VPS passaient pour des actions, le rappel « agis ou
+    /// conclus » ne partait jamais.
+    #[test]
+    fn les_inspections_reelles_du_vps_sont_des_lectures() {
+        for command in [
+            "tailscale serve --help 2>&1; echo ===VERSION===; tailscale version; echo ===SERVE-JSON===; tailscale serve status --json 2>&1",
+            "tailscale status 2>&1 | head -30; echo ===IP===; tailscale ip -4 2>&1",
+            "sed -n '483,600p' ~/app/backend/api/campaigns.py; echo ===; sed -n '150,230p' ~/app/backend/api/analytics.py",
+            "python3 --version; ss -ltn | grep -E ':8787|:8788' || echo LIBRE",
+            "cat ~/app/docker-compose.yml 2>/dev/null | head -80; echo ---; which tailscale",
+        ] {
+            assert!(command_is_read_only(command), "« {command} » doit être une lecture");
+        }
+        for command in ["sed -i 's/a/b/' config.py", "tailscale serve --bg 8787", "tailscale up", "tailscale funnel 443"] {
+            assert!(!command_is_read_only(command), "« {command} » ne doit pas être une lecture");
+        }
+    }
+
+    /// Un `mcp_call` qui ne fait que consulter (stats, liste, état, commande
+    /// d'inspection) est une lecture ; dans le doute (outil inconnu), une action.
+    #[test]
+    fn un_appel_mcp_de_consultation_est_une_lecture() {
+        let call = |server: &str, tool: &str, args: serde_json::Value| json!({"server": server, "tool": tool, "arguments": args});
+        for args in [
+            call("emile", "get_campaign_stats", json!({"campaign_id": 22, "days": 30})),
+            call("emile", "list_campaigns", json!({"limit": 50})),
+            call("emile", "list_out_of_office_replies", json!({"limit": 20})),
+            call("vps", "vps_docker_ps", json!({"all": true})),
+            call("vps", "vps_sysinfo", json!({})),
+            call("vps", "vps_docker_logs", json!({"container": "api"})),
+            call("vps", "vps_exec", json!({"command": "docker ps --format x; cat ~/app/docker-compose.yml"})),
+            // Arguments sérialisés en chaîne JSON par certains modèles.
+            json!({"server": "vps", "tool": "vps_exec", "arguments": "{\"command\": \"ls -la ~/app\"}"}),
+        ] {
+            assert!(mcp_call_is_read(&args), "{args} doit être une lecture");
+        }
+        for args in [
+            call("vps", "vps_docker_restart", json!({"container": "api"})),
+            call("vps", "vps_upload", json!({"remote_path": "/srv/x"})),
+            call("vps", "vps_exec", json!({"command": "docker compose up -d"})),
+            call("vps", "vps_exec", json!({})),
+            call("aggregate", "gmail_send", json!({"to": "a@example.com"})),
+            call("aggregate", "mail_mark_read", json!({"id": "1"})),
+            call("emile", "pause_campaign", json!({"campaign_id": 22})),
+            call("emile", "update_sequence_step", json!({"step_id": 37})),
+            call("x", "do_magic", json!({})),
+            json!({}),
+        ] {
+            assert!(!mcp_call_is_read(&args), "{args} ne doit pas être une lecture");
         }
     }
 

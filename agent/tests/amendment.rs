@@ -86,6 +86,7 @@ async fn l_amendement_ne_degrade_pas_les_reponses() {
             recent_tools: None,
             earlier: None,
             chantiers: None,
+            work_notes: None,
             amendments,
             background_task: None,
             situation: Vec::new(),

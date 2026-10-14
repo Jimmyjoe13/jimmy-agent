@@ -48,7 +48,11 @@ n'existe : c'est un programme personnel.
    travail récent a déjà confirmé, ne redemande pas confirmation entre les
    étapes. Pour du code : lis ce qui manque, écris les fichiers, lance les
    tests s'il y en a. Ne termine par une question que si une décision de
-   l'utilisateur est vraiment nécessaire.
+   l'utilisateur est vraiment nécessaire. Pour une création (fichier, script,
+   page, service), écris un **premier jet tôt** — dès que tu en sais assez,
+   au plus tard vers la 8e étape — puis complète-le : un livrable écrit vaut
+   mieux qu'une exploration parfaite. Ce que le « Carnet de travail » donne
+   pour acquis n'est pas à réinspecter.
 7. Lis efficacement : un gros fichier arrive par morceaux (`read_file` indique
    le `start_line` de la suite) ; `search_files` donne le numéro de ligne de
    ce qu'il trouve, lis autour au lieu de relire tout le fichier.
@@ -135,6 +139,9 @@ pub struct PromptContext<'a> {
     pub earlier: Option<String>,
     /// Chantiers ouverts, toutes conversations (`recap::chantiers_block`).
     pub chantiers: Option<String>,
+    /// Carnet de travail de cette conversation (`notes::work_notes_block`) :
+    /// les acquis vérifiés des tours outillés précédents.
+    pub work_notes: Option<String>,
     /// Amendements du prompt (lot « croissance ») : des instructions
     /// additionnelles actées avec l'utilisateur, lues dans
     /// `data/growth_amendments.md`. Absent ou vide : prompt inchangé.
@@ -272,6 +279,10 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
 
     if let Some(block) = &ctx.earlier {
         parts.push(("plus tôt", block.clone()));
+    }
+
+    if let Some(block) = &ctx.work_notes {
+        parts.push(("carnet de travail", block.clone()));
     }
 
     if let Some(block) = &ctx.recent_tools {
@@ -441,6 +452,7 @@ mod tests {
             recent_tools: None,
             earlier: None,
             chantiers: None,
+            work_notes: None,
             amendments: None,
             background_task: None,
             situation: Vec::new(),
@@ -478,6 +490,8 @@ mod tests {
             recent_tools: None,
             earlier: None,
             chantiers: None,
+            // Carnet de travail (14 octobre) : les acquis du tour précédent.
+            work_notes: crate::core::notes::work_notes_block(Some("- API Emile sur 127.0.0.1:18001")),
             amendments: Some("Ne jamais reformuler la question avant de répondre.".into()),
             // La tâche de fond rejoint le prompt (réponse en parallèle).
             background_task: Some("- Tâche en arrière-plan : « écris notify.py »".into()),
@@ -489,6 +503,7 @@ mod tests {
         let now = system.split("## Maintenant").nth(1).unwrap().split("\n\n").next().unwrap();
         assert!(now.contains("« écris notify.py »") && now.contains("« .env »"), "{system}");
         assert!(!system.contains("## Contexte de la session"), "{system}");
+        assert!(system.contains("## Carnet de travail de cette conversation") && system.contains("127.0.0.1:18001"), "{system}");
         assert!(system.contains("## Amendements"), "{system}");
         assert!(system.contains("Ne jamais reformuler"), "{system}");
         assert!(system.contains(".bak"), "{system}");
@@ -561,6 +576,7 @@ mod tests {
             recent_tools: None,
             earlier: None,
             chantiers: None,
+            work_notes: None,
             amendments: None,
             background_task: None,
             situation: Vec::new(),

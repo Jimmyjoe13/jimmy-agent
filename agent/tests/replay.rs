@@ -80,6 +80,7 @@ async fn rejouer_une_reponse_degeneree() {
         },
         earlier: app.history.recap(&session).ok().as_ref().and_then(jimmy_agent::core::recap::summary_block),
         chantiers: None,
+        work_notes: None,
         // `JIMMY_AMENDMENT` : teste un amendement candidat sur cette requête.
         amendments: std::env::var("JIMMY_AMENDMENT").ok().filter(|a| !a.trim().is_empty()),
         background_task: None,

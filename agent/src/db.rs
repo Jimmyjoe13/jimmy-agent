@@ -13,7 +13,7 @@ use crate::error::Result;
 /// Version 2 : table `memory_semantic` (embeddings LM Studio). Toute table
 /// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
 /// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub struct Db {
     conn: Connection,
@@ -145,6 +145,14 @@ impl Db {
                 session_id  TEXT,
                 updated_at  TEXT NOT NULL
             );
+
+            -- v5 : carnet de travail d'une conversation (`core::notes`) : les
+            -- acquis vérifiés des tours outillés, relus au tour suivant.
+            CREATE TABLE IF NOT EXISTS work_notes (
+                session_id  TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                notes       TEXT NOT NULL DEFAULT '',
+                updated_at  TEXT NOT NULL
+            );
             "#,
         )?;
 
@@ -260,6 +268,32 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 1, "table {table} absente");
         }
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Une base v4 (la vraie base au 14 octobre) reçoit le carnet de travail.
+    #[test]
+    fn migration_v4_vers_v5_cree_le_carnet_de_travail() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-v5-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v4.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'x',                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, project TEXT); PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        let n: i64 = db
+            .conn()
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='work_notes'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "table work_notes absente");
+        let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 5);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

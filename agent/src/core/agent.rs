@@ -113,6 +113,8 @@ pub async fn run_with_images(
     mut events: tokio::sync::mpsc::Sender<AgentEvent>,
 ) -> Result<AgentAnswer> {
     let started = Instant::now();
+    // Temps passé en coupure réseau (veille du PC…), hors budget de la tâche.
+    let mut paused = Duration::ZERO;
     // Message de l'utilisateur tel qu'envoyé au modèle (images comprises), et
     // tel qu'historisé (texte + note, jamais l'image).
     let user_message = Message::user_with_images(request.clone(), images.clone());
@@ -196,6 +198,9 @@ pub async fn run_with_images(
             .chantiers(crate::core::recap::CHANTIERS_SHOWN)
             .ok()
             .and_then(|list| crate::core::recap::chantiers_block(&list, &session_id)),
+        // Carnet de travail (14 octobre) : les acquis vérifiés des tours
+        // outillés précédents, pour ne pas tout réinspecter à chaque « ok go ».
+        work_notes: crate::core::notes::work_notes_block(deps.history.work_notes(&session_id).ok().flatten().as_deref()),
         // Amendements (lot « croissance ») : des instructions additionnelles
         // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
         amendments: crate::growth::read_amendments(&deps.data_dir),
@@ -253,13 +258,14 @@ pub async fn run_with_images(
     // (lot « croissance »). Avant, une erreur d'outil était corrigée puis
     // oubliée — la même erreur pouvait se reproduire à chaque tâche similaire.
     let mut tool_errors: Vec<(String, String)> = Vec::new();
-    // Point d'étape : lectures sans aucune action (voir `EXPLORATION_NUDGE_AT`).
-    let mut reads = 0usize;
-    let mut acts = 0usize;
-    let mut nudges = 0u32;
+    // Point d'étape : étapes de lecture depuis la dernière action (voir
+    // `ExplorationWatch`).
+    let mut watch = ExplorationWatch::default();
+    // Points de budget déjà envoyés (voir `BudgetWatch`).
+    let mut budget_watch = BudgetWatch::default();
     // Cibles lues depuis la dernière action (détecteur de relecture en
     // boucle, 13 octobre) et erreurs d'outil consécutives (hors refus).
-    let mut read_targets: Vec<String> = Vec::new();
+    let mut read_targets: Vec<ReadTarget> = Vec::new();
     let mut consec_errors = 0u32;
     // Appels d'outil arrivés coupés ou en texte : redemandés au plus 2 fois.
     let mut repairs = 0u32;
@@ -272,7 +278,7 @@ pub async fn run_with_images(
         if iteration >= max_iterations {
             break;
         }
-        if started.elapsed() > time_budget {
+        if over_budget(started.elapsed(), paused, time_budget) {
             emit(
                 &mut events,
                 AgentEvent::Notice {
@@ -304,6 +310,34 @@ pub async fn run_with_images(
                 log::warn!("[agent] erreur passagère du modèle {model} ({error}) : nouvelle tentative");
                 tokio::time::sleep(Duration::from_millis(800)).await;
                 first_try = call_model(&deps, &model, &messages, &specs, &settings, budget).await;
+            }
+        }
+        // Coupure réseau en pleine tâche, même lente (14 octobre : capot
+        // fermé, veille, réseau coupé ; au réveil la tâche mourait avec tout
+        // son travail). Le contexte est intact : on attend que le réseau
+        // revienne et on rejoue l'appel, sans flux. Le temps perdu est mis de
+        // côté (`paused`) pour ne pas consommer le budget de la tâche.
+        let mut waits = OUTAGE_RETRY_DELAYS.iter();
+        let mut outage = false;
+        while let Err(error) = &first_try {
+            if !resumes_after_outage(error, iteration, deps.voice, deps.in_background()) {
+                break;
+            }
+            let Some(wait) = waits.next() else { break };
+            log::warn!(
+                "[agent] coupure pendant l'appel au modèle {model} après {} ms ({error}) : reprise dans {} s",
+                call_started.elapsed().as_millis(),
+                wait.as_secs()
+            );
+            outage = true;
+            tokio::time::sleep(*wait).await;
+            first_try = call_model(&deps, &model, &messages, &specs, &settings, budget).await;
+        }
+        if outage {
+            // Appel perdu, attentes et reprise : rien de tout ça n'est du travail.
+            paused += call_started.elapsed();
+            if first_try.is_ok() {
+                log::info!("[agent] reprise après coupure réussie");
             }
         }
         let reply = match first_try {
@@ -455,16 +489,16 @@ pub async fn run_with_images(
             }
         }
 
+        let mut step_reads = 0usize;
+        let mut step_acted = false;
         for call in &reply.tool_calls {
             if is_read_call(&call.name, &call.arguments) {
-                reads += 1;
+                step_reads += 1;
                 // Relecture en boucle (13 octobre) : on retient quoi, pas qui.
                 // Une vraie action vide la liste (le contexte a changé).
-                if let Some(target) = reread_target(&call.name, &call.arguments) {
-                    read_targets.push(target);
-                }
+                read_targets.extend(reread_targets(&call.name, &call.arguments));
             } else {
-                acts += 1;
+                step_acted = true;
                 read_targets.clear();
             }
         }
@@ -597,18 +631,16 @@ pub async fn run_with_images(
         // (non enregistré dans l'historique) pousse à agir ou à conclure.
         // Mesuré : un seul rappel ne suffisait pas à MiMo (écriture à l'étape
         // 15) ; un second, plus ferme, suit à l'étape 10 si rien n'a bougé.
-        let step = iteration + 1;
-        if acts == 0 && reads >= EXPLORATION_READS {
-            let nudge = match nudges {
-                0 if step >= EXPLORATION_NUDGE_AT => Some(EXPLORATION_NUDGE),
-                1 if step >= EXPLORATION_NUDGE_AGAIN_AT => Some(EXPLORATION_NUDGE_AGAIN),
-                _ => None,
-            };
-            if let Some(text) = nudge {
-                nudges += 1;
-                log::info!("[agent] point d'étape n°{nudges} : {reads} lectures sans action, rappel d'agir");
-                messages.push(Message::user(text.to_string()));
-            }
+        // 14 octobre : compté depuis la dernière action, et répété (voir
+        // `ExplorationWatch`) — une action d'entrée désarmait tout.
+        if let Some(text) = watch.observe(!step_acted, step_reads) {
+            log::info!(
+                "[agent] point d'étape n°{} : {} lectures en {} étapes sans action, rappel d'agir",
+                watch.nudges,
+                watch.idle_reads,
+                watch.idle_steps
+            );
+            messages.push(Message::user(text.to_string()));
         }
         // Relecture en boucle et erreurs en chaîne (13 octobre) : rappels
         // ciblés, une fois par fenêtre (la liste/le compteur repartent après).
@@ -616,6 +648,14 @@ pub async fn run_with_images(
             log::info!("[agent] relecture en boucle : {text}");
             messages.push(Message::user(text));
             read_targets.clear();
+        }
+        // Point de budget (14 octobre) : le modèle ne savait pas où il en
+        // était ; il explorait jusqu'à la coupure (60 étapes, 20 min) sans
+        // rien livrer. À mi-budget puis à 80 %, il est prévenu.
+        let active = started.elapsed().saturating_sub(paused);
+        if let Some(text) = budget_watch.observe(iteration + 1, max_iterations, active, time_budget) {
+            log::info!("[agent] point de budget : {}", text.chars().take(90).collect::<String>());
+            messages.push(Message::user(text));
         }
         if let Some(text) = consecutive_error_notice(consec_errors) {
             log::info!("[agent] {consec_errors} erreurs d'outil consécutives, rappel de méthode");
@@ -635,11 +675,7 @@ pub async fn run_with_images(
             AgentEvent::Notice { message: "Limite atteinte : je conclus avec ce que j'ai trouvé.".into() },
         )
         .await;
-        messages.push(Message::user(
-            "Tu as atteint la limite d'étapes pour cette demande. Réponds maintenant, sans appeler d'outil, \
-             avec ce que tu as trouvé : sois bref, et dis honnêtement ce qu'il reste à faire."
-                .to_string(),
-        ));
+        messages.push(Message::user(CONCLUDE_NOTE.to_string()));
         compact_before_call(&mut messages);
         // Même budget que les autres appels : la conclusion ne doit pas, à son
         // tour, laisser l'utilisateur sans réponse pendant des minutes.
@@ -686,6 +722,27 @@ pub async fn run_with_images(
         },
     )
     .await;
+
+    // Carnet de travail (14 octobre), après la réponse et en tâche de fond :
+    // un tour qui a beaucoup exploré laisse ses acquis (résultats d'outils
+    // compris) au tour suivant. Indépendant de la mémoire : c'est le fil de la
+    // tâche, pas un souvenir. Le tour = de la demande à la réponse finale.
+    if tools_used.len() >= crate::core::notes::NOTES_MIN_TOOLS {
+        let start = messages
+            .iter()
+            .rposition(|m| m.role == crate::core::types::Role::User && m.content == user_message.content)
+            .unwrap_or(0);
+        let mut turn = messages[start..].to_vec();
+        turn.push(Message::assistant(final_text.clone()));
+        let llm = deps.llm.clone();
+        let settings = settings.clone();
+        let history = deps.history.clone();
+        let session = session_id.clone();
+        let model = model.clone();
+        tokio::spawn(async move {
+            crate::core::notes::update(&llm, &settings, &history, &session, &model, &turn).await;
+        });
+    }
 
     // 3. Mémorisation, **après** la réponse et en tâche de fond. Avant, elle
     // se faisait ici même, avant d'envoyer la réponse : un appel de plus au
@@ -866,20 +923,125 @@ const REPAIR_NOTE: &str = "Ton dernier appel d'outil est arrivé coupé ou sous 
 trop longue). Refais-le avec un vrai appel d'outil. Pour un gros fichier, écris-le en plusieurs fois : \
 write_file pour le début, puis write_file avec append=true pour chaque suite.";
 
-/// Cible d'une lecture pour le détecteur de relecture en boucle : `read_file`
-/// et `list_directory` avec leur chemin (`start_line` inclus : paginer un gros
-/// fichier n'est pas relire). `None` : pas une lecture ciblée.
-fn reread_target(name: &str, arguments: &serde_json::Value) -> Option<String> {
-    let path = arguments.get("path")?.as_str()?;
-    let slot = match name {
+/// Consigne de la conclusion forcée (limite d'étapes, de temps, ou modèle
+/// muet). Cas réel du 14 octobre : après « démarre par… », la conclusion
+/// finissait par « à corriger après ton accord » — l'utilisateur avait déjà
+/// validé, il a dû redire « ok continue ».
+const CONCLUDE_NOTE: &str = "Tu as atteint la limite d'étapes ou de temps pour cette demande. Réponds maintenant, \
+sans appeler d'outil : d'abord ce qui est fait (fichiers écrits, changements appliqués), puis ce qu'il reste à \
+faire, en étapes concrètes. Si l'utilisateur avait déjà validé la tâche, ne lui redemande pas son accord : dis \
+que tu reprends la suite à son prochain « continue ». Sois bref.";
+
+/// Points de budget envoyés au modèle pendant une tâche outillée : à 50 %
+/// puis à 80 % du budget (étapes ou temps, le plus avancé des deux), une fois
+/// chacun.
+#[derive(Default)]
+struct BudgetWatch {
+    half: bool,
+    late: bool,
+}
+
+impl BudgetWatch {
+    /// Après l'étape `step` sur `max_steps`, `elapsed` (hors coupures) sur
+    /// `time_budget` : le point à envoyer, s'il y en a un.
+    fn observe(&mut self, step: u32, max_steps: u32, elapsed: Duration, time_budget: Duration) -> Option<String> {
+        let by_steps = step as f64 / max_steps.max(1) as f64;
+        let by_time = elapsed.as_secs_f64() / time_budget.as_secs_f64().max(1.0);
+        let used = by_steps.max(by_time);
+        let steps_left = max_steps.saturating_sub(step);
+        let minutes_left = time_budget.saturating_sub(elapsed).as_secs().div_ceil(60);
+        if used >= 0.8 && !self.late {
+            self.late = true;
+            self.half = true;
+            return Some(format!(
+                "Fin de budget proche (message automatique) : il te reste {steps_left} étape(s) et environ \
+                 {minutes_left} min. Plus d'exploration : écris ou applique maintenant ce qui est demandé, avec ce \
+                 que tu sais ; puis conclus en disant ce qui est fait et ce qui reste."
+            ));
+        }
+        if used >= 0.5 && !self.half {
+            self.half = true;
+            return Some(format!(
+                "Point de budget (message automatique) : étape {step} sur {max_steps}, environ {minutes_left} min \
+                 restantes. Si la demande est de créer ou de modifier quelque chose et que rien n'est encore écrit, \
+                 écris maintenant un premier jet, puis complète-le."
+            ));
+        }
+        None
+    }
+}
+
+/// Une lecture vue par le détecteur de relecture en boucle : `key` identifie
+/// ce qui a été lu, `label` le dit au modèle (« lu « campaigns.py » »).
+#[derive(Debug, Clone, PartialEq)]
+struct ReadTarget {
+    key: String,
+    label: String,
+}
+
+/// Cibles d'une lecture pour le détecteur de relecture en boucle :
+/// `read_file` et `list_directory` avec leur chemin (`start_line` inclus :
+/// paginer un gros fichier n'est pas relire), `mcp_list_tools` par serveur,
+/// un `mcp_call` de consultation par outil et arguments, et chaque commande
+/// d'une ligne lancée (`run_command`, `vps_exec`) — 14 octobre : la même
+/// inspection revenait habillée d'`echo` et de `| head` différents.
+fn reread_targets(name: &str, arguments: &serde_json::Value) -> Vec<ReadTarget> {
+    let text = |key: &str| arguments.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let target = |key: String, label: String| vec![ReadTarget { key, label }];
+    match name {
         "read_file" => {
             let start = arguments.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("read_file:{path}:{start}")
+            let path = text("path");
+            target(format!("read_file|{path}|{start}"), format!("lu « {path} »"))
         }
-        "list_directory" => format!("list_directory:{path}"),
-        _ => return None,
-    };
-    Some(slot)
+        "list_directory" => target(format!("list_directory|{}", text("path")), format!("listé « {} »", text("path"))),
+        "mcp_list_tools" => target(
+            format!("mcp_list_tools|{}|{}", text("server"), text("filter")),
+            format!("listé les outils de « {} »", text("server")),
+        ),
+        "run_command" => command_targets(&text("command")),
+        "mcp_call" => {
+            let inner = match arguments.get("arguments") {
+                Some(serde_json::Value::String(raw)) => serde_json::from_str(raw).unwrap_or(serde_json::Value::Null),
+                Some(other) => other.clone(),
+                None => serde_json::Value::Null,
+            };
+            match inner.get("command").and_then(|v| v.as_str()) {
+                Some(command) => command_targets(command),
+                None => target(
+                    format!("mcp_call|{}|{}|{inner}", text("server"), text("tool")),
+                    format!("appelé « {} » avec les mêmes arguments", text("tool")),
+                ),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Les commandes d'une ligne, normalisées : découpe sur `;`, `&&`, `||` et
+/// les retours à la ligne, partie avant le premier tube, redirections et
+/// `echo` de séparation retirés. Une commande n'est comptée qu'une fois par
+/// ligne.
+fn command_targets(command: &str) -> Vec<ReadTarget> {
+    let mut out: Vec<ReadTarget> = Vec::new();
+    for piece in command.split(['\n', ';']).flat_map(|p| p.split("&&")).flat_map(|p| p.split("||")) {
+        let head = piece.split('|').next().unwrap_or("");
+        let words: Vec<&str> = head
+            .split_whitespace()
+            .filter(|w| !(w.starts_with("2>") || w.starts_with('>') || w.starts_with("1>") || w.starts_with("&>")))
+            .collect();
+        let Some(first) = words.first() else { continue };
+        if ["echo", "write-host", "write-output", "printf", "cd"].contains(&first.to_lowercase().as_str()) {
+            continue;
+        }
+        let normalized = words.join(" ");
+        let key = format!("cmd|{normalized}");
+        if !out.iter().any(|t| t.key == key) {
+            let short: String = normalized.chars().take(80).collect();
+            out.push(ReadTarget { key, label: format!("lancé « {short} »") });
+        }
+    }
+    out
 }
 
 /// Seuil de relecture en boucle : à la 3e lecture identique sans action
@@ -889,21 +1051,57 @@ const REREAD_THRESHOLD: usize = 3;
 /// Rappel de relecture en boucle : `Some(texte)` quand une même cible a été
 /// lue `REREAD_THRESHOLD` fois sans action entre-temps (l'appelant vide la
 /// liste à chaque action et après chaque rappel).
-fn reread_notice(targets: &[String]) -> Option<String> {
+fn reread_notice(targets: &[ReadTarget]) -> Option<String> {
     use std::collections::HashMap;
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for target in targets {
-        let n = counts.entry(target.as_str()).or_insert(0);
+        let n = counts.entry(target.key.as_str()).or_insert(0);
         *n += 1;
         if *n >= REREAD_THRESHOLD {
-            let file = target.split(':').nth(1).unwrap_or(target.as_str());
             return Some(format!(
-                "Rappel automatique : tu as déjà lu « {file} » {n} fois sans rien en faire. \
-                 N'ouvre plus ce fichier : agis avec ce que tu sais, ou conclus."
+                "Rappel automatique : tu as déjà {} {n} fois sans rien en faire. \
+                 Ne le refais plus : le résultat est plus haut, agis avec ce que tu sais, ou conclus.",
+                target.label
             ));
         }
     }
     None
+}
+
+/// Rappel « agis ou conclus », compté **depuis la dernière action** : une
+/// étape qui agit remet tout à zéro. Premier rappel après
+/// `EXPLORATION_NUDGE_AT` étapes de lecture (et au moins `EXPLORATION_READS`
+/// lectures), second à `EXPLORATION_NUDGE_AGAIN_AT`, puis le second revient
+/// toutes les `EXPLORATION_NUDGE_REPEAT` étapes. Avant le 14 octobre, le
+/// compte était global : une seule action en début de tâche (ou un `mcp_call`,
+/// toujours pris pour une action) désarmait le rappel pour toute la tâche.
+#[derive(Default)]
+struct ExplorationWatch {
+    idle_steps: u32,
+    idle_reads: usize,
+    nudges: u32,
+}
+
+impl ExplorationWatch {
+    /// Une étape vient de finir : `only_reads` si elle n'a fait que lire,
+    /// `reads` le nombre de lectures. Renvoie le rappel à envoyer, s'il y en a un.
+    fn observe(&mut self, only_reads: bool, reads: usize) -> Option<&'static str> {
+        if !only_reads {
+            *self = Self::default();
+            return None;
+        }
+        self.idle_steps += 1;
+        self.idle_reads += reads;
+        let due = match self.nudges {
+            0 => self.idle_steps >= EXPLORATION_NUDGE_AT && self.idle_reads >= EXPLORATION_READS,
+            n => self.idle_steps >= EXPLORATION_NUDGE_AGAIN_AT + (n - 1) * EXPLORATION_NUDGE_REPEAT,
+        };
+        if !due {
+            return None;
+        }
+        self.nudges += 1;
+        Some(if self.nudges == 1 { EXPLORATION_NUDGE } else { EXPLORATION_NUDGE_AGAIN })
+    }
 }
 
 /// Seuil d'erreurs d'outil consécutives avant de changer de méthode (cas réel
@@ -934,6 +1132,8 @@ faire. Si la demande est d'écrire, de modifier ou d'exécuter, fais-le maintena
 
 /// Second rappel, plus ferme, si le premier n'a rien changé.
 const EXPLORATION_NUDGE_AGAIN_AT: u32 = 10;
+/// Ensuite, le second rappel revient toutes les N étapes sans action.
+const EXPLORATION_NUDGE_REPEAT: u32 = 8;
 const EXPLORATION_NUDGE_AGAIN: &str = "Second rappel (message automatique) : n'ouvre plus aucun fichier. \
 Écris ou exécute maintenant ce qui est demandé, avec ce que tu as déjà lu ; sinon réponds.";
 
@@ -1017,6 +1217,9 @@ fn step_budget(foreground_iterations: u32, background: bool) -> (u32, Duration) 
 /// d'inspection SSH, rien de fait, deux demandes de suite).
 fn is_read_call(name: &str, arguments: &serde_json::Value) -> bool {
     is_read_tool(name)
+        // 14 octobre : un `mcp_call` de consultation (stats, `vps_exec cat`)
+        // comptait comme une action et désarmait le rappel.
+        || (name == "mcp_call" && crate::sensitive::mcp_call_is_read(arguments))
         || (name == "run_command"
             && arguments
                 .get("command")
@@ -1031,6 +1234,31 @@ fn is_read_tool(name: &str) -> bool {
             | "list_skills" | "read_skill" | "mcp_list_tools" | "http_request"
             | "system_info" | "process_list" | "window_list"
     )
+}
+
+/// Attentes avant chaque reprise après une coupure réseau en cours de tâche
+/// (au réveil du PC, le réseau met parfois quelques minutes à revenir :
+/// mesuré le 14 octobre, échecs jusqu'à ~4 min après le réveil).
+const OUTAGE_RETRY_DELAYS: [Duration; 3] = [Duration::from_secs(15), Duration::from_secs(60), Duration::from_secs(180)];
+
+/// Une coupure qui mérite d'attendre et de rejouer l'appel : réseau ou flux
+/// interrompu, en cours de tâche (étape > 0 : il y a du travail à sauver),
+/// sauf en vocal au premier plan (l'utilisateur attend la réponse : la
+/// conclusion actuelle est préférable à trois minutes de silence).
+fn resumes_after_outage(error: &Error, iteration: u32, voice: bool, background: bool) -> bool {
+    let network = match error {
+        Error::Provider { message, .. } => {
+            is_transient(error) || message.contains("error decoding response body") || message.contains("timed out")
+        }
+        Error::Http(_) => true,
+        _ => false,
+    };
+    network && iteration > 0 && (background || !voice)
+}
+
+/// Budget de temps dépassé, hors temps passé en coupure.
+fn over_budget(elapsed: Duration, paused: Duration, budget: Duration) -> bool {
+    elapsed.saturating_sub(paused) > budget
 }
 
 /// Durée maximale d'un appel au modèle pendant une conversation vocale.
@@ -1210,6 +1438,72 @@ mod degenerate_tests {
         assert!(progress_phrase("<tool_call>…", &[]).is_none());
     }
 
+    /// Cas réel du 14 octobre : `vps_exec` de `cat`/`grep` et
+    /// `get_campaign_stats` comptaient comme des actions.
+    #[test]
+    fn un_appel_mcp_de_consultation_compte_comme_une_lecture() {
+        let mcp = |tool: &str, args: serde_json::Value| serde_json::json!({"server": "vps", "tool": tool, "arguments": args});
+        assert!(is_read_call("mcp_call", &mcp("vps_exec", serde_json::json!({"command": "cat ~/app/docker-compose.yml | head -80"}))));
+        assert!(is_read_call("mcp_call", &mcp("get_campaign_stats", serde_json::json!({"campaign_id": 22}))));
+        assert!(!is_read_call("mcp_call", &mcp("vps_exec", serde_json::json!({"command": "docker compose up -d"}))));
+        assert!(!is_read_call("mcp_call", &mcp("vps_upload", serde_json::json!({}))));
+    }
+
+    /// Cas réel du 14 octobre : 43 étapes d'inspection, aucun rappel. Le
+    /// rappel compte les étapes **depuis la dernière action** (avant : une
+    /// seule action en début de tâche le désarmait pour toujours) et revient
+    /// toutes les 8 étapes tant que rien ne bouge.
+    #[test]
+    fn le_rappel_d_agir_se_rearme_et_revient() {
+        let mut watch = ExplorationWatch::default();
+        // Une action d'entrée (cas réel : `python --version; tailscale …`).
+        assert_eq!(watch.observe(false, 1), None);
+        let mut rappels = Vec::new();
+        for step in 1..=43 {
+            if watch.observe(true, 1).is_some() {
+                rappels.push(step);
+            }
+        }
+        assert_eq!(rappels, vec![6, 10, 18, 26, 34, 42]);
+        // Une vraie action remet à zéro ; le premier rappel revient 6 étapes plus tard.
+        assert_eq!(watch.observe(false, 0), None);
+        let reprise: Vec<u32> = (1..=6).filter(|_| watch.observe(true, 2).is_some()).collect();
+        assert_eq!(reprise, vec![6]);
+        // Moins de 6 lectures en 6 étapes : pas encore.
+        let mut calme = ExplorationWatch::default();
+        assert!((1..=5).all(|_| calme.observe(true, 1).is_none()));
+    }
+
+    /// Cas réels du 14 octobre : `mcp_list_tools vps` 4 fois, `tailscale serve
+    /// --help` 4 fois (avec des `| head` et des `echo` différents autour), et
+    /// un chemin Windows qui donnait « C » dans le rappel.
+    #[test]
+    fn les_relectures_mcp_et_commandes_declenchent_un_rappel() {
+        let cibles = |calls: &[(&str, serde_json::Value)]| -> Vec<ReadTarget> {
+            calls.iter().flat_map(|(name, args)| reread_targets(name, args)).collect()
+        };
+        let outils = serde_json::json!({"server": "vps"});
+        let rappel = reread_notice(&cibles(&[("mcp_list_tools", outils.clone()), ("mcp_list_tools", outils.clone()), ("mcp_list_tools", outils)]))
+            .expect("3e liste identique : rappel");
+        assert!(rappel.contains("vps"), "{rappel}");
+
+        let exec = |command: &str| serde_json::json!({"server": "vps", "tool": "vps_exec", "arguments": {"command": command}});
+        let boucle = cibles(&[
+            ("mcp_call", exec("tailscale serve --help 2>&1; echo ===FUNNEL===; tailscale funnel --help 2>&1 | head -40")),
+            ("mcp_call", exec("tailscale serve --help 2>&1 | head -100; echo ===STATUS===; tailscale status | head -20")),
+            ("mcp_call", exec("tailscale serve --help 2>&1; echo ===VERSION===; tailscale version")),
+        ]);
+        let rappel = reread_notice(&boucle).expect("3e lancement identique : rappel");
+        assert!(rappel.contains("tailscale serve --help"), "{rappel}");
+        // Des requêtes différentes ne sont pas des relectures.
+        let stats = |id: u32| serde_json::json!({"server": "emile", "tool": "get_campaign_stats", "arguments": {"campaign_id": id}});
+        assert_eq!(reread_notice(&cibles(&[("mcp_call", stats(21)), ("mcp_call", stats(22)), ("mcp_call", stats(23))])), None);
+
+        let lire = serde_json::json!({"path": "C:\\p\\api\\campaigns.py"});
+        let rappel = reread_notice(&cibles(&[("read_file", lire.clone()), ("read_file", lire.clone()), ("read_file", lire)])).unwrap();
+        assert!(rappel.contains("campaigns.py"), "{rappel}");
+    }
+
     #[test]
     fn les_lectures_ne_comptent_pas_comme_des_actions() {
         assert!(is_read_tool("read_file") && is_read_tool("search_files") && is_read_tool("mcp_list_tools"));
@@ -1222,7 +1516,7 @@ mod degenerate_tests {
     /// fichier (`start_line` différent) n'est pas relire.
     #[test]
     fn la_meme_lecture_trois_fois_declenche_un_rappel_cible() {
-        let target = |name: &str, args: serde_json::Value| reread_target(name, &args).unwrap_or_default();
+        let target = |name: &str, args: serde_json::Value| reread_targets(name, &args).remove(0);
         assert_eq!(reread_notice(&[]), None);
         let lus = vec![target("read_file", serde_json::json!({"path": "a.py"})), target("read_file", serde_json::json!({"path": "b.py"}))];
         assert_eq!(reread_notice(&lus), None);
@@ -1231,9 +1525,9 @@ mod degenerate_tests {
             target("read_file", serde_json::json!({"path": "gros.py"})),
             target("read_file", serde_json::json!({"path": "gros.py", "start_line": 101}))
         );
-        // `list_directory` compte aussi ; un autre outil, non.
-        assert!(target("list_directory", serde_json::json!({"path": "d"})).contains('d'));
-        assert_eq!(reread_target("run_command", &serde_json::json!({"command": "dir"})), None);
+        // `list_directory` compte aussi ; un outil d'écriture, non.
+        assert!(target("list_directory", serde_json::json!({"path": "d"})).label.contains('d'));
+        assert!(reread_targets("write_file", &serde_json::json!({"path": "a.py"})).is_empty());
         let boucle = vec![
             target("read_file", serde_json::json!({"path": "campaigns.py"})),
             target("read_file", serde_json::json!({"path": "mcp_server.py"})),
@@ -1268,6 +1562,63 @@ mod degenerate_tests {
         assert!(!is_transient(&Error::Timeout));
     }
 
+    /// Cas réels du 14 octobre : capot fermé en pleine tâche de fond, veille,
+    /// réseau coupé ; au réveil (21 et 27 min plus tard) l'appel échoue et la
+    /// tâche mourait. Une coupure réseau en cours de tâche se reprend, même
+    /// lente ; pas au premier appel (rien à sauver) ni en vocal au premier
+    /// plan (l'utilisateur attend), et jamais une requête refusée.
+    #[test]
+    fn une_coupure_reseau_en_cours_de_tache_se_reprend() {
+        let decodage = Error::provider("OpenCode Go", "error decoding response body");
+        let envoi = Error::provider("OpenCode Go", "error sending request for url (https://opencode.ai/zen/go/v1/responses)");
+        // Arguments : erreur, étape, vocal, en fond.
+        assert!(resumes_after_outage(&decodage, 43, false, true));
+        assert!(resumes_after_outage(&envoi, 19, true, true), "fond lancé à la voix");
+        assert!(resumes_after_outage(&envoi, 5, false, false), "Chat au premier plan");
+        assert!(!resumes_after_outage(&envoi, 0, false, true), "premier appel : rien à sauver");
+        assert!(!resumes_after_outage(&envoi, 5, true, false), "vocal au premier plan");
+        let refus = Error::provider("OpenCode Go", "HTTP 400 Bad Request — invalid_request_error");
+        assert!(!resumes_after_outage(&refus, 5, false, true));
+    }
+
+    /// Le temps passé en coupure (veille, réseau) ne compte pas dans le budget
+    /// de 20 min : sinon la tâche reprise mourait à l'étape suivante.
+    #[test]
+    fn le_temps_de_coupure_ne_compte_pas_dans_le_budget() {
+        let budget = Duration::from_secs(1200);
+        assert!(!over_budget(Duration::from_secs(2400), Duration::from_secs(1500), budget));
+        assert!(over_budget(Duration::from_secs(2400), Duration::from_secs(600), budget));
+    }
+
+    /// Cas réel du 14 octobre (campagne à réparer) : 60 étapes sur 60 sans savoir où il
+    /// en était. Le point part à mi-budget puis à 80 %, une fois chacun,
+    /// selon les étapes ou le temps (le plus avancé).
+    #[test]
+    fn le_modele_est_prevenu_a_mi_budget_puis_en_fin_de_budget() {
+        let min = |m: u64| Duration::from_secs(m * 60);
+        let mut watch = BudgetWatch::default();
+        let points: Vec<(u32, String)> = (1..=60)
+            .filter_map(|step| watch.observe(step, 60, Duration::from_secs(10 * step as u64), min(20)).map(|t| (step, t)))
+            .collect();
+        assert_eq!(points.iter().map(|(s, _)| *s).collect::<Vec<_>>(), vec![30, 48]);
+        assert!(points[0].1.contains("étape 30 sur 60") && points[0].1.contains("premier jet"), "{}", points[0].1);
+        assert!(points[1].1.contains("12 étape(s)") && points[1].1.contains("Plus d'exploration"), "{}", points[1].1);
+        // Le temps peut passer avant les étapes (appels lents) : 17 min sur 20
+        // à l'étape 10 → directement le point de fin, sans le premier.
+        let mut lent = BudgetWatch::default();
+        let texte = lent.observe(10, 60, min(17), min(20)).unwrap();
+        assert!(texte.starts_with("Fin de budget proche"), "{texte}");
+        assert_eq!(lent.observe(11, 60, min(18), min(20)), None);
+    }
+
+    /// Cas réel du 14 octobre (campagne à réparer) : la conclusion forcée finissait par
+    /// « après ton accord » alors que la tâche était validée.
+    #[test]
+    fn la_conclusion_forcee_ne_redemande_pas_l_accord() {
+        assert!(CONCLUDE_NOTE.contains("ne lui redemande pas son accord"));
+        assert!(CONCLUDE_NOTE.contains("ce qui est fait") && CONCLUDE_NOTE.contains("reste"));
+    }
+
     /// Extrait réel de la réponse du 4 octobre, 13:28:39.
     const REELLE: &str = "Autrement dit, antigravity c'est un IDE. La logique est simple. Un sous-agent utilisable en non interactifRightarrow se résout par trois conditions. Un exécutable avec un mode headless pour接受 un prompt. Un prompt 入力 ruisselant.";
 
@@ -1294,3 +1645,4 @@ mod degenerate_tests {
         assert!(!cut.contains("headless pour"), "coupé avant la phrase fautive : {cut}");
     }
 }
+

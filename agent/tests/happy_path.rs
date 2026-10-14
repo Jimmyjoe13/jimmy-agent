@@ -386,3 +386,98 @@ async fn il_va_au_bout_d_une_tache_validee_en_un_tour() {
     let pipeline = std::fs::read_to_string(projet.join("src").join("agent_reddit").join("pipeline.py")).unwrap();
     assert!(pipeline.contains("notify"), "notify n'est pas branché dans pipeline.py");
 }
+
+/// Cas réel du 14 octobre (tâche « dashboard ») : un tour explore et propose un
+/// plan, puis « ok go » repartait de zéro (réinspection, rien d'écrit). Le
+/// carnet de travail doit garder les acquis du premier tour (port, routes,
+/// fichiers) et le second tour doit écrire le livrable. Projet jetable créé
+/// dans le dossier temporaire : rien d'un vrai projet n'est touché.
+/// `JIMMY_TASK_MODEL` : le modèle à rejouer (défaut : le principal de
+/// l'utilisateur).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "vrai modèle ; deux tours réels sur un projet jetable"]
+async fn ok_go_repart_du_carnet_de_travail() {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).is_test(true).try_init();
+    let Some(app) = app_de_test() else {
+        panic!("environnement de test indisponible");
+    };
+    // Petit backend à explorer : port dans un fichier, routes dans d'autres.
+    let projet = std::env::temp_dir().join(format!("jimmy-carnet-{}", uuid_like()));
+    let api = projet.join("backend").join("api");
+    std::fs::create_dir_all(&api).unwrap();
+    std::fs::write(projet.join("docker-compose.yml"), "services:\n  backend:\n    build: ./backend\n    ports:\n      - \"127.0.0.1:18001:8000\"\n").unwrap();
+    std::fs::write(projet.join("backend").join("main.py"), "from fastapi import FastAPI\nfrom api import campaigns, stats\napp = FastAPI()\napp.include_router(campaigns.router, prefix=\"/api/v1/campaigns\")\napp.include_router(stats.router, prefix=\"/api/v1/stats\")\n").unwrap();
+    std::fs::write(api.join("campaigns.py"), "from fastapi import APIRouter\nrouter = APIRouter()\n\n@router.get(\"/\")\ndef list_campaigns():\n    return [{\"id\": 22, \"name\": \"Hotels\"}]\n").unwrap();
+    std::fs::write(api.join("stats.py"), "from fastapi import APIRouter, Header\nrouter = APIRouter()\n\n@router.get(\"/{campaign_id}\")\ndef campaign_stats(campaign_id: int, x_api_key: str = Header()):\n    return {\"sent\": 425, \"opened\": 218, \"clicked\": 111, \"replied\": 2}\n").unwrap();
+    std::fs::write(api.join("auth.py"), "# Clé attendue dans l'en-tête X-API-Key (variable EMILE_KEY côté client).\n").unwrap();
+    let services = projet.join("backend").join("services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(services.join("stats_service.py"), "def totals(rows):\n    # taux de clic = clicked / sent ; taux de réponse = replied / sent\n    return {k: sum(r[k] for r in rows) for k in (\"sent\", \"opened\", \"clicked\", \"replied\")}\n").unwrap();
+    std::fs::write(projet.join("backend").join("config.py"), "CORS_ORIGINS = [\"http://127.0.0.1:8787\"]\nAPI_PREFIX = \"/api/v1\"\n").unwrap();
+    std::fs::write(projet.join("README.md"), "# Emile (copie de test)\nBackend FastAPI en conteneur. Voir docker-compose.yml pour le port publié.\n").unwrap();
+
+    // Installation neuve = tout refusé jusqu'à l'accueil : accès standard,
+    // comme après l'écran d'accueil.
+    app.save_permissions(&jimmy_agent::permissions::Permissions::standard()).unwrap();
+    let session = app.history.create_session("Carnet de travail").unwrap();
+    app.history.set_project(&session, Some(&projet.to_string_lossy())).unwrap();
+    let model = std::env::var("JIMMY_TASK_MODEL").unwrap_or_else(|_| "muse-spark-1.3-contributor".into());
+    let tour = |demande: &'static str| {
+        let app = app.clone();
+        let session = session.clone();
+        let model = model.clone();
+        async move {
+            let (mut settings, ctx) = app.session_context(&session);
+            settings.llm.model = model;
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+            let reponse = jimmy_agent::core::agent::run(app.deps(), settings, session, demande.to_string(), ctx, tx)
+                .await
+                .expect("réponse");
+            let mut outils = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let jimmy_agent::core::types::AgentEvent::ToolStart { name, .. } = event {
+                    outils.push(name);
+                }
+            }
+            (reponse, outils)
+        }
+    };
+
+    let (reponse, outils) = tour(
+        "Fais l'état des lieux complet de ce projet : port publié de l'API, toutes les routes avec leurs \
+         paramètres, authentification, CORS, et comment les totaux sont calculés — lis chaque fichier utile. \
+         Puis propose-moi un plan court pour un dashboard HTML (dashboard.html à la racine) qui affiche les stats \
+         des campagnes. N'écris rien pour l'instant.",
+    )
+    .await;
+    println!("--- tour 1 ({} ms, {} outils) ---\n{}", reponse.duration_ms, outils.len(), reponse.text);
+
+    assert!(
+        outils.len() >= jimmy_agent::core::notes::NOTES_MIN_TOOLS,
+        "tour 1 trop court pour tester le carnet ({} outils) : {outils:?}",
+        outils.len()
+    );
+    // Le carnet s'écrit en tâche de fond après la réponse.
+    let mut notes = None;
+    for _ in 0..90 {
+        notes = app.history.work_notes(&session).unwrap();
+        if notes.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    let notes = notes.expect("carnet de travail écrit après un tour outillé");
+    println!("--- carnet ---\n{notes}");
+    assert!(notes.contains("18001"), "le port vérifié est dans le carnet : {notes}");
+
+    let (reponse, outils) = tour("ok go").await;
+    let avant_ecriture = outils.iter().position(|o| o == "write_file").unwrap_or(outils.len());
+    println!(
+        "--- tour 2 ({} ms, {} outils, {avant_ecriture} avant la première écriture) ---\n{}\noutils : {outils:?}",
+        reponse.duration_ms,
+        outils.len(),
+        reponse.text
+    );
+    assert!(projet.join("dashboard.html").is_file(), "dashboard.html écrit au tour « ok go »");
+    let _ = std::fs::remove_dir_all(&projet);
+}
