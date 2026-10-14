@@ -109,7 +109,7 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
     ];
     let proposals = app
         .llm
-        .complete(&settings.llm.model, &messages, 800, Some(0.0))
+        .complete(&settings.llm.model, &messages, 800, None)
         .await?;
     let proposals = proposals.trim().to_string();
 

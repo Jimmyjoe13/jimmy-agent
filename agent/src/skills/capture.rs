@@ -87,7 +87,7 @@ pub async fn capture(
         let mut wait = SHORT_RETRY;
         // Le corps d'un skill peut être long : 1 200 jetons le couvrent sans
         // couper (le format trois lignes est devenu prolixe à l'usage).
-        match llm.complete(&settings.llm.model, &messages, 1200, Some(0.0)).await {
+        match llm.complete(&settings.llm.model, &messages, 1200, None).await {
             Ok(raw) => match parse(&raw) {
                 Some(proposal) => return Some(proposal),
                 None => {

@@ -329,7 +329,7 @@ async fn classify(
         Message::user(format!("{}\n\nSouvenirs à ranger :\n{liste}", structure.describe())),
     ];
     for attempt in 1..=2 {
-        match llm.complete(model, &messages, MAX_TOKENS, Some(0.0)).await {
+        match llm.complete(model, &messages, MAX_TOKENS, None).await {
             Ok(raw) => {
                 if let Some(verdicts) = parse_classes(&raw, lot.len()) {
                     return Ok(verdicts);
@@ -494,7 +494,7 @@ async fn merge_note(root: &Path, llm: &LlmClient, model: &str, target: &Target, 
     let messages = vec![Message::system(FUSION), Message::user(demande)];
     let mut corps = None;
     for attempt in 1..=2 {
-        match llm.complete(model, &messages, MAX_TOKENS, Some(0.0)).await {
+        match llm.complete(model, &messages, MAX_TOKENS, None).await {
             Ok(raw) => {
                 let propre = clean_markdown(&raw);
                 if acceptable(ancien, &propre) {

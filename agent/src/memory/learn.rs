@@ -102,7 +102,7 @@ pub async fn learn(
         // `max_tokens` : 400 coupait un JSON bien formaté d'un ```fence``` en
         // pleine trajectoire incidente (observé à l'usage, 12:50) — la tâche
         // est de fond, 800 ne retardent jamais une réponse.
-        match llm.complete(settings.memory_model(), &messages, 800, Some(0.0)).await {
+        match llm.complete(settings.memory_model(), &messages, 800, None).await {
             Ok(raw) => {
                 if extract_json_array(&raw).is_some() {
                     return parse(&raw);

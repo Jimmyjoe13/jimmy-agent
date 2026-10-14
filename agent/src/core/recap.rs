@@ -353,7 +353,7 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
             suivis
         )),
     ];
-    let raw = match llm.complete(settings.memory_model(), &messages, MAX_TOKENS, Some(0.0)).await {
+    let raw = match llm.complete(settings.memory_model(), &messages, MAX_TOKENS, None).await {
         Ok(raw) => raw,
         Err(error) => {
             log::warn!("[contexte] carnet non mis à jour : {error}");

@@ -490,6 +490,35 @@ impl LlmClient {
                 crate::sensitive::mask_text(&raw)
             );
             let error = Error::provider(&service, format!("HTTP {status} — {}", truncate(&raw, 400)));
+            // Modèle qui refuse `temperature` (14 octobre) : un seul renvoi
+            // sans, dans le même format — pas un réessai pareil, pas une
+            // boucle (une fois, puis le verdict normal s'applique).
+            if !raw.contains("ModelProtocolUnsupported")
+                && is_temperature_rejection(status.as_u16(), &raw)
+                && body.as_object().is_some_and(|o| o.contains_key("temperature"))
+            {
+                body.as_object_mut().map(|o| o.remove("temperature"));
+                log::warn!("[llm] {model} refuse `temperature` : nouvel essai sans");
+                let headers = self.request_headers(&provider, protocol).await?;
+                let mut retry = self
+                    .http
+                    .post(format!("{}{}", provider.base_url, protocol.path()))
+                    .headers(headers)
+                    .json(&body);
+                if let Some(timeout) = timeout {
+                    retry = retry.timeout(timeout);
+                }
+                match retry.send().await {
+                    Ok(response) if response.status().is_success() => return Ok((protocol, response)),
+                    Ok(response) => {
+                        let status = response.status();
+                        let raw = response.text().await.unwrap_or_default();
+                        log::error!("[llm] HTTP {status} — corps complet : {}", crate::sensitive::mask_text(&raw));
+                        return Err(Error::provider(&service, format!("HTTP {status} — {}", truncate(&raw, 400))));
+                    }
+                    Err(e) => return Err(Error::provider(&service, e.to_string())),
+                }
+            }
             if !raw.contains("ModelProtocolUnsupported") {
                 return Err(error);
             }
@@ -841,6 +870,21 @@ impl LlmClient {
     }
 }
 
+/// Un 400 qui vient d'un `temperature` refusé par le modèle (14 octobre :
+/// Claude Sonnet 5, « temperature is deprecated for this model ») : la
+/// parade est de renvoyer sans, pas de réessayer pareil.
+fn is_temperature_rejection(status: u16, raw: &str) -> bool {
+    if status != 400 {
+        return false;
+    }
+    let low = raw.to_lowercase();
+    low.contains("temperature")
+        && (low.contains("deprecat")
+            || low.contains("not supported")
+            || low.contains("unsupported")
+            || low.contains("not allowed"))
+}
+
 /// Le refus de facturation Anthropic sur abonnement : 400 dont le corps parle
 /// de « extra usage ». Fonction pure — testée sans réseau. `Some(message
 /// clair)` seulement pour un fournisseur en mode abonnement.
@@ -946,8 +990,7 @@ mod routing_tests {
     }
 
     #[test]
-    fn le_refus_extra_usage_devient_un_message_actionnable() {
-        let plan = ProviderRuntime {
+    fn le_refus_extra_usage_devient_un_message_actionnable() {        let plan = ProviderRuntime {
             id: "anthropic".into(),
             label: "Anthropic (Claude)".into(),
             base_url: "https://api.anthropic.com/v1".into(),
@@ -967,6 +1010,20 @@ mod routing_tests {
         assert!(plan_extra_usage(&cle, 400, corps).is_none(), "clé API : pas d'interception");
         assert!(plan_extra_usage(&plan, 500, corps).is_none(), "500 : pas d'interception");
         assert!(plan_extra_usage(&plan, 400, "quota dépassé").is_none(), "sans « extra usage » : pas d'interception");
+    }
+
+    /// Cas réel du 14 octobre (PC bureau) : toutes les tâches de mémoire en
+    /// 400 car `temperature: 0.0` est forcé et le modèle le refuse
+    /// (« temperature is deprecated for this model »). Seul ce motif précis
+    /// déclenche le renvoi sans `temperature`.
+    #[test]
+    fn un_temperature_refuse_se_detecte() {
+        let corps = r#"{"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."}}"#;
+        assert!(is_temperature_rejection(400, corps));
+        assert!(!is_temperature_rejection(400, "quota dépassé"));
+        assert!(!is_temperature_rejection(400, "Third-party apps now draw from extra usage."));
+        assert!(!is_temperature_rejection(500, corps));
+        assert!(!is_temperature_rejection(400, "ModelProtocolUnsupported"));
     }
 
     #[test]
