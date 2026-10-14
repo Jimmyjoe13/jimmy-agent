@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "jimmy-agent"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2404,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "jimmy-desktop"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "env_logger",
