@@ -96,6 +96,7 @@ cd desktop; npm run build; cd ..                  # TypeScript strict
 | Navigateur | Action qui engage l'utilisateur = carte (`browser_action_needs_approval`) ; jamais de mot de passe saisi par Jimmy ; serveur Playwright toujours avec `--output-dir` | 86 |
 | Vision | Jamais d'outil de capture pour le modèle ; une image ne va ni sur disque ni dans l'historique (`Message::images` hors sérialisation) | 84 |
 | Tâches | Un tour de l'agent passe par `App::start_task` (jamais `agent::run` nu) ; le délai de passage en fond part du premier outil | 82 |
+| Boucle | Un `mcp_call` de consultation est une **lecture** (`sensitive::mcp_call_is_read`) ; un tour outillé laisse son **carnet de travail** (`core::notes`, table `work_notes`) relu au tour suivant ; une coupure réseau en cours de tâche se reprend (veille du PC) | 125-128 |
 
 ## 6. Tests d'interface : ils touchent aux données réelles
 
@@ -140,6 +141,9 @@ om.json`, champ `api_key`) et `${VAR}` dans
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 14 octobre 2026 (soir) : release **v0.1.9** publiée (`4c114b0`,
+  tag `v0.1.9`, CI verte) — Jimy va au bout de ses tâches (pièges 125-128) ;
+  site jimy-agent.me redéployé (bannière v0.1.9) et son état commité (`890af80`).
 - État au 11 octobre 2026 (soir) : `main` = `e853a65` poussé (skin
   premium ARK) ; dépôt privé `jimy-premium` = `da87e18` poussé (modèle
   `ark.glb`, manifeste resigné). Prochaine session : skin JEVA OMEGA
