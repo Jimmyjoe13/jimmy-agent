@@ -628,6 +628,32 @@ pub fn is_stop_all_command(text: &str) -> bool {
             .any(|w| w == "tout" || w == "toutes")
 }
 
+/// Accord vocal d'une carte en attente : « Confirmé » dit à voix haute
+/// (13 octobre, choix de l'utilisateur : la carte « Autoriser / Refuser »
+/// peut aussi se valider à la voix).
+///
+/// Seule une phrase **réduite** au mot compte, comme pour « STOP » : « Je
+/// confirme que le rapport est prêt » reste une commande. Un faux positif
+/// autoriserait une écriture sensible ou une action du navigateur.
+pub fn is_confirm_command(text: &str) -> bool {
+    const CONFIRM_WORDS: &[&str] = &["confirmé", "confirme", "confirmer"];
+    const CONFIRM_FILLERS: &[&str] = &["je", "c", "est"];
+    let words: Vec<String> = text
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        // Le nom de Jimmy devant ou derrière ne change rien.
+        .filter(|w| !matches_wake_word(w, "jimmy"))
+        .collect();
+    !words.is_empty()
+        && words.len() <= 4
+        && words.iter().any(|w| CONFIRM_WORDS.contains(&w.as_str()))
+        && words.iter().all(|w| {
+            CONFIRM_WORDS.contains(&w.as_str()) || CONFIRM_FILLERS.contains(&w.as_str())
+        })
+}
+
 pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
@@ -838,6 +864,19 @@ mod tests {
         }
     }
 
+    /// Accord vocal d'une carte en attente (13 octobre) : seule une phrase
+    /// réduite au mot compte (« Confirmé », « Jimmy, je confirme »). Une
+    /// vraie commande reste une commande.
+    #[test]
+    fn seul_un_confirme_reduit_compte_comme_accord() {
+        for text in ["Confirmé.", "confirmé !", "Jimmy, confirmé", "Je confirme.", "je confirme Jimy", "C'est confirmé"] {
+            assert!(is_confirm_command(text), "« {text} » doit confirmer");
+        }
+        for text in ["Confirme le serveur de dev.", "Je confirme que le rapport est prêt", "", "Jimmy.", "c'est confirmé depuis hier ?"] {
+            assert!(!is_confirm_command(text), "« {text} » ne doit pas confirmer");
+        }
+    }
+
     /// Stéréo 48 kHz → mono 16 kHz : une seconde d'entrée doit donner une
     /// seconde de sortie, et un signal identique sur les deux canaux doit
     /// garder son amplitude.
@@ -888,6 +927,20 @@ mod tests {
         assert_eq!(strip_wake_word("Arc, quelle heure est-il ?", "ark"), "quelle heure est-il ?");
         for transcript in ["Art, ouvre mes notes", "Jimmy, ouvre mes notes", "Arbre", "Arcade géante"] {
             assert!(!matches_wake_word(transcript, "ark"), "{transcript}");
+        }
+    }
+
+    /// Thibault : le « h » ne s'entend pas et Whisper l'omet parfois
+    /// (« Tibault ») ; « Thibaut » sans l final se dit pareil. « Tibo »
+    /// (surnom coupé) ne doit pas déclencher.
+    #[test]
+    fn mot_d_eveil_thibault() {
+        for transcript in ["Thibault, ouvre mes notes", "Thibault, quelle heure est-il ?", "Tibault, analyse ça", "Hé Thibault !", "Thibaut, ouvre le dossier"] {
+            assert!(matches_wake_word(transcript, "thibault"), "{transcript}");
+        }
+        assert_eq!(strip_wake_word("Thibault, quelle heure est-il ?", "thibault"), "quelle heure est-il ?");
+        for transcript in ["Tibo, ouvre mes notes", "Jimmy, ouvre mes notes", "Tableau blanc"] {
+            assert!(!matches_wake_word(transcript, "thibault"), "{transcript}");
         }
     }
 

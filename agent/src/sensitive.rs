@@ -36,6 +36,10 @@ use crate::core::types::AgentEvent;
 
 /// Délai laissé à l'utilisateur pour répondre ; au-delà, c'est un refus.
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
+/// Attente d'un « confirmé » vocal : au-delà, refus comme avant. Assez long
+/// pour entendre la demande et répondre, assez court pour ne pas figer la
+/// tâche vocale (13 octobre).
+pub const VOICE_APPROVAL_WAIT: Duration = Duration::from_secs(60);
 
 // ── Détection ────────────────────────────────────────────────────────────────
 
@@ -716,6 +720,34 @@ impl Approvals {
         self.always.lock().is_ok_and(|always| always.contains(key))
     }
 
+    /// Une carte attend-elle une réponse ? (accord vocal « confirmé » : on
+    /// ne confirme que s'il y a vraiment quelque chose à confirmer.)
+    pub fn has_pending(&self) -> bool {
+        self.pending.lock().is_ok_and(|p| !p.is_empty())
+    }
+
+    /// Accorde la demande en attente la plus récente, sans retenir la portée
+    /// (l'accord vocal vaut une fois ; « Toujours autoriser » reste un clic
+    /// dans le Chat). `false` : aucune demande en attente.
+    pub fn confirm_latest(&self) -> bool {
+        let id = self
+            .pending
+            .lock()
+            .map(|p| {
+                p.keys()
+                    .filter_map(|k| {
+                        k.strip_prefix("approval-")?.parse::<u64>().ok().map(|n| (n, k.clone()))
+                    })
+                    .max()
+                    .map(|(_, k)| k)
+            })
+            .unwrap_or_default();
+        match id {
+            Some(id) => self.respond(&id, true, false),
+            None => false,
+        }
+    }
+
     /// Accords permanents, triés, pour Paramètres.
     pub fn always_list(&self) -> Vec<String> {
         self.always.lock().map(|always| always.iter().cloned().collect()).unwrap_or_default()
@@ -760,8 +792,9 @@ impl Approvals {
 /// (rien de sensible, ou accord donné). `Some(texte)` : refusé, le texte est
 /// le résultat d'outil renvoyé au modèle.
 ///
-/// À la voix, personne ne peut cliquer : refus immédiat, l'utilisateur
-/// refera la demande dans le Chat.
+/// À la voix, personne ne peut cliquer : la carte part quand même (le Chat
+/// la montre) et on attend « confirmé » dit à voix haute (13 octobre).
+/// Sans réponse dans le délai, refus et l'utilisateur refera la demande.
 pub async fn authorize(
     approvals: &Approvals,
     voice: bool,
@@ -784,10 +817,32 @@ pub async fn authorize(
         None => format!("la modification de « {target} » (fichier sensible)"),
     };
     if voice {
-        log::warn!("[sécurité] {what} refusée : demande vocale, accord impossible");
+        // Accord vocal « confirmé » (13 octobre, choix de l'utilisateur) :
+        // la carte part comme au Chat, et la boucle d'écoute (mot « confirmé »,
+        // phrase réduite) peut l'accorder. Sans réponse dans le délai : refus.
+        // L'accord vocal vaut une fois, jamais « toujours ».
+        let (id, answer) = approvals.request(key.clone());
+        log::warn!("[sécurité] {what} : accord vocal attendu (« confirmé »)");
+        let _ = events
+            .send(AgentEvent::Approval {
+                id: id.clone(),
+                target: target.clone(),
+                detail: describe(tool, args),
+                scope: key,
+            })
+            .await;
+        let wait = timeout.min(VOICE_APPROVAL_WAIT);
+        let approved = matches!(tokio::time::timeout(wait, answer).await, Ok(Ok(true)));
+        approvals.forget(&id);
+        let _ = events.send(AgentEvent::ApprovalResolved { id: id.clone(), approved }).await;
+        log::info!("[sécurité] {id} (vocal) : {}", if approved { "confirmé" } else { "sans réponse, refusé" });
+        if approved {
+            return None;
+        }
         return Some(format!(
-            "REFUSÉ : {what} exige l'accord explicite de l'utilisateur, impossible à donner à la voix. \
-             Ne tente pas de la faire autrement ; dis-lui de refaire la demande dans le Chat écrit."
+            "REFUSÉ : {what} exige l'accord explicite de l'utilisateur (sans réponse à la voix). \
+             Ne tente pas de la faire autrement ; dis-lui de refaire la demande dans le Chat écrit, \
+             ou de dire « confirmé » quand tu lui demandes un accord à la voix."
         ));
     }
     let (id, answer) = approvals.request(key.clone());
@@ -1361,15 +1416,33 @@ mod tests {
         assert!(!approvals.respond(&id, true, false));
     }
 
+    /// À la voix (13 octobre) : la carte part aussi (le Chat la montre),
+    /// et « confirmé » accorde une fois ; sans réponse dans le délai,
+    /// refus — rien de sensible ne passe dans aucun cas.
     #[tokio::test]
-    async fn a_la_voix_refus_immediat_et_rien_de_sensible_passe() {
-        let approvals = Approvals::default();
+    async fn a_la_voix_carte_puis_confirme_ou_refus() {
+        let approvals = std::sync::Arc::new(Approvals::default());
         let (tx, mut rx) = mpsc::channel(8);
-        assert!(authorize(&approvals, true, "run_command", &sensitive_call(), &tx, Duration::from_secs(5)).await.is_some());
+        // Sans réponse : refus après le délai, carte émise puis résolue.
+        assert!(authorize(&approvals, true, "run_command", &sensitive_call(), &tx, Duration::from_millis(50)).await.is_some());
+        let Some(AgentEvent::Approval { .. }) = rx.recv().await else { panic!("pas de carte") };
+        let Some(AgentEvent::ApprovalResolved { approved: false, .. }) = rx.recv().await else { panic!("pas de résolution") };
+        // Avec « confirmé » pendant l'attente : accordé une fois.
+        let tx2 = tx.clone();
+        let waiting = {
+            let approvals = approvals.clone();
+            tokio::spawn(async move {
+                authorize(&approvals, true, "run_command", &sensitive_call(), &tx2, Duration::from_secs(5)).await
+            })
+        };
+        let Some(AgentEvent::Approval { .. }) = rx.recv().await else { panic!("pas de carte") };
+        assert!(approvals.has_pending());
+        assert!(approvals.confirm_latest());
+        assert_eq!(waiting.await.unwrap(), None);
+        assert!(approvals.always_list().is_empty(), "le vocal ne retient jamais la portée");
+        // Rien d'anodin ne demande : toujours libre.
         let anodin = json!({"command": "git status"});
         assert!(authorize(&approvals, false, "run_command", &anodin, &tx, Duration::from_secs(5)).await.is_none());
-        drop(tx);
-        assert!(rx.recv().await.is_none(), "aucune carte émise");
     }
 
     /// La portée de « Toujours » : le type d'action pour le navigateur (pas
@@ -1420,14 +1493,17 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         assert!(authorize(&approvals, true, "mcp_call", &clic("Publier"), &tx, Duration::from_secs(5)).await.is_none());
         let envoi = json!({ "server": "navigateur", "tool": "browser_file_upload", "arguments": { "paths": [r"C:\x.pdf"] } });
-        assert!(authorize(&approvals, true, "mcp_call", &envoi, &tx, Duration::from_secs(5)).await.is_some());
+        assert!(authorize(&approvals, true, "mcp_call", &envoi, &tx, Duration::from_millis(50)).await.is_some());
         drop(tx);
-        assert!(rx.recv().await.is_none(), "aucune carte émise");
+        // La carte est partie (Chat + « confirmé » vocal possibles), puis
+        // résolue en refus faute de réponse.
+        let Some(AgentEvent::Approval { .. }) = rx.recv().await else { panic!("pas de carte") };
+        let Some(AgentEvent::ApprovalResolved { approved: false, .. }) = rx.recv().await else { panic!("pas de résolution") };
 
-        // Retiré : la carte revient (refus vocal immédiat).
+        // Retiré : la carte revient (sans réponse vocale : refus après le délai).
         assert!(approvals.revoke("navigateur : clic sur un élément qui engage"));
         let (tx, _rx) = mpsc::channel(8);
-        assert!(authorize(&approvals, true, "mcp_call", &clic("Publier"), &tx, Duration::from_secs(5)).await.is_some());
+        assert!(authorize(&approvals, true, "mcp_call", &clic("Publier"), &tx, Duration::from_millis(50)).await.is_some());
         assert!(Approvals::load(path.clone()).always_list().is_empty(), "retrait enregistré");
         let _ = std::fs::remove_file(&path);
     }
@@ -1447,6 +1523,22 @@ mod tests {
         assert!(approvals.respond(&id, true, false));
         assert_eq!(waiting.await.unwrap(), None);
         assert!(approvals.always_list().is_empty());
+    }
+
+    /// Accord vocal « confirmé » (13 octobre) : sans demande en attente,
+    /// rien à confirmer ; avec une carte ouverte, la plus récente est
+    /// accordée une fois (portée non retenue).
+    #[test]
+    fn confirme_vocal_accorde_la_carte_en_attente() {
+        let approvals = Approvals::default();
+        assert!(!approvals.has_pending());
+        assert!(!approvals.confirm_latest());
+        let (id, _rx) = approvals.request("portée de test".to_string());
+        assert!(approvals.has_pending());
+        assert!(approvals.confirm_latest());
+        assert!(!approvals.has_pending(), "confirmée une fois, plus rien en attente");
+        assert!(!approvals.respond(&id, true, false), "déjà consommée par le confirmé");
+        assert!(approvals.always_list().is_empty(), "le vocal ne retient jamais la portée");
     }
 }
 

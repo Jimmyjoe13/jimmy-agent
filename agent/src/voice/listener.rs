@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
 
 use super::vad::{frame_len, rms, voiced_fraction, SpeechTracker};
-use super::{is_stop_all_command, is_stop_command, matches_wake_word, strip_wake_word, window_to_wav, VoiceRuntime};
+use super::{is_confirm_command, is_stop_all_command, is_stop_command, matches_wake_word, strip_wake_word, window_to_wav, VoiceRuntime};
 use crate::core::types::{AgentEvent, AvatarState};
 use crate::App;
 
@@ -252,6 +252,19 @@ impl App {
                     runtime.drain();
                     restore(&events, follow_until).await;
                     continue;
+                }
+                // Accord vocal d'une carte en attente (13 octobre) : « confirmé »,
+                // phrase réduite, accorde une fois. Sans carte en attente, la
+                // phrase suit le cours normal (pas de tâche pour un mot seul).
+                if is_confirm_command(&utterance) || is_confirm_command(&early) {
+                    if self.approvals.has_pending() {
+                        log::info!("[voice] accord vocal entendu : « {utterance} »");
+                        self.approvals.confirm_latest();
+                        self.speak(CONFIRMED_REPLY).await;
+                        runtime.drain();
+                        restore(&events, follow_until).await;
+                        continue;
+                    }
                 }
                 let addressed = early_match || full_match || in_conversation;
                 if !addressed {
@@ -551,6 +564,8 @@ pub const DETACHED_REPLY: &str = "Je m'en occupe en arrière-plan, je te prévie
 /// (crate desktop) s'en sert pour ne pas jouer la joie (`success`) quand
 /// Jimmy vient en fait d'être arrêté.
 pub const STOPPED_REPLY: &str = "D'accord, j'arrête. Je t'écoute.";
+/// Phrase dite après un accord vocal « confirmé ».
+pub const CONFIRMED_REPLY: &str = "C'est autorisé, je continue.";
 /// Parole maximale d'un ordre d'arrêt : au-delà, ce n'est pas « STOP ».
 const STOP_MAX_VOICED_MS: u64 = 1500;
 
@@ -585,6 +600,13 @@ async fn watch_for_stop(app: Arc<App>, runtime: Arc<VoiceRuntime>, rate: u32, th
                         app.request_stop();
                     }
                     return;
+                }
+                // Accord vocal pendant la tâche (13 octobre) : « confirmé »
+                // accorde la carte en attente, la tâche continue.
+                if is_confirm_command(&text) && app.approvals.has_pending() {
+                    log::info!("[voice] accord vocal entendu pendant la tâche : « {text} »");
+                    app.approvals.confirm_latest();
+                    app.speak(CONFIRMED_REPLY).await;
                 }
             }
             buffer.clear();
