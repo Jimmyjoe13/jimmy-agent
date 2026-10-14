@@ -365,7 +365,14 @@ impl App {
                 &settings.memory.embedding_model,
             ),
         ));
-        let skills = Arc::new(SkillStore::new(paths.skills_dir())?);
+        // Skills produit (`skills-core`, livrés avec l'appli) en plus du perso :
+        // le perso gagne sur un même nom, l'écriture reste perso.
+        let skills = Arc::new(SkillStore::new(paths.skills_dir())?.with_core(paths.skills_core_dir()));
+        // Visibilité permanente : un skill manquant se voit au journal, pas
+        // en devinant (même famille que le corps des 400, piège 113).
+        if let Ok(charges) = skills.list() {
+            log::info!("[skills] {} skill(s) chargé(s)", charges.len());
+        }
 
         // Clés à masquer dans les résultats d'outils : coffre `.secrets`, `.env`
         // et fournisseurs (les serveurs MCP ajoutent les leurs au lancement).

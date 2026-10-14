@@ -95,6 +95,18 @@ impl Paths {
         }
     }
 
+    /// Racine des skills produit (`skills-core`, versionnés et livrés avec
+    /// l'appli) : dans le dépôt en développement, à côté de l'exécutable
+    /// (`skills-core/`, comme `godot-runtime/`) en installé. Absent d'une
+    /// vieille installation : simplement aucun skill produit.
+    pub fn skills_core_dir(&self) -> PathBuf {
+        if self.dev {
+            self.app.join("agent").join("skills-core")
+        } else {
+            self.app.join("skills-core")
+        }
+    }
+
     pub fn godot_project(&self) -> PathBuf {
         self.app.join("godot")
     }

@@ -42,12 +42,24 @@ pub struct Skill {
 
 pub struct SkillStore {
     root: PathBuf,
+    /// Skills produit (`skills-core`, versionnés et livrés avec l'appli) :
+    /// lus en plus, jamais écrits. `None` : que le perso (tests).
+    core: Option<PathBuf>,
 }
 
 impl SkillStore {
     pub fn new(root: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&root)?;
-        Ok(SkillStore { root })
+        Ok(SkillStore { root, core: None })
+    }
+
+    /// Ajoute la racine produit (`skills-core`, versionnée et livrée avec
+    /// l'appli). Lus en plus du perso, jamais écrits : `write` et
+    /// `update_body` visent toujours la racine perso (aiguiser un skill
+    /// produit y crée une ombre qui gagne).
+    pub fn with_core(mut self, dir: PathBuf) -> Self {
+        self.core = Some(dir);
+        self
     }
 
     pub fn root(&self) -> &Path {
@@ -85,29 +97,51 @@ impl SkillStore {
     }
 
     pub fn list(&self) -> Result<Vec<Skill>> {
-        let mut skills = Vec::new();
-        for entry in std::fs::read_dir(&self.root)? {
-            let entry = entry?;
-            if !entry.path().is_dir() {
-                continue;
-            }
-            if let Some(skill) = self.load_dir(&entry.path()) {
-                skills.push(skill);
+        // Perso d'abord : sur un même nom, il gagne sur le produit.
+        let mut merged: std::collections::BTreeMap<String, Skill> = std::collections::BTreeMap::new();
+        if let Some(core) = &self.core {
+            for skill in Self::list_dir(core) {
+                merged.insert(skill.name.clone(), skill);
             }
         }
+        for skill in Self::list_dir(&self.root) {
+            merged.insert(skill.name.clone(), skill);
+        }
+        let mut skills: Vec<Skill> = merged.into_values().collect();
         skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         Ok(skills)
     }
 
-    pub fn load(&self, name: &str) -> Result<Skill> {
-        let dir = self.skill_dir(name);
-        let skill = self
-            .load_dir(&dir)
-            .ok_or_else(|| Error::Tool(format!("skill inconnu : {name}")))?;
-        Ok(skill)
+    fn list_dir(dir: &Path) -> Vec<Skill> {
+        let mut skills = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else { return skills };
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            if let Some(skill) = Self::load_from(&entry.path()) {
+                skills.push(skill);
+            }
+        }
+        skills
     }
 
-    fn load_dir(&self, dir: &Path) -> Option<Skill> {
+    pub fn load(&self, name: &str) -> Result<Skill> {
+        // Perso d'abord : une ombre perso gagne sur le produit.
+        let dir = self.skill_dir(name);
+        if let Some(skill) = Self::load_from(&dir) {
+            return Ok(skill);
+        }
+        if let Some(core) = &self.core {
+            let dir = core.join(SkillStore::slugify(name));
+            if let Some(skill) = Self::load_from(&dir) {
+                return Ok(skill);
+            }
+        }
+        Err(Error::Tool(format!("skill inconnu : {name}")))
+    }
+
+    fn load_from(dir: &Path) -> Option<Skill> {
         let file = dir.join("SKILL.md");
         let raw = std::fs::read_to_string(&file).ok()?;
         let (front, body) = split_frontmatter(&raw);
@@ -323,5 +357,31 @@ mod tests {
         let skill = store.load("manuel").unwrap();
         assert_eq!(skill.name, "manuel");
         assert!(skill.description.is_empty());
+    }
+
+    /// Skills produit (`skills-core`, versionnés et livrés) + skills perso :
+    /// le perso gagne sur un même nom, l'écriture reste perso (le produit est
+    /// en lecture seule : aiguiser un skill produit crée une ombre perso).
+    #[test]
+    fn produit_et_perso_fusionnent_perso_gagnant() {
+        let base = std::env::temp_dir().join(format!("jimmy-skills-core-{}", uuid::Uuid::new_v4()));
+        let core = base.join("core");
+        let user = base.join("user");
+        std::fs::create_dir_all(core.join("doublon")).unwrap();
+        std::fs::write(core.join("doublon").join("SKILL.md"), "---\nname: doublon\ndescription: version produit\n---\n\ncorps produit").unwrap();
+        std::fs::create_dir_all(core.join("socle")).unwrap();
+        std::fs::write(core.join("socle").join("SKILL.md"), "---\nname: socle\ndescription: socle produit\n---\n\ncorps socle").unwrap();
+        let store = SkillStore::new(user.clone()).unwrap().with_core(core);
+        store.write("doublon", "version perso", "corps perso").unwrap();
+        // 2 noms : le doublon en version perso, le socle produit.
+        let noms: Vec<String> = store.list().unwrap().iter().map(|s| s.name.clone()).collect();
+        assert_eq!(noms.len(), 2, "{noms:?}");
+        let doublon = store.load("doublon").unwrap();
+        assert!(doublon.body.contains("corps perso"), "le perso gagne");
+        assert!(store.load("socle").unwrap().body.contains("corps socle"));
+        // Aiguiser le socle produit crée une ombre perso, sans toucher au produit.
+        store.update_body("socle", "corps aiguisé").unwrap();
+        assert!(user.join("socle").join("SKILL.md").is_file(), "ombre perso créée");
+        assert!(store.load("socle").unwrap().body.contains("aiguisé"));
     }
 }

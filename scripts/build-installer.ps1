@@ -48,6 +48,13 @@ else {
 }
 if (-not (Test-Path $target)) { throw "Godot introuvable dans les ressources" }
 
+Write-Host '1b. Skills produit' -ForegroundColor Cyan
+$core = Join-Path $root 'agent\skills-core'
+$coreTarget = Join-Path $res 'skills-core'
+if (-not (Test-Path $core)) { throw "Skills produit introuvables : $core" }
+Copy-Item -Recurse -Force $core $coreTarget
+Write-Host "   skills-core copié ($((Get-ChildItem $coreTarget -Recurse -File).Count) fichiers)"
+
 Write-Host '2. Installeur NSIS' -ForegroundColor Cyan
 Push-Location (Join-Path $root 'desktop')
 & (Join-Path $root 'scripts\with-msvc.ps1') npx tauri build --bundles nsis --config src-tauri/tauri.installer.conf.json

@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "installer-res/godot-runtime/": "godot-runtime/"
+      "installer-res/godot-runtime/": "godot-runtime/",
+      "installer-res/skills-core/": "skills-core/"
     }
   }
 }
