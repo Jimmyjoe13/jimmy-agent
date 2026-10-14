@@ -83,6 +83,13 @@ async fn chemin_heureux_analyse_un_dossier() {
 
     let mut settings = settings.clone();
     settings.workspace = app.paths.app.to_string_lossy().to_string();
+    // Surcharge du modèle pour le test (13 octobre) : quand le modèle par
+    // défaut est indisponible côté fournisseur, on rejoue le tour avec un
+    // modèle prouvé vivant (`JIMMY_TASK_MODEL=muse-spark-1.3-contributor`).
+    // Sans la variable : le modèle par défaut, comme avant.
+    if let Ok(model) = std::env::var("JIMMY_TASK_MODEL") {
+        settings.llm.model = model;
+    }
 
     let reponse = jimmy_agent::core::agent::run(
         app.deps(),

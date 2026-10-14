@@ -461,6 +461,14 @@ impl LlmClient {
             }
             // Le corps peut contenir un secret d'authentification en théorie :
             // on ne renvoie jamais la clé, seulement le message du serveur.
+            // Diagnostic (13 octobre) : un 400 tronqué à 400 caractères ne dit
+            // pas si c'est une panne ou une requête invalide — le corps complet
+            // est journalisé une fois, secrets masqués (la clé voyage dans les
+            // en-têtes, jamais dans une réponse).
+            log::error!(
+                "[llm] HTTP {status} — corps complet : {}",
+                crate::sensitive::mask_text(&raw)
+            );
             let error = Error::provider(&service, format!("HTTP {status} — {}", truncate(&raw, 400)));
             if !raw.contains("ModelProtocolUnsupported") {
                 return Err(error);
