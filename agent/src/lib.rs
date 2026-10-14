@@ -378,7 +378,7 @@ impl App {
         )?);
         // Multi-fournisseurs : la liste et le routing modèle → fournisseur
         // viennent de la configuration, pas des deux arguments ci-dessus.
-        llm.update_providers(&settings.llm, &secrets);
+        llm.update_providers(&settings, &secrets);
         let tts = Tts::new(providers::tts::TtsProvider::FishAudio)?;
         // Jeton de l'avatar : nouveau à chaque lancement, transmis à Godot
         // par son environnement (jamais en ligne de commande, lisible par
@@ -793,7 +793,7 @@ impl App {
         // Les fournisseurs et le routing suivent l'enregistrement : un choix de
         // modèle ou de clé dans l'interface s'applique sans redémarrage.
         let current = self.settings();
-        self.llm.update_providers(&current.llm, &self.secrets);
+        self.llm.update_providers(&current, &self.secrets);
         register_known_secrets(&current, &self.secrets);
         result
     }

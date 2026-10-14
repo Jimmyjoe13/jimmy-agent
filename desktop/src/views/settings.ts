@@ -33,6 +33,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     type: "text",
     placeholder: "Vide = modèle principal",
   }) as HTMLInputElement;
+  const memoryProviderSelect = h("select", { class: "field" }) as HTMLSelectElement;
 
   async function load() {
     const loaded = await guard(() => api.getSettings(), "paramètres");
@@ -80,6 +81,18 @@ export function settingsView(ctx: AppContext): HTMLElement {
     vaultEnabled.checked = settings.memory.vault_enabled;
     shareWindowTitle.checked = settings.memory.share_window_title;
     memoryModelInput.value = settings.memory.model ?? "";
+    // Fournisseur de la mémoire : vide = celui du principal (14 octobre).
+    mount(memoryProviderSelect);
+    memoryProviderSelect.append(h("option", { value: "" }, "Celui du modèle principal"));
+    for (const provider of settings.llm.providers) {
+      if (!provider.enabled) continue;
+      memoryProviderSelect.append(h("option", { value: provider.id }, provider.label));
+    }
+    const currentMemoryProvider = settings.llm.memory_provider ?? "";
+    if (currentMemoryProvider && ![...memoryProviderSelect.options].some((o) => o.value === currentMemoryProvider)) {
+      memoryProviderSelect.append(h("option", { value: currentMemoryProvider }, `${currentMemoryProvider} (désactivé)`));
+    }
+    memoryProviderSelect.value = currentMemoryProvider;
 
     render();
   }
@@ -135,6 +148,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.memory.vault_enabled = vaultEnabled.checked;
     settings.memory.share_window_title = shareWindowTitle.checked;
     settings.memory.model = memoryModelInput.value.trim();
+    settings.llm.memory_provider = memoryProviderSelect.value;
 
     if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
     await ctx.refreshStatus();
@@ -251,6 +265,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
         field("Chemin du vault", vaultPathInput),
         field("Dossier des souvenirs de Jimy", vaultFolderInput),
         field("Modèle de la mémoire (apprentissage et tri du vault)", memoryModelInput),
+        field("Fournisseur de la mémoire (vide = celui du principal)", memoryProviderSelect),
       ),
       card(
         "Contexte",

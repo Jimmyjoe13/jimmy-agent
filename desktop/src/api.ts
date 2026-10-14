@@ -318,6 +318,8 @@ export interface LlmSettings {
   provider: string;
   /** Fournisseur du modèle vocal (vide = celui du principal). */
   voice_provider: string;
+  /** Fournisseur du modèle de mémoire (vide = celui du principal). */
+  memory_provider: string;
   providers: ProviderConfig[];
   temperature: number | null;
   max_tokens: number;

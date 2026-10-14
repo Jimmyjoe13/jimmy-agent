@@ -143,6 +143,13 @@ pub struct LlmSettings {
     /// Fournisseur du modèle vocal. Vide = celui du modèle principal.
     #[serde(default)]
     pub voice_provider: String,
+    /// Fournisseur du modèle de mémoire (`memory.model`). Vide = celui du
+    /// modèle principal. Sans lui, un modèle mémoire dédié retombe sur le
+    /// fournisseur du principal — et un principal chez un autre fournisseur
+    /// reçoit un identifiant inconnu (cas réel du 14 octobre : `muse-spark`
+    /// envoyé à Anthropic, 404).
+    #[serde(default)]
+    pub memory_provider: String,
     /// Fournisseurs configurés (les cinq intégrés + ceux ajoutés).
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
@@ -166,6 +173,7 @@ impl Default for LlmSettings {
             base_url: "https://opencode.ai/zen/go/v1".into(),
             provider: PROVIDER_OPENCODE.into(),
             voice_provider: String::new(),
+            memory_provider: String::new(),
             providers: ProviderConfig::presets(),
             temperature: None,
             // 4096 coupait l'écriture d'un fichier : les jetons de raisonnement
@@ -232,6 +240,17 @@ impl LlmSettings {
             return self.active_provider();
         }
         self.provider(&self.voice_provider)
+            .filter(|p| p.enabled)
+            .or_else(|| self.active_provider())
+    }
+
+    /// Le fournisseur actif du modèle de mémoire : `memory_provider` s'il
+    /// est renseigné et valide, sinon celui du principal (14 octobre).
+    pub fn memory_active_provider(&self) -> Option<&ProviderConfig> {
+        if self.memory_provider.trim().is_empty() {
+            return self.active_provider();
+        }
+        self.provider(&self.memory_provider)
             .filter(|p| p.enabled)
             .or_else(|| self.active_provider())
     }
@@ -1156,5 +1175,20 @@ mod env_tests {
         assert_eq!(s.llm.voice_active_provider().unwrap().id, PROVIDER_DEEPSEEK);
         s.llm.voice_provider = String::new();
         assert_eq!(s.llm.voice_active_provider().unwrap().id, PROVIDER_OPENCODE);
+    }
+
+    /// Cas réel du 14 octobre : `memory.model` dédié (`muse-spark`) avec un
+    /// principal chez un autre fournisseur (Anthropic) — sans `memory_provider`,
+    /// le carnet partait sur Anthropic (404). Le fournisseur mémoire suit
+    /// `memory_provider`, sinon celui du principal, jamais une panne.
+    #[test]
+    fn le_fournisseur_memoire_suit_son_reglage_ou_le_principal() {
+        let mut s = Settings::default();
+        s.llm.provider = PROVIDER_ANTHROPIC.into();
+        assert_eq!(s.llm.memory_active_provider().unwrap().id, PROVIDER_ANTHROPIC);
+        s.llm.memory_provider = PROVIDER_OPENCODE.into();
+        assert_eq!(s.llm.memory_active_provider().unwrap().id, PROVIDER_OPENCODE);
+        s.llm.memory_provider = "n-existe-pas".into();
+        assert_eq!(s.llm.memory_active_provider().unwrap().id, PROVIDER_ANTHROPIC);
     }
 }

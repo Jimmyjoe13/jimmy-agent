@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::protocol::{Protocol, StreamAccum};
-use crate::config::{LlmSettings, ProviderConfig, Secrets, AUTH_CLAUDE_PLAN, PROVIDER_OPENCODE};
+use crate::config::{ProviderConfig, Secrets, Settings, AUTH_CLAUDE_PLAN, PROVIDER_OPENCODE};
 use crate::core::types::{Message, ToolCall, ToolSpec};
 use crate::error::{Error, Result};
 
@@ -180,36 +180,56 @@ impl LlmClient {
     /// Applique la configuration : fournisseurs activés (clés effectives
     /// résolues avec le repli d'environnement) et routing modèle → fournisseur
     /// (principal, vocal). Appelé au lancement et à chaque enregistrement.
-    pub fn update_providers(&self, settings: &LlmSettings, secrets: &Secrets) {
+    pub fn update_providers(&self, settings: &Settings, secrets: &Secrets) {
         let mut providers = HashMap::new();
-        for config in settings.providers.iter().filter(|p| p.enabled) {
-            let key = settings.resolve_key(config, secrets);
+        for config in settings.llm.providers.iter().filter(|p| p.enabled) {
+            let key = settings.llm.resolve_key(config, secrets);
             providers.insert(config.id.clone(), ProviderRuntime::from_config(config, &key));
         }
         let main = settings
+            .llm
             .active_provider()
             .map(|p| p.id.clone())
             .filter(|id| providers.contains_key(id))
             .unwrap_or_else(|| PROVIDER_OPENCODE.to_string());
         let voice = settings
+            .llm
             .voice_active_provider()
             .map(|p| p.id.clone())
             .filter(|id| providers.contains_key(id))
             .unwrap_or_else(|| main.clone());
 
         let mut routes = HashMap::new();
-        if !settings.model.trim().is_empty() {
-            routes.insert(settings.model.trim().to_string(), main.clone());
+        if !settings.llm.model.trim().is_empty() {
+            routes.insert(settings.llm.model.trim().to_string(), main.clone());
         }
-        let voice_model = settings.voice_model.trim();
-        if !voice_model.is_empty() && voice_model != settings.model.trim() {
+        let voice_model = settings.llm.voice_model.trim();
+        if !voice_model.is_empty() && voice_model != settings.llm.model.trim() {
             routes.insert(voice_model.to_string(), voice);
+        }
+        // Modèle de mémoire dédié (14 octobre) : sans route à lui, il retombe
+        // sur le fournisseur du principal — et un principal chez un autre
+        // fournisseur reçoit un identifiant inconnu (404). `memory_provider`
+        // vide = comme le principal (route existante, rien à ajouter). Si le
+        // modèle mémoire est le principal ou le vocal, leur route s'applique.
+        let memory_model = settings.memory_model().trim().to_string();
+        if !memory_model.is_empty()
+            && memory_model != settings.llm.model.trim()
+            && memory_model != settings.llm.voice_model.trim()
+        {
+            let memory = settings
+                .llm
+                .memory_active_provider()
+                .map(|p| p.id.clone())
+                .filter(|id| providers.contains_key(id))
+                .unwrap_or_else(|| main.clone());
+            routes.insert(memory_model, memory);
         }
 
         log::info!(
             "[llm] fournisseurs : {} activé(s), principal « {} » chez {main}, routeur {} modèle(s)",
             providers.len(),
-            settings.model,
+            settings.llm.model,
             routes.len(),
         );
         // Un fournisseur en mode abonnement Claude ? La session lit les jetons
@@ -858,13 +878,13 @@ mod routing_tests {
     use super::*;
     use crate::config::{PROVIDER_DEEPSEEK, PROVIDER_OPENCODE};
 
-    fn settings_with(main: &str, model: &str, voice: &str, voice_provider: &str) -> LlmSettings {
-        let mut s = LlmSettings::default();
-        s.migrate_providers();
-        s.provider = main.into();
-        s.model = model.into();
-        s.voice_model = voice.into();
-        s.voice_provider = voice_provider.into();
+    fn settings_with(main: &str, model: &str, voice: &str, voice_provider: &str) -> Settings {
+        let mut s = Settings::default();
+        s.llm.migrate_providers();
+        s.llm.provider = main.into();
+        s.llm.model = model.into();
+        s.llm.voice_model = voice.into();
+        s.llm.voice_provider = voice_provider.into();
         s
     }
 
@@ -883,6 +903,25 @@ mod routing_tests {
         assert_eq!(client.runtime_for("glm-4.5-air").api_key, "sk-opencode");
         // Un modèle inconnu du routeur retombe sur le principal.
         assert_eq!(client.runtime_for("n-importe-quoi").id, PROVIDER_DEEPSEEK);
+    }
+
+    /// Cas réel du 14 octobre : `memory.model = muse-spark` avec un principal
+    /// `claude-sonnet-5` chez Anthropic — le carnet partait sur
+    /// `api.anthropic.com` (404 `not_found_error`). Le modèle mémoire suit
+    /// `memory_provider`, jamais le fournisseur du principal par défaut.
+    #[test]
+    fn le_modele_memoire_suit_son_fournisseur_au_lieu_du_principal() {
+        use crate::config::PROVIDER_ANTHROPIC;
+        let client = LlmClient::new("https://x/v1", "k", "s").unwrap();
+        let mut s = settings_with(PROVIDER_ANTHROPIC, "claude-sonnet-5", "longcat-2.5-preview-free", PROVIDER_OPENCODE);
+        s.memory.model = "muse-spark-1.3-contributor".into();
+        s.llm.memory_provider = PROVIDER_OPENCODE.into();
+        client.update_providers(&s, &secrets());
+        assert_eq!(client.runtime_for("muse-spark-1.3-contributor").id, PROVIDER_OPENCODE);
+        // Sans `memory_provider` : comme le principal (comportement conservé).
+        s.llm.memory_provider = String::new();
+        client.update_providers(&s, &secrets());
+        assert_eq!(client.runtime_for("muse-spark-1.3-contributor").id, PROVIDER_ANTHROPIC);
     }
 
     #[test]

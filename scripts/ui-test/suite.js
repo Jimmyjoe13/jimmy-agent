@@ -674,7 +674,31 @@ let stepPage = null;
     // champ resté ici avant d'enregistrer.
     const workspace = await p.locator(".field-row", { hasText: "Dossier de travail" }).locator("input").inputValue();
     expect(workspace.length > 0, "dossier de travail vide");
-    await p.locator(".view-header button", { hasText: "Enregistrer" }).click();
+    // Fournisseur de la mémoire (14 octobre) : affiché, enregistré, restauré.
+    const memRow = p.locator(".field-row", { hasText: "Fournisseur de la mémoire" });
+    const beforeMem = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("get_settings")).llm.memory_provider ?? "");
+    expect((await memRow.locator("select").inputValue()) === beforeMem, `fournisseur mémoire affiché, attendu « ${beforeMem} »`);
+    const memOptions = await memRow.locator("select option").evaluateAll((els) => els.map((e) => e.value).filter((v) => v));
+    const memTarget = memOptions.includes("openrouter") ? "openrouter" : memOptions.find((v) => v !== beforeMem);
+    try {
+      if (memTarget) {
+        await memRow.locator("select").selectOption(memTarget);
+        await p.locator(".view-header button", { hasText: "Enregistrer" }).click();
+        await p.waitForFunction(
+          async (v) => (await window.__TAURI_INTERNALS__.invoke("get_settings")).llm.memory_provider === v,
+          memTarget,
+          { timeout: 10000 },
+        );
+      }
+    } finally {
+      await memRow.locator("select").selectOption(beforeMem);
+      await p.locator(".view-header button", { hasText: "Enregistrer" }).click();
+      await p.waitForFunction(
+        async (v) => (await window.__TAURI_INTERNALS__.invoke("get_settings")).llm.memory_provider === v,
+        beforeMem,
+        { timeout: 10000 },
+      );
+    }
     // Attendre le bon message : un toast précédent (skin) peut encore être affiché.
     await p.waitForFunction(
       () => [...document.querySelectorAll(".toast")].some((t) => t.textContent.includes("Paramètres enregistrés")),

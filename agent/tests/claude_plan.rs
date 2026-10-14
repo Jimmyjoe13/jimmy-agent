@@ -12,7 +12,7 @@
 //! publics indiquent qu'Anthropic peut refuser les modèles premium hors Claude
 //! Code ; le verdict premium est affiché sans être exigé.
 
-use jimmy_agent::config::{LlmSettings, Secrets, AUTH_CLAUDE_PLAN, PROVIDER_ANTHROPIC};
+use jimmy_agent::config::{Secrets, Settings, AUTH_CLAUDE_PLAN, PROVIDER_ANTHROPIC};
 use jimmy_agent::core::types::{Message, ToolSpec};
 use jimmy_agent::providers::claude_plan::credentials_path;
 use jimmy_agent::providers::LlmClient;
@@ -28,10 +28,10 @@ fn plan_client() -> Option<LlmClient> {
         println!("SKIP : pas de session Claude Code à {}", path.display());
         return None;
     }
-    let mut settings = LlmSettings::default();
-    settings.provider = PROVIDER_ANTHROPIC.into();
-    settings.model = HAIKU.into();
-    for p in &mut settings.providers {
+    let mut settings = Settings::default();
+    settings.llm.provider = PROVIDER_ANTHROPIC.into();
+    settings.llm.model = HAIKU.into();
+    for p in &mut settings.llm.providers {
         if p.id == PROVIDER_ANTHROPIC {
             p.auth = AUTH_CLAUDE_PLAN.into();
         }
