@@ -1,25 +1,36 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jimy — Merci ! Activation de ton skin</title>
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<link rel="canonical" href="https://jimy-agent.me/merci.html">
+<meta name="robots" content="noindex">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM"; /* même ID GA4 que l'accueil */</script>
+<script src="/assets/tracking.js" defer></script>
+<link rel="stylesheet" href="/assets/site.css">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-.card{background:#fff;border:1px solid #eee;border-radius:18px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.06)}
-h1{font-size:24px;margin-bottom:8px}
-.sub{color:#666;font-size:14px;margin-bottom:20px}
-.skin{font-size:20px;font-weight:700;margin:12px 0}
-.key{background:#111;color:#7CFC00;font-family:monospace;font-size:16px;padding:14px;border-radius:10px;margin:16px 0;word-break:break-all}
-.btn{display:block;background:#111;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-weight:700;margin-top:12px}
-.btn2{display:block;background:#fff;color:#111;border:2px solid #111;padding:12px;border-radius:10px;text-decoration:none;font-weight:600;margin-top:10px}
-.hint{font-size:13px;color:#777;margin-top:16px;line-height:1.5}
-.err{background:#fee;color:#900;padding:12px;border-radius:10px;font-size:14px;margin:12px 0}
+/* Carte centrée propre à la page merci (le reste vient de site.css). */
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--night-2);border:1px solid var(--line-2);border-radius:24px;padding:36px 32px;max-width:520px;width:100%;text-align:center;box-shadow:0 40px 80px -30px rgba(0,0,0,.8)}
+.card .logo{display:flex;justify-content:center;margin:0 0 22px}
+h1{font-size:38px;margin-bottom:8px}
+.sub{color:var(--ink-dim);font-size:15px;margin-bottom:20px}
+.skin{font:700 22px var(--display);margin:12px 0}
+#status p{color:var(--ink-dim)}
+.key{background:#05070f;border:1px solid var(--line-2);color:#9bff7a;font:15px var(--mono);padding:14px;border-radius:12px;margin:16px 0;word-break:break-all}
+.btn{display:block;background:var(--coral);color:#1a0b06;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;margin-top:12px}
+.btn2{display:block;background:transparent;color:var(--ink);border:1px solid var(--line-2);padding:13px;border-radius:12px;text-decoration:none;font-weight:600;margin-top:10px}
+.hint{font-size:13.5px;color:var(--ink-mute);margin-top:18px;line-height:1.55}
+.err{background:rgba(255,79,139,.12);border:1px solid rgba(255,79,139,.35);color:#ffb3c8;padding:12px;border-radius:12px;font-size:14px;margin:12px 0}
 </style>
 </head>
 <body>
 <div class="card">
+<div class="logo"><span class="brand"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></span></div>
 <h1>🦊 Merci !</h1>
 <p class="sub">Paiement confirmé. Voici ta clé pour débloquer ton skin dans Jimy.</p>
 <div class="skin" id="skin">…</div>
@@ -42,6 +53,7 @@ async function go() {
     const r = await fetch(url);
     const data = await r.json();
     if (!data.ok) throw new Error(data.error || 'paiement non confirmé');
+    if (window.jimyTrackPurchase) window.jimyTrackPurchase(slug, sessionId);
     document.getElementById('key').style.display = 'block';
     document.getElementById('key').textContent = data.license;
     // Pas d'ouverture automatique de l'appli (lien jimy:// pas encore géré) :

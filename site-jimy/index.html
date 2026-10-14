@@ -1,81 +1,311 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jimy — Boutique skins</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;background:#faf9f5;color:#222;min-height:100vh}
-header{display:flex;align-items:center;gap:14px;padding:18px 22px;background:#fff;border-bottom:1px solid #eee}
-header img{width:56px;height:56px;border-radius:14px;object-fit:cover}
-header h1{font-size:22px}
-header p{font-size:13px;color:#666}
-main{max-width:960px;margin:0 auto;padding:28px 18px 60px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:22px}
-.card{background:#fff;border:1px solid #eee;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
-.card h2{font-size:19px}
-.prix{font-size:22px;font-weight:700}
-.desc{font-size:14px;color:#555;flex:1}
-.btn{display:inline-block;text-align:center;background:#111;color:#fff;padding:12px 16px;border-radius:10px;text-decoration:none;font-weight:600}
-.btn:hover{background:#333}
-.btn.off{background:#ddd;color:#777;cursor:default}
-.note{margin-top:22px;font-size:13px;color:#777;background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px}
-footer{margin-top:30px;font-size:12px;color:#999;text-align:center}
-.download{background:#fff;border:1px solid #eee;border-radius:16px;padding:24px;margin-bottom:34px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
-.download h2{font-size:22px;margin-bottom:6px}
-.download .lead{color:#555;margin-bottom:16px}
-.btn.big{font-size:17px;padding:14px 22px}
-.steps{margin:18px 0 0 18px;color:#444;font-size:14px;line-height:1.6}
-.small{font-size:12px;color:#888;margin-top:12px}
-</style>
+<title>Jimy — l'agent IA qui vit sur ton bureau</title>
+<meta name="description" content="Jimy est un agent IA incarné par un personnage 3D qui vit sur ton bureau Windows. Tu lui parles, il agit sur ton PC et te répond à voix haute. Gratuit et open source.">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<link rel="preload" href="/assets/fonts/bricolage.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="canonical" href="https://jimy-agent.me/">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM"; /* ID GA4 de la propriété jimy-agent.me */</script>
+<link rel="stylesheet" href="/assets/site.css">
+<!-- Partage (Open Graph / X) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jimy-agent.me/">
+<meta property="og:title" content="Jimy — l'agent IA qui vit sur ton bureau">
+<meta property="og:description" content="Un personnage 3D sur ton bureau Windows : tu lui parles, il agit, il te répond. Gratuit et open source.">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
-<header>
-<img src="logo-jimy.jpg" alt="Logo Jimy">
-<div>
-<h1>Jimy</h1>
-<p>Agent personnel — boutique officielle des skins renard</p>
-</div>
+
+<!-- ═══ En-tête ═══════════════════════════════════════════════════════════ -->
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Jimy, accueil"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></a>
+    <nav aria-label="Navigation principale">
+      <a href="#comment">Comment ça marche</a>
+      <a href="#fonctions">Fonctions</a>
+      <a href="#skins">Skins</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn btn-main btn-sm" href="#telecharger">Télécharger</a>
+    </nav>
+  </div>
 </header>
+
 <main>
-<section class="download" id="telecharger">
-<h2>Télécharger Jimy pour Windows</h2>
-<p class="lead">Ton agent personnel, sur ton bureau : avatar 3D, voix en local, et il agit pour toi. Version bêta, gratuite et open source.</p>
-<a class="btn big" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe">⬇ Télécharger l'installeur (Windows 10/11)</a>
-<ol class="steps">
-<li>Lance <b>Jimy-setup.exe</b>. Windows peut afficher « Windows a protégé votre ordinateur » (application pas encore signée) : clique sur <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>.</li>
-<li>Au premier lancement, Jimy télécharge sa reconnaissance vocale (environ 65 Mo, puis 180 Mo en option) : l'écoute s'active à la fin.</li>
-<li>Il te faut une clé de modèle de langage (<b>OpenCode Go</b> ou <b>OpenRouter</b>) : l'écran d'accueil te la demande, elle reste sur ta machine.</li>
-</ol>
-<p class="small">Code source et notes de version : <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases">github.com/Jimmyjoe13/jimmy-agent</a>. Installeur construit par GitHub Actions ; signature gratuite demandée à SignPath Foundation (<a href="/code-signing.html">Code signing policy</a>). <a href="/confidentialite.html">Confidentialité</a>. Mac : bientôt.</p>
+
+<!-- ═══ Hero : un faux bureau où Jimy vit et répond ════════════════════════ -->
+<section class="hero" aria-labelledby="titre">
+  <div class="wrap">
+    <div>
+      <a class="pill reveal" style="--d:0" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest"><b>BÊTA</b> v0.1.9 · gratuite et open source</a>
+      <h1 id="titre" class="reveal" style="--d:1">L'agent IA qui <span class="grad">habite</span> ton bureau.</h1>
+      <p class="lead reveal" style="--d:2">Jimy est un personnage 3D qui vit sur Windows. <strong>Tu lui parles, il agit sur ton PC</strong> — fichiers, commandes, navigateur — et te répond à voix haute.</p>
+      <div class="cta reveal" style="--d:3">
+        <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+          Télécharger pour Windows
+        </a>
+        <a class="btn btn-ghost" href="#skins">Voir les skins</a>
+      </div>
+      <p class="meta mono reveal" style="--d:4">Windows 10 / 11 · 64 bits · macOS bientôt · <a href="#defender">Windows bloque l'installeur ?</a></p>
+    </div>
+
+    <div class="reveal" style="--d:2">
+      <!-- Démo animée par assets/site.js ; texte de repli pour les lecteurs d'écran. -->
+      <div class="desk" role="img" aria-label="Démonstration : sur un bureau Windows, on demande à Jimy de ranger les téléchargements et il répond que c'est fait.">
+        <div class="desk-icons" aria-hidden="true">
+          <div class="desk-icon"><i class="folder"></i>Projets</div>
+          <div class="desk-icon"><i class="folder"></i>Téléchargements</div>
+          <div class="desk-icon"><i class="file md"></i>notes.md</div>
+        </div>
+        <div class="desk-task" id="task" aria-hidden="true"></div>
+        <div class="said off" id="said" aria-hidden="true"><span class="wave"><i></i><i></i><i></i><i></i></span><span id="said-text"></span></div>
+        <div class="bubble off" id="bubble" aria-hidden="true"></div>
+        <img class="avatar" id="avatar" src="/assets/skins/renard.webp" alt="" width="770" height="960">
+        <div class="taskbar" aria-hidden="true"><span></span><span></span><span class="jimy"></span><span></span><time id="clock">21:42</time></div>
+      </div>
+      <div class="picker" role="group" aria-label="Changer le skin de la démo">
+        <span class="label mono">Skin :</span>
+        <button class="chip" type="button" data-skin="renard" aria-pressed="true"><span class="ph"><img src="/assets/skins/renard.webp" alt=""></span>Renard</button>
+        <button class="chip" type="button" data-skin="neon" aria-pressed="false"><span class="ph"><img src="/assets/skins/neon.webp" alt=""></span>Néon</button>
+        <button class="chip" type="button" data-skin="jeva" aria-pressed="false"><span class="ph"><img src="/assets/skins/jeva.webp" alt=""></span>JEVA</button>
+        <button class="chip" type="button" data-skin="ark" aria-pressed="false"><span class="ph"><img src="/assets/skins/ark.webp" alt=""></span>ARK</button>
+      </div>
+    </div>
+  </div>
 </section>
-<h2>Choisis ton skin</h2>
-<p>La boutique ouvre bientôt. Les skins seront activables dans l'appli Jimy dès l'ouverture.</p>
-<div class="grid">
-<div class="card">
-<h2>🦊 Renard Néon</h2>
-<div class="prix">4,90 €</div>
-<p class="desc">Skin lumineux orange néon pour l'avatar renard de Jimy.</p>
-<span class="btn off">Bientôt disponible</span>
-</div>
-<div class="card">
-<h2>👻 Renard Fantôme</h2>
-<div class="prix">6,90 €</div>
-<p class="desc">Skin spectral translucide, effet fantôme.</p>
-<span class="btn off">Bientôt disponible</span>
-</div>
-<div class="card">
-<h2>🤖 Renard Métal</h2>
-<div class="prix">9,90 €</div>
-<p class="desc">Skin métal brossé premium, reflets argentés.</p>
-<span class="btn off">Bientôt disponible</span>
-</div>
-</div>
-<div class="note">
-Les achats ne sont pas encore ouverts : aucun paiement n'est possible pour le moment.
-</div>
-<footer>Jimy avec un seul M — jimy-agent.me · <a href="/code-signing.html">Code signing policy</a> · <a href="/confidentialite.html">Confidentialité</a></footer>
+
+<!-- ═══ Comment ça marche ═════════════════════════════════════════════════ -->
+<section id="comment" aria-labelledby="t-comment">
+  <div class="wrap">
+    <p class="kicker reveal">Comment ça marche</p>
+    <h2 id="t-comment" class="section-title reveal">Pas un chatbot dans une fenêtre. Un coloc.</h2>
+    <p class="section-lead reveal">Jimy reste sur ton bureau, au-dessus de tes fenêtres. Tu peux le déplacer, il esquive ta souris, et il réagit à tout ce qu'il fait.</p>
+    <ol class="flow">
+      <li class="reveal"><span class="n">01</span><h3>Tu l'appelles</h3><p><q>« Jimy… »</q> — il répond « Oui ? ». Le mot d'éveil est détecté sur ta machine : l'audio de ton micro n'en sort pas.</p></li>
+      <li class="reveal"><span class="n">02</span><h3>Il réfléchit</h3><p>Avec le modèle de langage que tu choisis, et ta propre clé : OpenCode Go, OpenRouter, Claude ou ton fournisseur.</p></li>
+      <li class="reveal"><span class="n">03</span><h3>Il agit</h3><p>Fichiers, commandes, navigateur, serveurs MCP. Tout ce qui engage — payer, envoyer, supprimer — attend ton feu vert.</p></li>
+      <li class="reveal"><span class="n">04</span><h3>Il répond</h3><p>À voix haute, avec une bulle et une animation. Et il retient ce qui compte pour la prochaine fois.</p></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ═══ Fonctions (bento) ═════════════════════════════════════════════════ -->
+<section id="fonctions" aria-labelledby="t-fonctions">
+  <div class="wrap">
+    <p class="kicker reveal">Ce qu'il sait faire</p>
+    <h2 id="t-fonctions" class="section-title reveal">Un vrai agent, avec des mains.</h2>
+
+    <div class="bento">
+      <article class="tile wide reveal">
+        <span class="tag mono">tâches de fond</span>
+        <h3>Il bosse pendant que tu parles d'autre chose</h3>
+        <p>Une tâche longue passe en arrière-plan : tu gardes la main, sa voix réécoute, et un compagnon travaille à côté de lui jusqu'à l'annonce de fin.</p>
+        <div class="demo log" aria-hidden="true">
+          <div class="u">› Jimy, compare les prix des trois devis du dossier Clients</div>
+          <div>  lecture de 3 PDF… extraction des montants…</div>
+          <div class="bg">  ↳ passé en tâche de fond — le lapin s'en occupe</div>
+          <div class="u">› Au fait, il fait combien dehors ?</div>
+          <div class="ok">  ✓ Devis comparés : le moins cher est celui d'Atelier Nord (−18 %)</div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">navigateur</span>
+        <h3>Son propre Chrome</h3>
+        <p>Il cherche, compare, remplit des formulaires. Et il demande avant d'envoyer.</p>
+        <div class="demo approve" aria-hidden="true">
+          <div class="t">Envoyer le formulaire ?</div>
+          <div class="d">contact@atelier-nord.fr · 3 champs remplis</div>
+          <div class="row"><span class="yes">Autoriser</span><span>Refuser</span></div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">mémoire</span>
+        <h3>Il se souvient</h3>
+        <p>Tes préférences, tes projets en cours, ses propres erreurs. Branche ton vault Obsidian : il y cherche et y range ses notes.</p>
+        <div class="demo mem" aria-hidden="true"><div>Tu préfères des réponses courtes</div><div>Projet « Site vitrine » en cours</div><div>Leçon : vérifier le dossier avant d'écrire</div></div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">vision</span>
+        <h3>« Regarde mon écran »</h3>
+        <p>Il voit ta fenêtre active, pour t'aider sur ce que tu as sous les yeux. Seulement quand tu le demandes, jamais de lui-même.</p>
+        <div class="demo" aria-hidden="true"><div class="eye"></div></div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">modèles</span>
+        <h3>Le cerveau que tu veux</h3>
+        <p>Un modèle pour le travail, un plus rapide pour la voix. Tu changes en un clic.</p>
+        <div class="demo models" aria-hidden="true"><span class="on">OpenCode Go</span><span>OpenRouter</span><span class="on">Claude</span><span>DeepSeek</span><span>+ le tien</span></div>
+      </article>
+
+      <article class="tile half reveal">
+        <span class="tag mono">mcp · skills</span>
+        <h3>Il apprend de nouveaux tours</h3>
+        <p>Branche des serveurs MCP pour lui donner tes outils. Quand une démarche marche, il en fait un skill et l'affine à l'usage.</p>
+      </article>
+
+      <article class="tile half reveal">
+        <span class="tag mono">garde-fous</span>
+        <h3>Rien de sensible sans toi</h3>
+        <p>Écrire dans un <code class="mono">.env</code>, une clé, un secret, payer, publier : une carte d'autorisation s'affiche, tu décides. « Toujours autoriser » si tu lui fais confiance.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Collection de skins ═══════════════════════════════════════════════ -->
+<section id="skins" class="collection" aria-labelledby="t-skins">
+  <div class="wrap">
+    <p class="kicker reveal">La collection</p>
+    <h2 id="t-skins" class="section-title reveal">Choisis à quoi ressemble ton Jimy.</h2>
+    <p class="section-lead reveal">Cinq skins de base, offerts. Des skins premium, chacun avec son propre nom d'appel et son compagnon de tâches de fond.</p>
+
+    <div class="showcase">
+      <div class="stage reveal" id="stage">
+        <span class="badge free" id="stage-badge">Offert</span>
+        <img id="stage-img" src="/assets/skins/renard.webp" alt="Skin Renard" width="770" height="960" loading="lazy">
+      </div>
+      <div class="info reveal">
+        <h3 id="skin-name">Renard</h3>
+        <p class="desc" id="skin-desc">Le Jimy d'origine.</p>
+        <dl class="specs">
+          <dt>On l'appelle</dt><dd id="skin-wake">« Jimy »</dd>
+          <dt>Compagnon</dt><dd id="skin-buddy">le lapin</dd>
+          <dt>Prix</dt><dd id="skin-price">Offert</dd>
+        </dl>
+        <div class="thumbs" role="group" aria-label="Skins">
+          <button class="thumb" type="button" data-show="renard" aria-pressed="true"><img src="/assets/skins/renard.webp" alt="" loading="lazy"><span class="n">Renard</span></button>
+          <button class="thumb" type="button" data-show="arctique" aria-pressed="false"><img src="/assets/skins/arctique.webp" alt="" loading="lazy"><span class="n">Arctique</span></button>
+          <button class="thumb" type="button" data-show="fennec" aria-pressed="false"><img src="/assets/skins/fennec.webp" alt="" loading="lazy"><span class="n">Fennec</span></button>
+          <button class="thumb" type="button" data-show="ours" aria-pressed="false"><img src="/assets/skins/ours.webp" alt="" loading="lazy"><span class="n">Ours</span></button>
+          <button class="thumb" type="button" data-show="robot" aria-pressed="false"><img src="/assets/skins/robot.webp" alt="" loading="lazy"><span class="n">Robot</span></button>
+          <button class="thumb" type="button" data-show="neon" aria-pressed="false"><i class="p"></i><img src="/assets/skins/neon.webp" alt="" loading="lazy"><span class="n">Néon</span></button>
+          <button class="thumb" type="button" data-show="jeva" aria-pressed="false"><i class="p"></i><img src="/assets/skins/jeva.webp" alt="" loading="lazy"><span class="n">JEVA</span></button>
+          <button class="thumb" type="button" data-show="ark" aria-pressed="false"><i class="p"></i><img src="/assets/skins/ark.webp" alt="" loading="lazy"><span class="n">ARK</span></button>
+        </div>
+        <div class="next"><img src="/assets/skins/jeva.webp" alt="" loading="lazy"><span><b>JEVA OMEGA</b> est en préparation : plus massive, huit pattes, et des mini-JEVA comme compagnons.</span></div>
+        <p class="shop-note">La boutique ouvre bientôt : aucun paiement n'est possible pour l'instant. Les skins premium s'activeront avec une clé de licence, dans l'onglet Skin de l'appli.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Confiance ═════════════════════════════════════════════════════════ -->
+<section class="trust" aria-labelledby="t-trust">
+  <div class="wrap">
+    <div>
+      <p class="kicker reveal">Vie privée</p>
+      <h2 id="t-trust" class="section-title reveal">Il vit chez toi. Pas chez nous.</h2>
+      <p class="section-lead reveal">Jimy tourne sur ta machine. Seuls partent sur le réseau les échanges nécessaires : ton fournisseur de modèle, la synthèse vocale, et ce que tu lui demandes de faire en ligne. <a href="/confidentialite.html">Tout le détail</a>.</p>
+    </div>
+    <ul class="checks">
+      <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg><div><b>Pas de compte, pas de pub, pas de télémétrie</b><span>Rien n'est envoyé à l'auteur de Jimy.</span></div></li>
+      <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg><div><b>Ton micro ne sort pas de ton PC</b><span>La reconnaissance vocale (whisper.cpp) tourne en local, hors ligne.</span></div></li>
+      <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg><div><b>Tes clés restent sur ta machine</b><span>Historique, mémoire, réglages et clés d'API sont stockés localement.</span></div></li>
+      <li class="reveal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg><div><b>Code ouvert</b><span>Licence MIT sur <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a> ; l'installeur est construit par GitHub Actions à partir de ce code.</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ Installer + FAQ ═══════════════════════════════════════════════════ -->
+<section id="telecharger" aria-labelledby="t-install">
+  <div class="wrap">
+    <p class="kicker reveal">Installer</p>
+    <h2 id="t-install" class="section-title reveal">Trois minutes, et il est là.</h2>
+    <ol class="install">
+      <li class="reveal"><h3>Lance l'installeur</h3><p><b>Jimy-setup.exe</b>. Windows peut afficher « Windows a protégé votre ordinateur » (installeur pas encore signé) : <b>Informations complémentaires</b>, puis <b>Exécuter quand même</b>.</p></li>
+      <li class="reveal"><h3>Laisse-le s'équiper</h3><p>Au premier lancement, il télécharge sa reconnaissance vocale (environ 65 Mo, puis 180 Mo en option). L'écoute s'active à la fin.</p></li>
+      <li class="reveal"><h3>Donne-lui un cerveau</h3><p>L'accueil te demande une clé de modèle de langage (<b>OpenCode Go</b> ou <b>OpenRouter</b>). Elle reste sur ta machine.</p></li>
+    </ol>
+
+    <!-- Note Defender : à retirer quand l'installeur sera signé (SignPath). -->
+    <aside class="defender reveal" id="defender" aria-labelledby="t-defender">
+      <h3 id="t-defender">Windows bloque l'installeur ? C'est normal, pour l'instant.</h3>
+      <p>Jimy n'a pas encore de <b>certificat de signature</b> (demande en cours auprès de SignPath Foundation). Sans lui, Microsoft Defender se méfie de tout nouveau programme. L'installeur est construit par GitHub Actions à partir du <a href="https://github.com/Jimmyjoe13/jimmy-agent">code public</a> : télécharge-le uniquement depuis ce site ou depuis les <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases">Releases GitHub</a>.</p>
+      <div class="defender-cases">
+        <div>
+          <h4>1. Au téléchargement (Edge)</h4>
+          <p>« Jimy-setup.exe n'est pas fréquemment téléchargé » : survole le fichier dans les téléchargements, clique sur <b>…</b> → <b>Conserver</b>, puis <b>Afficher plus</b> → <b>Conserver quand même</b>.</p>
+        </div>
+        <div>
+          <h4>2. Au lancement (SmartScreen)</h4>
+          <p>« Windows a protégé votre ordinateur » : clique sur <b>Informations complémentaires</b>, vérifie que le fichier s'appelle bien <b>Jimy-setup.exe</b>, puis <b>Exécuter quand même</b>.</p>
+        </div>
+        <div>
+          <h4>3. Si le fichier disparaît</h4>
+          <p>Defender l'a mis en quarantaine. Ouvre <b>Sécurité Windows</b> → <b>Protection contre les virus et menaces</b> → <b>Historique de protection</b>, choisis l'élément Jimy, puis <b>Actions</b> → <b>Autoriser sur l'appareil</b>. Relance l'installeur.</p>
+        </div>
+      </div>
+      <p class="defender-foot">Sous Windows 11, si c'est le <b>Contrôle intelligent des applications</b> qui bloque, il n'y a pas de bouton « Exécuter quand même » : attends la version signée plutôt que de désactiver cette protection. Ne désactive jamais l'antivirus pour installer Jimy.</p>
+    </aside>
+    <div class="cta reveal">
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Télécharger Jimy-setup.exe
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Jimmyjoe13/jimmy-agent/releases">Notes de version</a>
+    </div>
+
+    <div class="faq" id="faq">
+      <div>
+        <p class="kicker reveal">FAQ</p>
+        <h2 class="section-title reveal">Les questions qu'on nous pose.</h2>
+      </div>
+      <div class="reveal">
+        <details><summary>C'est vraiment gratuit ?</summary><p>L'appli et les cinq skins de base, oui, et le code est open source. Il te faut une clé chez un fournisseur de modèle de langage (OpenCode Go, OpenRouter…) : c'est lui qui facture l'usage, selon le modèle choisi. Les skins premium seront payants.</p></details>
+        <details><summary>Il m'écoute en permanence ?</summary><p>Le micro est ouvert pour entendre « Jimy », mais tout se passe sur ta machine : l'audio ne part jamais sur Internet. Après une réponse, il garde l'oreille ouverte quelques secondes pour enchaîner sans redire son nom. Tout se règle ou se coupe dans Paramètres → Écoute.</p></details>
+        <details><summary>Quelle machine faut-il ?</summary><p>Windows 10 ou 11, 64 bits. Jimy est développé sur un portable Ryzen 7 avec 16 Go de RAM, sans carte graphique dédiée. L'avatar a trois profils graphiques pour les machines plus modestes.</p></details>
+        <details><summary>Pourquoi Windows affiche un avertissement ?</summary><p>L'installeur n'est pas encore signé. Une signature gratuite est demandée à SignPath Foundation (<a href="/code-signing.html">Code signing policy</a>). En attendant, l'installeur est construit par GitHub Actions à partir du code public, que tu peux vérifier. Pas à pas pour l'autoriser : <a href="#defender">voir ici</a>.</p></details>
+        <details><summary>Et sur Mac ?</summary><p>C'est la prochaine étape. Pour l'instant, Jimy n'existe que sur Windows.</p></details>
+        <details><summary>Comment j'active un skin premium ?</summary><p>La boutique n'est pas encore ouverte. À l'ouverture, tu recevras une clé de licence après l'achat : dans l'appli, onglet Skin → « Skins premium », colle-la et clique sur Activer. Le skin se télécharge tout seul.</p></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Appel final ═══════════════════════════════════════════════════════ -->
+<section class="final" aria-labelledby="t-final">
+  <div class="wrap">
+    <span class="brand-mark mark" aria-hidden="true"></span>
+    <h2 id="t-final" class="reveal">Dis bonjour à Jimy.</h2>
+    <p class="reveal">Gratuit, open source, et prêt à s'installer sur ton bureau.</p>
+    <div class="cta reveal">
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Télécharger pour Windows
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Jimmyjoe13/jimmy-agent">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.7.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.5-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.8V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+        Code source
+      </a>
+    </div>
+  </div>
+</section>
+
 </main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></span>
+    <span>Jimy, avec un seul M · jimy-agent.me</span>
+    <nav aria-label="Liens du pied de page">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/code-signing.html">Code signing policy</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js" defer></script>
+<script src="/assets/site.js" defer></script>
 </body>
 </html>
