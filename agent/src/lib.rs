@@ -15,6 +15,7 @@ pub mod growth;
 pub mod licence;
 pub mod memory;
 pub mod mcp;
+pub mod os;
 pub mod paths;
 pub mod permissions;
 pub mod premium;
@@ -811,7 +812,16 @@ impl App {
     pub fn load_permissions(&self) -> Permissions {
         let path = self.permissions_path();
         if let Ok(raw) = std::fs::read_to_string(&path) {
-            if let Ok(parsed) = serde_json::from_str::<Permissions>(&raw) {
+            if let Ok(mut parsed) = serde_json::from_str::<Permissions>(&raw) {
+                // Installations existantes (lot 4) : les nouveaux interdits
+                // rejoignent le fichier, accords et interdits perso intacts.
+                if parsed.merge_default_denies() {
+                    if let Ok(json) = serde_json::to_string_pretty(&parsed) {
+                        if std::fs::write(&path, json).is_ok() {
+                            log::info!("[permissions] interdits par défaut complétés ({})", path.display());
+                        }
+                    }
+                }
                 return parsed;
             }
         }

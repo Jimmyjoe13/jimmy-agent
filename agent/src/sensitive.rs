@@ -604,6 +604,8 @@ pub fn needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
     let arg = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or("");
     match tool {
         "write_file" => Some(arg("path")).filter(|p| is_sensitive_path(p)).map(str::to_string),
+        // Lot 4 : arrêter un processus engage toujours (perte de travail).
+        "process_kill" => Some("machine : arrêt d'un processus".to_string()),
         "run_command" => command_modifies_sensitive(arg("command")),
         "mcp_call" => {
             let inner = inner_args(args.get("arguments"));
@@ -1064,6 +1066,17 @@ mod tests {
         assert!(!masque.contains("cle-agregat-test-0123456789"), "{masque}");
         assert!(masque.contains(&format!("X-API-Key:{REDACTED}\n  suite")), "{masque}");
         assert_eq!(redact_known("un mot court"), "un mot court");
+    }
+
+    /// Lot 4, tranche 2 : arrêter un processus engage (perte de travail) —
+    /// carte à chaque fois, portée « Toujours » au type d'action, pas au PID
+    /// (comme le navigateur).
+    #[test]
+    fn arreter_un_processus_demande_toujours_son_accord() {
+        let tuer = json!({"pid": 1234u32});
+        let cible = needs_approval("process_kill", &tuer).expect("carte attendue");
+        assert!(cible.contains("processus"), "{cible}");
+        assert_eq!(always_key(&cible), cible.to_lowercase());
     }
 
     /// Navigation en son nom : seules les actions qui engagent demandent

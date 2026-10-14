@@ -15,6 +15,7 @@ pub mod knowledge;
 pub mod mcp;
 pub mod net;
 pub mod skills;
+pub mod sys;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -146,6 +147,13 @@ impl ToolRegistry {
         self.register(Arc::new(fs::WriteFile));
         self.register(Arc::new(fs::SearchFiles));
         self.register(Arc::new(cli::RunCommand));
+        self.register(Arc::new(sys::SystemInfo));
+        self.register(Arc::new(sys::ProcessList));
+        self.register(Arc::new(sys::OpenPath));
+        self.register(Arc::new(sys::ProcessKill));
+        self.register(Arc::new(sys::WindowList));
+        self.register(Arc::new(sys::WindowFocus));
+        self.register(Arc::new(sys::AppOpen));
         self.register(Arc::new(net::HttpRequest::new(deps.http.clone())));
         self.register(Arc::new(net::OpenBrowser));
         self.register(Arc::new(knowledge::SearchMemory));
@@ -164,6 +172,23 @@ impl ToolRegistry {
 #[derive(Clone)]
 pub struct ToolDeps {
     pub http: reqwest::Client,
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    /// Pièges 11/22 : une fonction qui existe n'est pas une fonction appelée.
+    /// Les outils machine doivent être enregistrés, pas seulement définis.
+    #[test]
+    fn les_outils_machine_sont_branches() {
+        let deps = ToolDeps { http: reqwest::Client::new() };
+        let registry = ToolRegistry::new();
+        registry.register_defaults(&deps);
+        for name in ["system_info", "process_list", "open_path", "process_kill", "window_list", "window_focus", "app_open", "run_command", "read_file"] {
+            assert!(registry.get(name).is_some(), "{name} doit être enregistré");
+        }
+    }
 }
 
 // ── Aides partagées ──────────────────────────────────────────────────────────

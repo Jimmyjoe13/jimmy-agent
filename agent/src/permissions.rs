@@ -59,6 +59,9 @@ impl Default for AccessRule {
             granted: false,
             allow_paths: Vec::new(),
             allow_commands: Vec::new(),
+            // Motifs ancrés en début de ligne (`glob_match`) : un mot seul ne
+            // bloque que la commande nue, `*` couvre ses arguments. Lot 4 :
+            // destructeurs courants des trois OS, en plus des disques Windows.
             deny_commands: vec![
                 "format".into(),
                 "diskpart".into(),
@@ -66,6 +69,16 @@ impl Default for AccessRule {
                 "cipher /w".into(),
                 "Remove-Item -Recurse C:\\".into(),
                 "del /f /s c:\\".into(),
+                "shutdown*".into(),
+                "reboot*".into(),
+                "halt*".into(),
+                "poweroff*".into(),
+                "mkfs*".into(),
+                "dd *".into(),
+                "reg delete*".into(),
+                "rm -rf /*".into(),
+                "rm -rf ~*".into(),
+                "Remove-Item -Recurse C:\\Windows*".into(),
             ],
         }
     }
@@ -88,7 +101,15 @@ pub struct Permissions {
     pub write: AccessRule,
     pub execute: AccessRule,
     pub network: AccessRule,
+    /// Version des interdits par défaut appliqués (lot 4) : une configuration
+    /// existante reçoit les nouveaux motifs sans perdre ses accords ni ses
+    /// propres interdits ; un retrait volontaire postérieur est respecté.
+    #[serde(default)]
+    pub deny_version: u32,
 }
+
+/// Version courante des interdits par défaut (voir `merge_default_denies`).
+pub const DENY_VERSION: u32 = 1;
 
 impl Default for Permissions {
     fn default() -> Self {
@@ -109,18 +130,41 @@ impl Default for Permissions {
                     "[::1]:8790*".into(),
                 ],
             },
+            deny_version: DENY_VERSION,
         }
     }
 }
 
 impl Permissions {
-    pub fn rule(&self, capability: Capability) -> &AccessRule {
-        match capability {
+    pub fn rule(&self, capability: Capability) -> &AccessRule {        match capability {
             Capability::Read => &self.read,
             Capability::Write => &self.write,
             Capability::Execute => &self.execute,
             Capability::Network => &self.network,
         }
+    }
+
+    /// Ajoute les interdits par défaut manquants à une configuration existante
+    /// (lot 4) : les nouvelles protections profitent aux installations
+    /// existantes sans toucher à leurs accords (`granted`, `allow_*`) ni
+    /// retirer leurs propres interdits. Seules les règles appliquées
+    /// (`execute`, `network` : `check` ignore `deny_commands` pour `read` et
+    /// `write`) sont complétées. Renvoie `true` si le fichier est à réécrire.
+    /// Un retrait volontaire postérieur reste respecté (version posée).
+    pub fn merge_default_denies(&mut self) -> bool {
+        if self.deny_version >= DENY_VERSION {
+            return false;
+        }
+        let fresh = Permissions::default();
+        for (rule, fresh_rule) in [(&mut self.execute, &fresh.execute), (&mut self.network, &fresh.network)] {
+            for motif in &fresh_rule.deny_commands {
+                if !rule.deny_commands.iter().any(|m| m == motif) {
+                    rule.deny_commands.push(motif.clone());
+                }
+            }
+        }
+        self.deny_version = DENY_VERSION;
+        true
     }
 
     /// Vérifie qu'une opération est autorisée. `target` est un chemin (Read,
@@ -205,6 +249,7 @@ impl Permissions {
             write: open(refused.write),
             execute: open(refused.execute),
             network: AccessRule { granted: true, ..refused.network },
+            deny_version: DENY_VERSION,
         }
     }
 
@@ -218,6 +263,7 @@ impl Permissions {
             write: if write { standard.write } else { refused.write },
             execute: if execute { standard.execute } else { refused.execute },
             network: if network { standard.network } else { refused.network },
+            deny_version: DENY_VERSION,
         }
     }
 
@@ -380,5 +426,34 @@ mod tests {
         perms.execute.allow_commands = vec!["git *".into()];
         assert!(perms.check(Capability::Execute, "git status").is_ok());
         assert!(perms.check(Capability::Execute, "diskpart").is_err());
+    }
+
+    /// Lot 4 : les destructeurs courants des trois OS sont interdits par
+    /// défaut (`shutdown`, `rm -rf /`, `mkfs`, `reg delete`…), en gardant les
+    /// commandes ordinaires libres.
+    #[test]
+    fn destructeurs_multi_os_bloques_ordinaires_libres() {
+        let mut perms = Permissions::default();
+        perms.execute.granted = true;
+        for advocate in ["shutdown /s", "reboot", "halt", "poweroff", "mkfs /dev/sda", "dd if=/dev/zero of=/dev/sda", "reg delete HKLM /f", "rm -rf /", "rm -rf ~/docs", "Remove-Item -Recurse C:\\Windows\\Temp"] {
+            assert!(perms.check(Capability::Execute, advocate).is_err(), "{advocate} doit être interdit");
+        }
+        for ordinary in ["git status", "npm run build", "Get-ChildItem C:\\Projet", "echo halte"] {
+            assert!(perms.check(Capability::Execute, ordinary).is_ok(), "{ordinary} doit rester libre");
+        }
+    }
+
+    /// Les nouveaux interdits rejoignent une configuration existante sans
+    /// toucher à ses accords ; un second passage ne change rien.
+    #[test]
+    fn les_nouveaux_interdits_completent_sans_ecraser() {
+        let mut perms = Permissions::standard();
+        perms.deny_version = 0;
+        perms.execute.deny_commands.retain(|m| m != "shutdown*");
+        assert!(perms.merge_default_denies());
+        assert!(perms.execute.deny_commands.iter().any(|m| m == "shutdown*"));
+        assert!(perms.execute.granted, "les accords ne bougent pas");
+        assert!(perms.check(Capability::Execute, "git status").is_ok());
+        assert!(!perms.merge_default_denies(), "deuxième passage : rien à faire");
     }
 }
