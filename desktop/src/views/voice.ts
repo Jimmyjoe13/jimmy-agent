@@ -136,6 +136,79 @@ export function voiceView(ctx: AppContext): HTMLElement {
     if (ok && !running) toast(`Écoute active — dis « ${capitalize(ctx.status.stt.wake_word)} ».`);
   }
 
+  // ── Interrupteur principal de la voix (Lot 2) ──────────────────────────
+  // Coupe ou réactive toute la voix à la volée : écoute micro/VAD + synthèse
+  // TTS. Persisté côté Rust (`voice_set_enabled`) et respecté au prochain
+  // démarrage. La boucle de l'agent n'est jamais touchée : sans voix, les
+  // réponses continuent à l'écran et dans la bulle.
+  const voiceMasterToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const listenToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const speechToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
+  const voiceStateNote = h("p", { class: "note voice-enabled-note" }, "Chargement…");
+
+  async function loadVoiceEnabled() {
+    const loaded = await guard(() => api.getSettings(), "activation de la voix");
+    if (!loaded) return;
+    voiceMasterToggle.checked = loaded.voice.enabled;
+    listenToggle.checked = loaded.stt.enabled;
+    speechToggle.checked = loaded.tts.enabled;
+    renderVoiceEnabled();
+  }
+
+  function renderVoiceEnabled() {
+    const master = voiceMasterToggle.checked;
+    const listening = listenToggle.checked && master;
+    const speaking = speechToggle.checked && master;
+    voiceStateNote.textContent = !master
+      ? "Voix coupée : Jimy reste silencieux et n'écoute plus, il répond uniquement à l'écrit."
+      : !listening && !speaking
+        ? "Voix activée mais micro et synthèse coupés : Jimy répond uniquement à l'écrit."
+        : !listening
+          ? "Micro coupé : Jimy parle mais n'écoute plus (utilise le Chat écrit)."
+          : !speaking
+            ? "Synthèse coupée : Jimy écoute mais répond uniquement à l'écrit."
+            : "Voix active : Jimy écoute au micro et répond à voix haute.";
+    listenToggle.disabled = !master;
+    speechToggle.disabled = !master;
+    // Sans micro, le bouton d'écoute n'a aucun sens.
+    listenButton.toggleAttribute("disabled", !listening && !ctx.voice?.running);
+  }
+
+  async function setVoiceEnabled(scope: "voice" | "listen" | "speech", box: HTMLInputElement) {
+    const wanted = box.checked;
+    box.disabled = true;
+    const updated = await guard(() => api.voiceSetEnabled(scope, wanted), "activation de la voix");
+    if (updated) {
+      voiceMasterToggle.checked = updated.voice;
+      listenToggle.checked = updated.listen;
+      speechToggle.checked = updated.speech;
+      await ctx.refreshStatus();
+      renderListening();
+      toast(
+        scope === "voice"
+          ? wanted
+            ? "Voix réactivée."
+            : "Voix coupée : réponses uniquement à l'écrit."
+          : scope === "listen"
+            ? wanted
+              ? "Micro réactivé."
+              : "Micro coupé."
+            : wanted
+              ? "Synthèse vocale réactivée."
+              : "Synthèse vocale coupée.",
+      );
+    } else {
+      box.checked = !wanted;
+    }
+    box.disabled = false;
+    renderVoiceEnabled();
+  }
+
+  voiceMasterToggle.addEventListener("change", () => void setVoiceEnabled("voice", voiceMasterToggle));
+  listenToggle.addEventListener("change", () => void setVoiceEnabled("listen", listenToggle));
+  speechToggle.addEventListener("change", () => void setVoiceEnabled("speech", speechToggle));
+  void loadVoiceEnabled();
+
   function emptyHeard() {
     mount(heard, h("p", { class: "hint" }, "Les phrases transcrites par l'écoute s'affichent ici, en direct."));
   }
@@ -393,6 +466,18 @@ export function voiceView(ctx: AppContext): HTMLElement {
     "section",
     { class: "view" },
     componentsNote,
+    card(
+      "Activation de la voix",
+      h(
+        "p",
+        { class: "note" },
+        "Coupe ou réactive toute la voix à la volée. Coupée, Jimy n'écoute plus au micro et ne parle plus : il répond uniquement à l'écrit, sans interrompre son travail.",
+      ),
+      toggle("Voix de Jimy (écoute et parole)", voiceMasterToggle),
+      toggle("Écoute au micro (reconnaissance vocale locale)", listenToggle),
+      toggle("Synthèse vocale (Jimy parle à voix haute)", speechToggle),
+      voiceStateNote,
+    ),
     h(
       "div",
       { class: "card voice-hero" },

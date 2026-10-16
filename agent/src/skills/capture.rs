@@ -50,6 +50,10 @@ pub struct ProposedSkill {
     pub close_to: Option<String>,
 }
 
+/// Plafond de jetons pour la capture de skill : couvre le raisonnement caché
+/// (`muse-spark`, piège 70) + le corps du skill.
+pub const CAPTURE_MAX_TOKENS: u32 = 4_000;
+
 /// Tente de condenser la trajectoire en skill. `tools_used` = noms des outils
 /// appelés ; l'appelant ne déclenche la capture qu'au-delà de quelques outils.
 pub async fn capture(
@@ -85,9 +89,9 @@ pub async fn capture(
         // Panne réseau : la seconde tentative 800 ms plus tard ne passerait
         // jamais (inclurait la même coupure) → on attend NETWORK_RETRY.
         let mut wait = SHORT_RETRY;
-        // Le corps d'un skill peut être long : 1 200 jetons le couvrent sans
-        // couper (le format trois lignes est devenu prolixe à l'usage).
-        match llm.complete(&settings.llm.model, &messages, 1200, None).await {
+        // 4 000 jetons : couvre le raisonnement caché de `muse-spark` (à 1 200,
+        // la réponse arrivait vide `""`, 6 échecs les 14-15 octobre) et le corps.
+        match llm.complete(&settings.llm.model, &messages, CAPTURE_MAX_TOKENS, None).await {
             Ok(raw) => match parse(&raw) {
                 Some(proposal) => return Some(proposal),
                 None => {
@@ -235,5 +239,6 @@ mod tests {
     fn trop_court_rejete() {
         let raw = "name: audit\ndescription: court mais ok\ncorps vide";
         assert!(parse(raw).is_none());
+        assert!(CAPTURE_MAX_TOKENS >= 4_000, "couvre le raisonnement caché");
     }
 }

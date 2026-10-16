@@ -1,4 +1,4 @@
-//! Les trois formats d'API d'OpenCode Go, avec de vrais modèles : un tour
+//! Les quatre formats d'API d'OpenCode Go, avec de vrais modèles : un tour
 //! avec outil puis la réponse finale, en flux, par le client de Jimmy.
 //!
 //! Cas réel du 6 octobre : Muse Spark 1.3 restait muet (`400
@@ -11,8 +11,13 @@ use std::path::Path;
 use jimmy_agent::core::types::{Message, ToolCall, ToolSpec};
 use jimmy_agent::providers::LlmClient;
 
-/// Un modèle par format : Chat, Responses, Messages.
-const MODELES: [&str; 3] = ["glm-5.3-flash", "muse-spark-1.3-contributor", "qwen3.8-flash"];
+/// Un modèle par format : Chat, Responses, Messages, Google.
+const MODELES: [&str; 4] = [
+    "glm-5.3-flash",
+    "muse-spark-1.3-contributor",
+    "qwen3.8-flash",
+    "gemini-4-argon-contributor",
+];
 
 fn client() -> LlmClient {
     let racine = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

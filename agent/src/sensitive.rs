@@ -503,13 +503,104 @@ const MCP_ACTION_WORDS: &[&str] = &[
     "launch", "activate", "schedule", "batch", "respond", "star",
 ];
 
+/// Cible de la carte d'autorisation pour l'extinction, le redémarrage ou la
+/// mise en veille de l'ordinateur (`system_power` ou commande `shutdown`…).
+pub const POWER_TARGET: &str = "machine : éteindre ou redémarrer l'ordinateur";
+
+/// Cible de la carte d'autorisation pour la webcam (`webcam_capture`).
+/// Portée « Toujours » = tout le type d'action (quel que soit l'index de la
+/// caméra), comme le navigateur.
+pub const WEBCAM_TARGET: &str = "machine : voir via la webcam";
+
+/// Préfixe de la cible d'un envoi MCP vers l'extérieur (email, message,
+/// lancement de campagne — cas réel du 15 octobre : 10 `gmail_send_message`
+/// partis sans carte).
+pub const OUTBOUND_TARGET: &str = "communication : ";
+
+/// Le segment de commande éteint-il, redémarre-t-il ou met-il en veille la
+/// machine ? `shutdown /a` (annulation) et `shutdown /query` (lecture)
+/// restent libres.
+fn words_power_off(words: &[&str]) -> bool {
+    let Some(start) = words
+        .iter()
+        .position(|w| !PREFIXES.contains(&w.to_lowercase().as_str()) && !(w.contains('=') && !w.starts_with('-')))
+    else {
+        return false;
+    };
+    let Some((verb, rest)) = words[start..].split_first() else {
+        return false;
+    };
+    let verb = verb.to_lowercase();
+    let verb = verb.rsplit(['/', '\\']).next().unwrap_or(&verb).trim_end_matches(".exe");
+    if rest.iter().any(|w| w.eq_ignore_ascii_case("--help") || w.eq_ignore_ascii_case("/?")) {
+        return false;
+    }
+    match verb {
+        "shutdown" => {
+            !rest.iter().any(|w| {
+                let low = w.to_lowercase();
+                matches!(low.as_str(), "/a" | "-a" | "-c" | "/query")
+            })
+        }
+        "reboot" | "poweroff" | "halt" | "stop-computer" | "restart-computer" => true,
+        "rundll32" => rest.iter().any(|w| w.to_lowercase().contains("setsuspendstate")),
+        v if WRAPPERS.contains(&v) => rest
+            .iter()
+            .any(|w| if w.contains(' ') { command_powers_off(w).is_some() } else { false })
+            || (0..rest.len()).any(|i| words_power_off(&rest[i..])),
+        _ => false,
+    }
+}
+
+/// Une ligne de commande qui éteint, redémarre ou met en veille la machine.
+pub fn command_powers_off(command: &str) -> Option<String> {
+    let acts = segments(command)
+        .iter()
+        .any(|seg| words_power_off(&seg.words.iter().map(String::as_str).collect::<Vec<_>>()));
+    if acts {
+        Some(POWER_TARGET.to_string())
+    } else {
+        None
+    }
+}
+
+/// Un appel d'outil MCP qui envoie un email/message à l'extérieur ou lance
+/// une campagne réelle (cas du 15 octobre : `gmail_send_message` appelé 10
+/// fois sans carte). Les brouillons (`draft`), aperçus (`preview`) et
+/// lectures restent libres.
+fn mcp_outbound_needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
+    let lower = tool.to_lowercase();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    if words.iter().any(|w| matches!(*w, "draft" | "drafts" | "preview" | "test" | "check")) {
+        return None;
+    }
+    if words.iter().any(|w| matches!(*w, "send" | "reply")) {
+        let recipient = ["to", "recipient", "email"]
+            .iter()
+            .find_map(|k| args.get(*k).and_then(|v| v.as_str()))
+            .filter(|s| !s.trim().is_empty());
+        return match recipient {
+            Some(to) => Some(format!("{OUTBOUND_TARGET}envoi à « {to} »")),
+            None => Some(format!("{OUTBOUND_TARGET}envoi d'un message ou email")),
+        };
+    }
+    if words.contains(&"campaign")
+        && words
+            .iter()
+            .any(|w| matches!(*w, "launch" | "start" | "activate" | "resume" | "delete"))
+    {
+        return Some(format!("{OUTBOUND_TARGET}lancement ou suppression d'une campagne"));
+    }
+    None
+}
+
 /// Un appel d'outil MCP (`tool` sur le serveur) modifie-t-il un fichier
-/// sensible ?
+/// sensible ou éteint-il une machine ?
 fn mcp_modifies_sensitive(tool: &str, args: &serde_json::Value) -> Option<String> {
     // Outil qui exécute une commande (vps_exec, local_run, server_run…).
     for key in ["command", "cmd", "script"] {
         if let Some(command) = args.get(key).and_then(|v| v.as_str()) {
-            return command_modifies_sensitive(command);
+            return command_powers_off(command).or_else(|| command_modifies_sensitive(command));
         }
     }
     if is_write_tool(tool) {
@@ -650,23 +741,41 @@ fn string_literals(code: &str) -> String {
     out
 }
 
-/// L'appel d'outil modifie-t-il un fichier sensible ? Renvoie le fichier en
-/// cause ; `None` pour tout le reste (lecture comprise).
+/// L'appel d'outil modifie-t-il un fichier sensible ou engage-t-il
+/// l'utilisateur (arrêt processus, extinction PC, envoi externe, navigateur) ?
+/// Renvoie la cible en cause ; `None` pour tout le reste (lecture comprise).
 pub fn needs_approval(tool: &str, args: &serde_json::Value) -> Option<String> {
     let arg = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or("");
     match tool {
         "write_file" => Some(arg("path")).filter(|p| is_sensitive_path(p)).map(str::to_string),
         // Lot 4 : arrêter un processus engage toujours (perte de travail).
         "process_kill" => Some("machine : arrêt d'un processus".to_string()),
-        "run_command" => command_modifies_sensitive(arg("command")),
+        // Webcam (Lot 2) : voir l'utilisateur engage toujours sa vie privée —
+        // carte à chaque fois, portée « Toujours » au type d'action.
+        "webcam_capture" => Some(WEBCAM_TARGET.to_string()),
+        // Extinction, redémarrage ou mise en veille : accord requis, sauf
+        // `cancel` qui annule un arrêt en cours et doit rester immédiat.
+        "system_power" => {
+            let action = arg("action").trim().to_lowercase();
+            if matches!(action.as_str(), "cancel" | "abort") {
+                None
+            } else {
+                Some(POWER_TARGET.to_string())
+            }
+        }
+        "run_command" => command_powers_off(arg("command")).or_else(|| command_modifies_sensitive(arg("command"))),
         "mcp_call" => {
             let inner = inner_args(args.get("arguments"));
-            browser_action_needs_approval(arg("tool"), &inner).or_else(|| mcp_modifies_sensitive(arg("tool"), &inner))
+            browser_action_needs_approval(arg("tool"), &inner)
+                .or_else(|| mcp_outbound_needs_approval(arg("tool"), &inner))
+                .or_else(|| mcp_modifies_sensitive(arg("tool"), &inner))
         }
         // Outil MCP enregistré directement (`mcp_<serveur>__<outil>`).
         name if name.starts_with("mcp_") => {
             let short = name.split("__").nth(1).unwrap_or(name);
-            browser_action_needs_approval(short, args).or_else(|| mcp_modifies_sensitive(short, args))
+            browser_action_needs_approval(short, args)
+                .or_else(|| mcp_outbound_needs_approval(short, args))
+                .or_else(|| mcp_modifies_sensitive(short, args))
         }
         _ => None,
     }
@@ -694,18 +803,22 @@ pub fn describe(tool: &str, args: &serde_json::Value) -> String {
 /// « Envoyer » » et « clic sur « Publier » » partagent un accord). Fichier
 /// sensible : le chemin exact, casse et séparateurs normalisés.
 pub fn always_key(target: &str) -> String {
-    match target.strip_prefix(BROWSER_TARGET) {
-        Some(action) if action.starts_with("clic sur « ") => {
-            format!("{BROWSER_TARGET}clic sur un élément qui engage")
+    if let Some(action) = target.strip_prefix(BROWSER_TARGET) {
+        if action.starts_with("clic sur « ") {
+            return format!("{BROWSER_TARGET}clic sur un élément qui engage");
         }
-        Some(action) if action.starts_with("saisie validée dans « ") => {
-            format!("{BROWSER_TARGET}saisie validée (hors recherche)")
+        if action.starts_with("saisie validée dans « ") {
+            return format!("{BROWSER_TARGET}saisie validée (hors recherche)");
         }
-        // Les autres types (script, Entrée, envoi de fichier…) n'embarquent
-        // pas d'élément : la cible est déjà le type.
-        Some(_) => target.to_string(),
-        None => target.to_lowercase().replace('/', "\\"),
+        return target.to_string();
     }
+    if let Some(action) = target.strip_prefix(OUTBOUND_TARGET) {
+        if action.starts_with("envoi à « ") {
+            return format!("{OUTBOUND_TARGET}envoi d'un message ou email");
+        }
+        return target.to_string();
+    }
+    target.to_lowercase().replace('/', "\\")
 }
 
 // ── Demande d'autorisation ───────────────────────────────────────────────────
@@ -816,6 +929,12 @@ impl Approvals {
         removed
     }
 
+    /// Accorde directement une portée permanente depuis les Paramètres
+    /// (ex. « Toujours autoriser » sur l'extinction de l'ordinateur).
+    pub fn grant_always(&self, key: &str) {
+        self.grant(always_key(key));
+    }
+
     fn grant(&self, key: String) {
         log::info!("[sécurité] toujours autorisé désormais : {key}");
         if let Ok(mut always) = self.always.lock() {
@@ -864,11 +983,16 @@ pub async fn authorize(
         log::info!("[sécurité] « {target} » : toujours autorisé ({key})");
         return None;
     }
-    // Action du navigateur en son nom, ou écriture d'un fichier sensible :
-    // même carte, mots différents.
-    let what = match target.strip_prefix(BROWSER_TARGET) {
-        Some(action) => format!("l'action dans le navigateur ({action})"),
-        None => format!("la modification de « {target} » (fichier sensible)"),
+    // Action du navigateur, contrôle machine, envoi externe ou fichier
+    // sensible : même carte, mots adaptés.
+    let what = if let Some(action) = target.strip_prefix(BROWSER_TARGET) {
+        format!("l'action dans le navigateur ({action})")
+    } else if let Some(action) = target.strip_prefix("machine : ") {
+        format!("l'action sur la machine ({action})")
+    } else if let Some(action) = target.strip_prefix(OUTBOUND_TARGET) {
+        format!("la communication externe ({action})")
+    } else {
+        format!("la modification de « {target} » (fichier sensible)")
     };
     if voice {
         // Accord vocal « confirmé » (13 octobre, choix de l'utilisateur) :
@@ -1129,6 +1253,63 @@ mod tests {
         let cible = needs_approval("process_kill", &tuer).expect("carte attendue");
         assert!(cible.contains("processus"), "{cible}");
         assert_eq!(always_key(&cible), cible.to_lowercase());
+    }
+
+    /// Webcam (Lot 2) : chaque photo demande l'accord (vie privée), portée
+    /// « Toujours » au type d'action ; `webcam_list` reste libre.
+    #[test]
+    fn voir_via_la_webcam_demande_toujours_son_accord() {
+        let photo = json!({});
+        let cible = needs_approval("webcam_capture", &photo).expect("carte attendue");
+        assert_eq!(cible, WEBCAM_TARGET);
+        assert_eq!(always_key(&cible), WEBCAM_TARGET);
+        assert_eq!(needs_approval("webcam_list", &json!({})), None);
+    }
+
+    /// Cas réels des 14-15 octobre : éteindre/redémarrer le PC (`system_power`
+    /// ou `shutdown`) et envoyer un email via MCP (`gmail_send_message`)
+    /// demandent l'accord de l'utilisateur ; annuler un arrêt (`cancel`, `/a`)
+    /// ou créer un brouillon restent libres.
+    #[test]
+    fn eteindre_le_pc_et_envoyer_un_email_mcp_demandent_l_accord() {
+        // system_power : shutdown/restart/sleep demandent, cancel est libre.
+        for action in ["shutdown", "restart", "sleep"] {
+            let cible = needs_approval("system_power", &json!({"action": action})).expect("accord requis");
+            assert_eq!(cible, POWER_TARGET);
+            assert_eq!(always_key(&cible), POWER_TARGET);
+        }
+        assert_eq!(needs_approval("system_power", &json!({"action": "cancel"})), None);
+
+        // run_command : shutdown /s et Stop-Computer demandent ; /a, /query et
+        // schtasks /query restent libres.
+        for cmd in ["shutdown /s /t 0", "Stop-Computer -Force", "Restart-Computer"] {
+            assert_eq!(
+                needs_approval("run_command", &json!({"command": cmd})).as_deref(),
+                Some(POWER_TARGET),
+                "{cmd} doit demander l'accord"
+            );
+        }
+        for libre in ["shutdown /a", "shutdown /query", "schtasks /query /fo LIST | findstr /i shutdown"] {
+            assert_eq!(needs_approval("run_command", &json!({"command": libre})), None, "{libre} doit rester libre");
+        }
+
+        // MCP sortant : gmail_send_message demande, gmail_list_labels et draft restent libres.
+        let send = needs_approval(
+            "mcp_call",
+            &json!({"server": "aggregate", "tool": "gmail_send_message", "arguments": {"to": "client@example.com", "subject": "Test"}}),
+        )
+        .expect("envoi mail doit demander");
+        assert!(send.starts_with(OUTBOUND_TARGET), "{send}");
+        assert_eq!(always_key(&send), format!("{OUTBOUND_TARGET}envoi d'un message ou email"));
+
+        assert_eq!(
+            needs_approval("mcp_call", &json!({"server": "aggregate", "tool": "gmail_list_labels", "arguments": {}})),
+            None
+        );
+        assert_eq!(
+            needs_approval("mcp_call", &json!({"server": "aggregate", "tool": "gmail_create_draft", "arguments": {"to": "a@b.fr"}})),
+            None
+        );
     }
 
     /// Navigation en son nom : seules les actions qui engagent demandent

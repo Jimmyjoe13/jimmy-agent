@@ -138,7 +138,7 @@ affichées.
 151 tests unitaires (6 octobre) couvrent les parties où une erreur serait
 silencieuse : similarité vectorielle, permissions, fichiers sensibles, wake
 word, découpage des phrases, extraction mémoire, formats d'API des modèles
-(corps, réponses et flux de Chat, Responses et Messages).
+(corps, réponses et flux de Chat, Responses, Messages et Google natif).
 
 ```powershell
 .\scripts\with-msvc.ps1 cargo test --workspace   # 0 échec, 0 avertissement

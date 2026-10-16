@@ -62,6 +62,9 @@ impl Default for AccessRule {
             // Motifs ancrés en début de ligne (`glob_match`) : un mot seul ne
             // bloque que la commande nue, `*` couvre ses arguments. Lot 4 :
             // destructeurs courants des trois OS, en plus des disques Windows.
+            // L'extinction (`shutdown`, `reboot`, `poweroff`, `halt`) n'est
+            // plus interdite en dur (v2) : elle passe par `sensitive::needs_approval`
+            // (carte d'autorisation ou « confirmé » vocal, ou « Toujours autoriser »).
             deny_commands: vec![
                 "format".into(),
                 "diskpart".into(),
@@ -69,20 +72,23 @@ impl Default for AccessRule {
                 "cipher /w".into(),
                 "Remove-Item -Recurse C:\\".into(),
                 "del /f /s c:\\".into(),
-                "shutdown*".into(),
-                "reboot*".into(),
-                "halt*".into(),
-                "poweroff*".into(),
                 "mkfs*".into(),
                 "dd *".into(),
                 "reg delete*".into(),
                 "rm -rf /*".into(),
-                "rm -rf ~*".into(),
+                "rm -rf ~*",
                 "Remove-Item -Recurse C:\\Windows*".into(),
-            ],
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
         }
     }
 }
+
+/// Anciens motifs d'extinction de la v1, retirés de `deny_commands` en v2
+/// pour laisser l'utilisateur autoriser l'arrêt du PC (carte ou permanent).
+const LEGACY_POWER_DENIES: &[&str] = &["shutdown*", "reboot*", "halt*", "poweroff*"];
 
 impl AccessRule {
     pub fn deny_all() -> Self {
@@ -109,7 +115,9 @@ pub struct Permissions {
 }
 
 /// Version courante des interdits par défaut (voir `merge_default_denies`).
-pub const DENY_VERSION: u32 = 1;
+/// v1 : destructeurs lot 4 ; v2 : retrait de `shutdown*`/`reboot*`/`halt*`/`poweroff*`
+/// (désormais soumis à carte d'autorisation dans `sensitive.rs`).
+pub const DENY_VERSION: u32 = 2;
 
 impl Default for Permissions {
     fn default() -> Self {
@@ -163,7 +171,35 @@ impl Permissions {
                 }
             }
         }
+        // v2 : l'extinction passe par carte d'autorisation (`sensitive.rs`)
+        // plutôt que par un refus sec dans `deny_commands`.
+        if self.deny_version < 2 {
+            self.execute
+                .deny_commands
+                .retain(|m| !LEGACY_POWER_DENIES.contains(&m.as_str()));
+        }
         self.deny_version = DENY_VERSION;
+        true
+    }
+
+    /// Ajoute le dossier du vault Obsidian aux chemins de **lecture** autorisés
+    /// (`read.allow_paths`) s'il est restreint à une liste et ne le couvre pas
+    /// encore. L'écriture directe hors inbox reste bloquée (`write.allow_paths`
+    /// inchangé). Renvoie `true` si la règle a été modifiée.
+    pub fn allow_vault_read(&mut self, vault_root: &std::path::Path) -> bool {
+        if self.read.allow_paths.is_empty() {
+            return false;
+        }
+        let root_str = vault_root.to_string_lossy();
+        let trimmed = root_str.trim().trim_end_matches(['\\', '/']);
+        if trimmed.is_empty() {
+            return false;
+        }
+        let probe = format!("{trimmed}\\note.md");
+        if self.read.allow_paths.iter().any(|p| path_match(p, &probe)) {
+            return false;
+        }
+        self.read.allow_paths.push(format!("{trimmed}\\**"));
         true
     }
 
@@ -428,32 +464,46 @@ mod tests {
         assert!(perms.check(Capability::Execute, "diskpart").is_err());
     }
 
-    /// Lot 4 : les destructeurs courants des trois OS sont interdits par
-    /// défaut (`shutdown`, `rm -rf /`, `mkfs`, `reg delete`…), en gardant les
-    /// commandes ordinaires libres.
+    /// Lot 4 + v2 : les destructeurs irréversibles des trois OS sont interdits
+    /// par défaut (`rm -rf /`, `mkfs`, `reg delete`…), tandis que l'extinction
+    /// (`shutdown`, `reboot`) passe par carte d'autorisation (`sensitive`).
     #[test]
     fn destructeurs_multi_os_bloques_ordinaires_libres() {
         let mut perms = Permissions::default();
         perms.execute.granted = true;
-        for advocate in ["shutdown /s", "reboot", "halt", "poweroff", "mkfs /dev/sda", "dd if=/dev/zero of=/dev/sda", "reg delete HKLM /f", "rm -rf /", "rm -rf ~/docs", "Remove-Item -Recurse C:\\Windows\\Temp"] {
+        for advocate in ["mkfs /dev/sda", "dd if=/dev/zero of=/dev/sda", "reg delete HKLM /f", "rm -rf /", "rm -rf ~/docs", "Remove-Item -Recurse C:\\Windows\\Temp"] {
             assert!(perms.check(Capability::Execute, advocate).is_err(), "{advocate} doit être interdit");
         }
-        for ordinary in ["git status", "npm run build", "Get-ChildItem C:\\Projet", "echo halte"] {
-            assert!(perms.check(Capability::Execute, ordinary).is_ok(), "{ordinary} doit rester libre");
+        for ordinary in ["git status", "npm run build", "Get-ChildItem C:\\Projet", "echo halte", "shutdown /s /t 15"] {
+            assert!(perms.check(Capability::Execute, ordinary).is_ok(), "{ordinary} doit rester libre côté deny_commands");
         }
     }
 
     /// Les nouveaux interdits rejoignent une configuration existante sans
-    /// toucher à ses accords ; un second passage ne change rien.
+    /// toucher à ses accords ; la v2 retire l'ancien `shutdown*` rigide.
     #[test]
     fn les_nouveaux_interdits_completent_sans_ecraser() {
         let mut perms = Permissions::standard();
-        perms.deny_version = 0;
-        perms.execute.deny_commands.retain(|m| m != "shutdown*");
+        perms.deny_version = 1;
+        perms.execute.deny_commands.push("shutdown*".into());
+        perms.execute.deny_commands.retain(|m| m != "mkfs*");
         assert!(perms.merge_default_denies());
-        assert!(perms.execute.deny_commands.iter().any(|m| m == "shutdown*"));
+        assert!(perms.execute.deny_commands.iter().any(|m| m == "mkfs*"));
+        assert!(!perms.execute.deny_commands.iter().any(|m| m == "shutdown*"), "shutdown* retiré en v2");
         assert!(perms.execute.granted, "les accords ne bougent pas");
         assert!(perms.check(Capability::Execute, "git status").is_ok());
         assert!(!perms.merge_default_denies(), "deuxième passage : rien à faire");
+    }
+
+    /// Le dossier du vault configuré rejoint `read.allow_paths` sans ouvrir
+    /// l'écriture directe hors inbox.
+    #[test]
+    fn vault_ajoute_en_lecture_seulement() {
+        let mut perms = Permissions::standard();
+        assert!(perms.check(Capability::Read, r"C:\Obsidian\Jimmy\1_Projets\Preuve_Lot\cibles.csv").is_err());
+        assert!(perms.allow_vault_read(std::path::Path::new(r"C:\Obsidian\Jimmy")));
+        assert!(perms.check(Capability::Read, r"C:\Obsidian\Jimmy\1_Projets\Preuve_Lot\cibles.csv").is_ok());
+        assert!(perms.check(Capability::Write, r"C:\Obsidian\Jimmy\1_Projets\Preuve_Lot\cibles.csv").is_err());
+        assert!(!perms.allow_vault_read(std::path::Path::new(r"C:\Obsidian\Jimmy")), "idempotent");
     }
 }

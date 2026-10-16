@@ -141,6 +141,12 @@ om.json`, champ `api_key`) et `${VAR}` dans
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 16 octobre 2026 (soir) : release **v0.2.0** publiée (tag `v0.2.0`,
+  CI verte) — extinction/redémarrage du PC sur accord (`system_power`, délai
+  15 s, 3 modes dans Permissions), interrupteur voix dans l'onglet Voix
+  (principal/micro/synthèse), webcam à la demande (`webcam_capture`,
+  1/min max, image mémoire seule) ; protocole Gemini natif et avatar
+  Thibault repris dans la release ; site redéployé (bannière v0.2.0).
 - État au 14 octobre 2026 (soir) : release **v0.1.9** publiée (`4c114b0`,
   tag `v0.1.9`, CI verte) — Jimy va au bout de ses tâches (pièges 125-128) ;
   site jimy-agent.me redéployé (bannière v0.1.9) et son état commité (`890af80`).

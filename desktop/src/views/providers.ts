@@ -30,6 +30,7 @@ const PROTOCOLS: [string, string][] = [
   ["chat", "chat — /chat/completions"],
   ["responses", "responses — /responses"],
   ["messages", "messages — /messages (Claude)"],
+  ["google", "google — Gemini natif (:generateContent)"],
 ];
 
 export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElement {

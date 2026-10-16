@@ -336,6 +336,12 @@ impl LlmClient {
                 headers.insert("x-api-key", value);
             }
             headers.insert("anthropic-version", reqwest::header::HeaderValue::from_static("2023-06-01"));
+        } else if protocol == Protocol::Google {
+            // Même logique pour Gemini (`@ai-sdk/google`) : `x-goog-api-key`
+            // en plus de `Bearer` couvre à la fois OpenCode Go et l'API Google.
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&provider.api_key) {
+                headers.insert("x-goog-api-key", value);
+            }
         }
         headers
     }
@@ -358,8 +364,9 @@ impl LlmClient {
     }
 
     /// Format d'API du modèle : celui imposé par la configuration du
-    /// fournisseur, sinon celui du catalogue public (OpenCode Go), sinon Chat.
-    /// Mis en cache par couple fournisseur/modèle.
+    /// fournisseur, sinon l'indice connu par famille (`from_model_hint`),
+    /// sinon celui du catalogue public (OpenCode Go), sinon Chat. Mis en cache
+    /// par couple fournisseur/modèle.
     async fn protocol(&self, provider: &ProviderRuntime, model: &str) -> Protocol {
         let key = (provider.id.clone(), model.to_string());
         if let Some(known) = self.protocols.lock().ok().and_then(|p| p.get(&key).copied()) {
@@ -368,11 +375,16 @@ impl LlmClient {
         let protocol = if let Some(fixed) = provider.protocol {
             fixed
         } else if provider.id == PROVIDER_OPENCODE {
-            let Ok(catalog) = self.catalog_models(false).await else { return Protocol::Chat };
-            let npm = catalog.get(model).and_then(|e| e.pointer("/provider/npm")).and_then(|v| v.as_str());
-            let from_catalog = Protocol::from_npm(npm);
-            log::info!("[llm] « {model} » : format {}", from_catalog.label());
-            from_catalog
+            if let Some(hinted) = Protocol::from_model_hint(model) {
+                log::info!("[llm] « {model} » : format {}", hinted.label());
+                hinted
+            } else {
+                let Ok(catalog) = self.catalog_models(false).await else { return Protocol::Chat };
+                let npm = catalog.get(model).and_then(|e| e.pointer("/provider/npm")).and_then(|v| v.as_str());
+                let from_catalog = Protocol::from_npm(npm);
+                log::info!("[llm] « {model} » : format {}", from_catalog.label());
+                from_catalog
+            }
         } else {
             Protocol::Chat
         };
@@ -393,10 +405,11 @@ impl LlmClient {
     async fn send(
         &self,
         model: &str,
+        stream: bool,
         build: &(dyn Fn(Protocol) -> serde_json::Value + Sync),
         timeout: Option<Duration>,
     ) -> Result<(Protocol, reqwest::Response)> {
-        self.send_on(None, model, build, timeout).await
+        self.send_on(None, model, stream, build, timeout).await
     }
 
     /// [`send`] avec fournisseur imposé (bibliothèque qui parcourt un
@@ -405,6 +418,7 @@ impl LlmClient {
         &self,
         provider: Option<&str>,
         model: &str,
+        stream: bool,
         build: &(dyn Fn(Protocol) -> serde_json::Value + Sync),
         timeout: Option<Duration>,
     ) -> Result<(Protocol, reqwest::Response)> {
@@ -449,10 +463,17 @@ impl LlmClient {
             }
             // L'abonnement Claude peut rafraîchir son jeton ici : les en-têtes
             // s'obtiennent en async.
+            let endpoint = protocol.endpoint(model, stream);
+            // Gemini natif : autre base que `zen/go/v1` (voir `google_base`).
+            let base = if protocol == Protocol::Google {
+                self.google_base(&provider).await
+            } else {
+                provider.base_url.clone()
+            };
             let headers = self.request_headers(&provider, protocol).await?;
             let mut request = self
                 .http
-                .post(format!("{}{}", provider.base_url, protocol.path()))
+                .post(format!("{base}{endpoint}"))
                 .headers(headers)
                 .json(&body);
             if let Some(timeout) = timeout {
@@ -493,16 +514,21 @@ impl LlmClient {
             // Modèle qui refuse `temperature` (14 octobre) : un seul renvoi
             // sans, dans le même format — pas un réessai pareil, pas une
             // boucle (une fois, puis le verdict normal s'applique).
+            let has_temp = body.as_object().is_some_and(|o| o.contains_key("temperature"))
+                || body.pointer("/generationConfig/temperature").is_some();
             if !raw.contains("ModelProtocolUnsupported")
                 && is_temperature_rejection(status.as_u16(), &raw)
-                && body.as_object().is_some_and(|o| o.contains_key("temperature"))
+                && has_temp
             {
                 body.as_object_mut().map(|o| o.remove("temperature"));
+                if let Some(gen) = body.get_mut("generationConfig").and_then(|g| g.as_object_mut()) {
+                    gen.remove("temperature");
+                }
                 log::warn!("[llm] {model} refuse `temperature` : nouvel essai sans");
                 let headers = self.request_headers(&provider, protocol).await?;
                 let mut retry = self
                     .http
-                    .post(format!("{}{}", provider.base_url, protocol.path()))
+                    .post(format!("{base}{endpoint}"))
                     .headers(headers)
                     .json(&body);
                 if let Some(timeout) = timeout {
@@ -539,7 +565,7 @@ impl LlmClient {
         let build = |p: Protocol| p.body(model, messages, tools, temperature, max_tokens, false);
         let provider = self.runtime_for(model);
         let service = provider.label;
-        let (protocol, response) = self.send(model, &build, None).await?;
+        let (protocol, response) = self.send(model, false, &build, None).await?;
         let raw = response.text().await.map_err(|e| Error::provider(&service, e.to_string()))?;
         let value: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| Error::provider(&service, format!("réponse illisible : {e}")))?;
@@ -555,7 +581,7 @@ impl LlmClient {
     /// `on_delta` au fil de la génération — sans cet affichage en direct, le
     /// chat montre des pointillés pendant toute la génération (appel réel
     /// mesuré à 22 s de silence). Le **raisonnement caché** est compté mais
-    /// jamais passé à `on_delta`. Chaque format a ses événements ; les trois
+    /// jamais passé à `on_delta`. Chaque format a ses événements ; tous
     /// envoient des lignes `data: {…}` (voir [`StreamAccum`]).
     pub async fn chat_stream(
         &self,
@@ -569,7 +595,7 @@ impl LlmClient {
         let build = |p: Protocol| p.body(model, messages, tools, temperature, max_tokens, true);
         let provider = self.runtime_for(model);
         let service = provider.label;
-        let (protocol, mut response) = self.send(model, &build, None).await?;
+        let (protocol, mut response) = self.send(model, true, &build, None).await?;
 
         let mut acc = StreamAccum::new(protocol);
         let started = std::time::Instant::now();
@@ -759,11 +785,9 @@ impl LlmClient {
         Some(input.iter().any(|kind| kind == "image"))
     }
 
-    /// Entrées du fournisseur `opencode-go` dans le catalogue public.
-    async fn catalog_models(
-        &self,
-        refresh: bool,
-    ) -> Result<HashMap<String, serde_json::Value>> {
+    /// Entrée du fournisseur `opencode-go` dans le catalogue public (modèles,
+    /// mais aussi `api` : l'URL du protocole natif, voir [`Self::google_base`]).
+    async fn catalog_root(&self, refresh: bool) -> Result<serde_json::Value> {
         let cached = if refresh {
             None
         } else {
@@ -772,8 +796,8 @@ impl LlmClient {
                 .ok()
                 .and_then(|c| c.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(3600)).map(|(_, v)| v.clone()))
         };
-        let catalog = match cached {
-            Some(value) => value,
+        match cached {
+            Some(value) => Ok(value),
             None => {
                 let value: serde_json::Value = self
                     .http
@@ -791,14 +815,38 @@ impl LlmClient {
                 if let Ok(mut slot) = self.catalog.lock() {
                     *slot = Some((std::time::Instant::now(), ours.clone()));
                 }
-                ours
+                Ok(ours)
             }
-        };
+        }
+    }
+
+    /// Entrées du fournisseur `opencode-go` dans le catalogue public.
+    async fn catalog_models(
+        &self,
+        refresh: bool,
+    ) -> Result<HashMap<String, serde_json::Value>> {
+        let catalog = self.catalog_root(refresh).await?;
         Ok(catalog
             .get("models")
             .and_then(|m| m.as_object())
             .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default())
+    }
+
+    /// URL de base du protocole Gemini natif. Mesuré le 15 octobre : le
+    /// `:generateContent` ne vit pas sur `zen/go/v1` (404, page du site) mais
+    /// sur l'URL qu'annonce le catalogue public (champ `api` du fournisseur,
+    /// `inference/go/v1`). Repli : la base configurée (un proxy peut router
+    /// pareil, et une config sans catalogue ne doit pas casser).
+    async fn google_base(&self, provider: &ProviderRuntime) -> String {
+        if provider.id == PROVIDER_OPENCODE {
+            if let Ok(catalog) = self.catalog_root(false).await {
+                if let Some(api) = catalog.get("api").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+                    return api.trim().trim_end_matches('/').to_string();
+                }
+            }
+        }
+        provider.base_url.clone()
     }
 
     /// Teste un modèle avec **les mêmes conditions que Jimmy** : une requête
@@ -854,7 +902,7 @@ impl LlmClient {
             .map(|p| p.label)
             .unwrap_or_else(|| "modèle".into());
         let outcome = async {
-            let (protocol, response) = self.send_on(provider, model, &build, Some(Duration::from_secs(40))).await?;
+            let (protocol, response) = self.send_on(provider, model, false, &build, Some(Duration::from_secs(40))).await?;
             let raw = response.text().await.map_err(|e| Error::provider(&service, e.to_string()))?;
             let value: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| Error::provider(&service, format!("réponse illisible : {e}")))?;

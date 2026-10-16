@@ -245,13 +245,13 @@ mod tests {
         let mut perms = Permissions::default();
         perms.write.granted = true;
         perms.read.granted = true;
-        ToolContext {
-            workspace: std::env::temp_dir(),
-            permissions: Arc::new(RwLock::new(perms)),
-            memory: Arc::new(crate::memory::MemoryStore::new(db)),
-            skills: Arc::new(crate::skills::SkillStore::new(skills_dir).unwrap()),
+        ToolContext::with_empty_images(
+            std::env::temp_dir(),
+            Arc::new(RwLock::new(perms)),
+            Arc::new(crate::memory::MemoryStore::new(db)),
+            Arc::new(crate::skills::SkillStore::new(skills_dir).unwrap()),
             vault,
-        }
+        )
     }
 
     /// Régression : « mémoire » n'est pas un chemin, la liste de chemins

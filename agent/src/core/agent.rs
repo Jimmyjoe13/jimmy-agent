@@ -73,15 +73,15 @@ impl AgentDeps {
     }
 
     pub fn tool_context(&self, settings: &Settings) -> ToolContext {
-        ToolContext {
-            workspace: std::path::PathBuf::from(&settings.workspace),
-            permissions: Arc::new(std::sync::RwLock::new(
+        ToolContext::with_empty_images(
+            std::path::PathBuf::from(&settings.workspace),
+            Arc::new(std::sync::RwLock::new(
                 crate::permissions::Permissions::default(),
             )),
-            memory: self.memory.clone(),
-            skills: self.skills.clone(),
-            vault: self.vault.clone(),
-        }
+            self.memory.clone(),
+            self.skills.clone(),
+            self.vault.clone(),
+        )
     }
 }
 
@@ -624,6 +624,18 @@ pub async fn run_with_images(
             deps.history
                 .append(&session_id, &Message::tool_result(call.id, call.name, text))
                 .catch();
+            // Webcam (Lot 2) : la photo capturée par `webcam_capture` rejoint
+            // le prochain appel au modèle comme image (même pipeline que
+            // `screen.rs`), puis le panier est vidé — nettoyage automatique :
+            // rien ne persiste au-delà du tour, ni sur disque ni en mémoire.
+            if let Ok(mut pending) = tool_context.pending_images.lock() {
+                if !pending.is_empty() {
+                    let images: Vec<crate::core::types::Image> = std::mem::take(&mut *pending);
+                    let note = webcam_note(&images).unwrap_or_else(|| "(Photo webcam jointe.)".to_string());
+                    messages.push(Message::user_with_images(note.clone(), images));
+                    deps.history.append(&session_id, &Message::user(note)).catch();
+                }
+            }
         }
 
         // Cas réel du 4 octobre : 20 lectures en 11 étapes, « j'ai tout lu, rien
@@ -1183,6 +1195,17 @@ fn screen_note(images: &[crate::core::types::Image]) -> Option<String> {
     Some(format!("(Capture d'écran jointe : {}.)", labels.join(", ")))
 }
 
+/// Note gardée dans l'historique à la place d'une photo webcam : l'image ne
+/// vit qu'en mémoire le temps du tour (nettoyage automatique), seule cette
+/// note persiste — pas de stockage qui grossit, pas de jetons brûlés ensuite.
+fn webcam_note(images: &[crate::core::types::Image]) -> Option<String> {
+    if images.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = images.iter().map(|image| format!("« {} »", image.label)).collect();
+    Some(format!("(Photo webcam jointe : {}.)", labels.join(", ")))
+}
+
 /// Budget d'une demande : étapes et durée totale. Au premier plan, celui des
 /// réglages (25 en vocal) et 10 min — même durée qu'à l'écrit : MiMo met 3 à
 /// 4 minutes pour une tâche de code, 180 s coupaient avant l'écriture. En
@@ -1232,7 +1255,7 @@ fn is_read_tool(name: &str) -> bool {
         name,
         "read_file" | "search_files" | "list_directory" | "vault_read" | "vault_search" | "search_memory"
             | "list_skills" | "read_skill" | "mcp_list_tools" | "http_request"
-            | "system_info" | "process_list" | "window_list"
+            | "system_info" | "process_list" | "window_list" | "webcam_list"
     )
 }
 

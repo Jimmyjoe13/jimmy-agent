@@ -27,6 +27,7 @@ pub mod tasks;
 pub mod tools;
 pub mod update;
 pub mod voice;
+pub mod webcam;
 
 use std::sync::{Arc, RwLock};
 
@@ -708,21 +709,24 @@ impl App {
         Some(pending.remove(index).1)
     }
 
-    /// Images d'une demande : la capture du bouton (`capture_id`) ou, sur
-    /// phrase explicite (« regarde mon écran »), une capture prise maintenant.
-    /// Renvoie aussi une note à ajouter à la demande quand l'image ne peut pas
-    /// partir (capture impossible, modèle qui ne lit pas les images) : Jimmy le
-    /// dit au lieu de répondre à l'aveugle.
+    /// Images d'une demande : la capture du bouton (`capture_id`), la webcam
+    /// sur phrase explicite (« regarde-moi »), ou l'écran sur phrase explicite
+    /// (« regarde mon écran »). Au plus une image d'écran + une photo webcam
+    /// par demande (jetons) ; la webcam reste à **1/minute** et ne vit qu'en
+    /// mémoire. Renvoie aussi une note quand l'image ne peut pas partir.
     pub async fn images_for(
         &self,
         request: &str,
         capture_id: Option<&str>,
         voice: bool,
     ) -> (Vec<core::types::Image>, Option<String>) {
-        let image = match capture_id.and_then(|id| self.take_capture(id)) {
-            Some(image) => image,
-            None if screen::wants_screen(request) => match self.capture_screen().await {
-                Ok(capture) => capture.image,
+        let mut images: Vec<core::types::Image> = Vec::new();
+        let mut notes: Vec<String> = Vec::new();
+        if let Some(image) = capture_id.and_then(|id| self.take_capture(id)) {
+            images.push(image);
+        } else if screen::wants_screen(request) {
+            match self.capture_screen().await {
+                Ok(capture) => images.push(capture.image),
                 Err(error) => {
                     log::warn!("[vision] capture impossible : {error}");
                     return (
@@ -730,9 +734,33 @@ impl App {
                         Some(format!("(La capture de la fenêtre demandée a échoué : {error}. Dis-le simplement.)")),
                     );
                 }
-            },
-            None => return (Vec::new(), None),
-        };
+            }
+        }
+        // Webcam à la demande seulement, throttlée à 1/minute (le refus dit
+        // dans combien de temps réessayer, sans allumer la caméra).
+        if webcam::wants_webcam(request) {
+            let photo = tokio::task::spawn_blocking(|| webcam::capture_photo(None)).await;
+            match photo {
+                Ok(Ok(capture)) => images.push(capture.image),
+                Ok(Err(error)) => {
+                    let message = error.to_string();
+                    if message.contains("1 photo webcam par minute") {
+                        notes.push(format!("({message})"));
+                    } else {
+                        log::warn!("[webcam] photo impossible : {message}");
+                        notes.push(format!("(La photo webcam demandée a échoué : {message}. Dis-le simplement.)"));
+                    }
+                }
+                Err(join) => {
+                    log::warn!("[webcam] capture interrompue : {join}");
+                    notes.push("(La photo webcam demandée a été interrompue. Dis-le simplement.)".to_string());
+                }
+            }
+        }
+        if images.is_empty() {
+            let note = notes.into_iter().next();
+            return (Vec::new(), note);
+        }
         let settings = self.settings();
         let model = if voice && !settings.llm.voice_model.trim().is_empty() {
             settings.llm.voice_model.trim().to_string()
@@ -741,16 +769,23 @@ impl App {
         };
         if self.llm.accepts_images(&model).await == Some(false) {
             log::warn!("[vision] le modèle {model} ne lit pas les images : capture non envoyée");
-            return (
-                Vec::new(),
-                Some(format!(
-                    "(L'utilisateur voulait te montrer sa fenêtre « {} », mais le modèle {model} ne lit pas les images : \
-                     dis-le-lui et propose d'en choisir un qui les lit, comme MiMo ou Muse Spark.)",
-                    image.label
-                )),
+            let labels: Vec<String> = images.iter().map(|i| format!("« {} »", i.label)).collect();
+            let mut note = format!(
+                "(L'utilisateur voulait te montrer {} mais le modèle {model} ne lit pas les images : \
+                 dis-le-lui et propose d'en choisir un qui les lit, comme MiMo ou Muse Spark.)",
+                labels.join(" et ")
             );
+            if let Some(extra) = notes.into_iter().next() {
+                note.push(' ');
+                note.push_str(&extra);
+            }
+            return (Vec::new(), Some(note));
         }
-        (vec![image], None)
+        // Au plus 2 images par demande (écran + webcam) : au-delà, les jetons
+        // brûlent sans aider.
+        images.truncate(2);
+        let note = notes.into_iter().next();
+        (images, note)
     }
 
     /// Connecte les serveurs MCP configurés et ajoute leurs outils au
@@ -820,19 +855,30 @@ impl App {
         let path = self.permissions_path();
         if let Ok(raw) = std::fs::read_to_string(&path) {
             if let Ok(mut parsed) = serde_json::from_str::<Permissions>(&raw) {
-                // Installations existantes (lot 4) : les nouveaux interdits
-                // rejoignent le fichier, accords et interdits perso intacts.
-                if parsed.merge_default_denies() {
+                // Installations existantes (lot 4 + v2) : les nouveaux interdits
+                // rejoignent le fichier, et le dossier du vault ouvert est
+                // autorisé en lecture (`read_file`, `list_directory`).
+                let mut changed = parsed.merge_default_denies();
+                if let Some(vault) = &self.vault {
+                    if parsed.allow_vault_read(vault.root()) {
+                        changed = true;
+                    }
+                }
+                if changed {
                     if let Ok(json) = serde_json::to_string_pretty(&parsed) {
                         if std::fs::write(&path, json).is_ok() {
-                            log::info!("[permissions] interdits par défaut complétés ({})", path.display());
+                            log::info!("[permissions] permissions mises à jour ({})", path.display());
                         }
                     }
                 }
                 return parsed;
             }
         }
-        Permissions::default()
+        let mut fresh = Permissions::default();
+        if let Some(vault) = &self.vault {
+            fresh.allow_vault_read(vault.root());
+        }
+        fresh
     }
 
     pub fn save_permissions(&self, permissions: &Permissions) -> Result<()> {
@@ -1294,10 +1340,11 @@ impl App {
 
     /// Dit `text` à voix haute (synthèse + lecture) et l'affiche dans la bulle
     /// de l'avatar. Utilisé par l'écoute **et** par le chat. Ne renvoie pas
-    /// d'erreur : une voix indisponible ne doit pas faire échouer la réponse.
+    /// d'erreur : une voix désactivée ou indisponible ne doit pas faire échouer
+    /// la réponse (le texte reste à l'écran et dans la bulle).
     pub async fn speak(&self, text: &str) {
         let settings = self.settings();
-        if !settings.tts.enabled {
+        if !settings.voice.enabled || !settings.tts.enabled {
             return;
         }
         let cleaned = providers::tts::prepare_for_speech(text);
@@ -1468,13 +1515,13 @@ impl App {
 
     pub fn tool_context(&self) -> tools::ToolContext {
         let settings = self.settings();
-        tools::ToolContext {
-            workspace: std::path::PathBuf::from(&settings.workspace),
-            permissions: self.permissions(),
-            memory: self.memory.clone(),
-            skills: self.skills.clone(),
-            vault: self.vault.clone(),
-        }
+        tools::ToolContext::with_empty_images(
+            std::path::PathBuf::from(&settings.workspace),
+            self.permissions(),
+            self.memory.clone(),
+            self.skills.clone(),
+            self.vault.clone(),
+        )
     }
 
     pub fn deps(&self) -> Arc<core::agent::AgentDeps> {

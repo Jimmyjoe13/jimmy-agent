@@ -24,6 +24,7 @@ uuid.workspace = true
 chrono.workspace = true
 cpal.workspace = true
 hound.workspace = true
+nokhwa.workspace = true
 xcap = "0.9.8"
 base64 = "0.23.1"
 # Licences des skins premium : vérification Ed25519 hors ligne. `ring` est

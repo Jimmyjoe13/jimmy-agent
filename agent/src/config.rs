@@ -50,7 +50,7 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub api_key: String,
     /// Format d'API : `"chat"`, `"responses"` ou `"messages"`. `None` =
-    /// automatique (catalogue OpenCode Go, puis essai des trois formats).
+    /// automatique (catalogue OpenCode Go, puis essai des quatre formats).
     #[serde(default)]
     pub protocol: Option<String>,
     /// La clé voyage dans l'en-tête `x-api-key` (Anthropic) au lieu de

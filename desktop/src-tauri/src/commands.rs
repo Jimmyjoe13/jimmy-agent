@@ -358,6 +358,18 @@ pub async fn approval_revoke(state: State<'_, AppState>, key: String) -> std::re
     Ok(state.app.approvals.revoke(&key))
 }
 
+/// Accorde directement une portée permanente depuis les Paramètres (ex.
+/// « Toujours autoriser » sur l'extinction de l'ordinateur).
+#[tauri::command]
+pub async fn approval_grant(state: State<'_, AppState>, key: String) -> std::result::Result<(), String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("portée vide".into());
+    }
+    state.app.approvals.grant_always(key);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sessions(state: State<'_, AppState>) -> std::result::Result<Vec<serde_json::Value>, String> {
     let list = state.app.history.sessions(50).map_err(err)?;
@@ -1090,6 +1102,40 @@ pub async fn voice_stop(
     remember_listening(&state.app, false);
     let _ = state.app.avatar.set_state(AvatarState::Idle, "").await;
     Ok(())
+}
+
+/// Active ou coupe la voix à la volée, sans redémarrage.
+///
+/// `scope` : `voice` (interrupteur principal : écoute + synthèse),
+/// `listen` (micro/VAD et reconnaissance) ou `speech` (synthèse TTS).
+/// À la coupure, l'écoute en cours est arrêtée aussitôt et toute lecture
+/// vocale en cours est interrompue ; la boucle de l'agent n'est pas touchée
+/// (les réponses continuent à l'écran et dans la bulle). L'état est persisté
+/// dans `config.json` et respecté au prochain démarrage.
+#[tauri::command]
+pub async fn voice_set_enabled(
+    state: State<'_, AppState>,
+    runtime: State<'_, Arc<VoiceRuntime>>,
+    scope: String,
+    enabled: bool,
+) -> std::result::Result<serde_json::Value, String> {
+    let app = state.app.clone();
+    let mut settings = app.settings();
+    let (stop_listening, interrupt_speech) =
+        jimmy_agent::voice::apply_enabled(&mut settings, &scope, enabled).map_err(err)?;
+    if stop_listening {
+        runtime.stop();
+        let _ = app.avatar.set_state(AvatarState::Idle, "").await;
+    }
+    if interrupt_speech {
+        jimmy_agent::voice::interrupt_playback();
+    }
+    app.save_settings(settings.clone()).map_err(err)?;
+    Ok(serde_json::json!({
+        "voice": settings.voice.enabled,
+        "listen": settings.stt.enabled,
+        "speech": settings.tts.enabled,
+    }))
 }
 
 /// État réel de l'écoute. L'interface s'y fie au lieu de garder son propre

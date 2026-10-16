@@ -38,11 +38,41 @@ pub struct ToolContext {
     pub memory: Arc<MemoryStore>,
     pub skills: Arc<crate::skills::SkillStore>,
     pub vault: Option<Arc<crate::memory::vault::Vault>>,
+    /// Images capturées par `webcam_capture` pendant ce tour : la boucle de
+    /// l'agent les joint au prochain appel au modèle (message utilisateur avec
+    /// images) puis les oublie. Jamais sur disque, jamais dans l'historique —
+    /// nettoyage automatique à chaque tour.
+    pub pending_images: Arc<std::sync::Mutex<Vec<crate::core::types::Image>>>,
+}
+
+impl ToolContext {
+    /// Crée un contexte avec un panier d'images vide (un par demande).
+    pub fn with_empty_images(
+        workspace: PathBuf,
+        permissions: Arc<RwLock<Permissions>>,
+        memory: Arc<MemoryStore>,
+        skills: Arc<crate::skills::SkillStore>,
+        vault: Option<Arc<crate::memory::vault::Vault>>,
+    ) -> Self {
+        ToolContext {
+            workspace,
+            permissions,
+            memory,
+            skills,
+            vault,
+            pending_images: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
 }
 
 impl ToolContext {
     pub fn check(&self, capability: Capability, target: &str) -> Result<()> {
-        let permissions = self.permissions.read().map_err(|_| Error::Tool("permissions illisibles".into()))?;
+        let mut permissions = self.permissions.read().map_err(|_| Error::Tool("permissions illisibles".into()))?.clone();
+        if capability == Capability::Read {
+            if let Some(vault) = &self.vault {
+                permissions.allow_vault_read(vault.root());
+            }
+        }
         permissions.check(capability, target)
     }
 
@@ -154,6 +184,9 @@ impl ToolRegistry {
         self.register(Arc::new(sys::WindowList));
         self.register(Arc::new(sys::WindowFocus));
         self.register(Arc::new(sys::AppOpen));
+        self.register(Arc::new(sys::SystemPower));
+        self.register(Arc::new(sys::WebcamCapture));
+        self.register(Arc::new(sys::WebcamList));
         self.register(Arc::new(net::HttpRequest::new(deps.http.clone())));
         self.register(Arc::new(net::OpenBrowser));
         self.register(Arc::new(knowledge::SearchMemory));
@@ -185,7 +218,7 @@ mod registry_tests {
         let deps = ToolDeps { http: reqwest::Client::new() };
         let registry = ToolRegistry::new();
         registry.register_defaults(&deps);
-        for name in ["system_info", "process_list", "open_path", "process_kill", "window_list", "window_focus", "app_open", "run_command", "read_file"] {
+        for name in ["system_info", "process_list", "open_path", "process_kill", "window_list", "window_focus", "app_open", "system_power", "webcam_capture", "webcam_list", "run_command", "read_file"] {
             assert!(registry.get(name).is_some(), "{name} doit être enregistré");
         }
     }

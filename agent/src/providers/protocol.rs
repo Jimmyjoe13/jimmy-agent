@@ -1,6 +1,6 @@
 //! Formats d'appel des modèles (« protocoles »).
 //!
-//! OpenCode Go sert chaque modèle dans **un seul** des trois formats d'API ; le
+//! OpenCode Go sert chaque modèle dans **un seul** des quatre formats d'API ; le
 //! catalogue public l'indique par le paquet SDK du modèle (`provider.npm`) :
 //!
 //! * absent ou `@ai-sdk/openai-compatible` → [`Protocol::Chat`]
@@ -8,11 +8,14 @@
 //! * `@ai-sdk/openai` → [`Protocol::Responses`] (`/responses`) : Muse Spark,
 //!   GPT, Grok ;
 //! * `@ai-sdk/anthropic` → [`Protocol::Messages`] (`/messages`) : Qwen 3.7+,
-//!   MiniMax.
+//!   MiniMax ;
+//! * `@ai-sdk/google` → [`Protocol::Google`] (Gemini natif,
+//!   `/models/{model}:generateContent` et `:streamGenerateContent?alt=sse`) :
+//!   Gemini 4 Argon et suivants.
 //!
 //! Un modèle appelé dans un autre format répond `400 ModelProtocolUnsupported`
 //! (cas réel du 6 octobre : Muse Spark 1.3 muet dans Jimmy, qui ne parlait que
-//! Chat). Ce module traduit la conversation de Jimmy ([`Message`],
+//! Chat ; cas du 15 octobre : Gemini 4 Argon, 4e protocole). Ce module traduit la conversation de Jimmy ([`Message`],
 //! [`ToolSpec`]) vers chaque format, et chaque réponse — entière ou en flux
 //! SSE — vers une [`LlmReply`].
 //!
@@ -35,19 +38,26 @@ pub enum Protocol {
     Chat,
     Responses,
     Messages,
+    Google,
 }
 
 impl Protocol {
     /// Tous les formats, dans l'ordre d'essai quand le catalogue ne dit rien.
-    pub const ALL: [Protocol; 3] = [Protocol::Chat, Protocol::Responses, Protocol::Messages];
+    pub const ALL: [Protocol; 4] = [
+        Protocol::Chat,
+        Protocol::Responses,
+        Protocol::Messages,
+        Protocol::Google,
+    ];
 
     /// Format d'après le réglage du fournisseur (`"chat"`, `"responses"`,
-    /// `"messages"`) ; `None` pour toute autre valeur (= automatique).
+    /// `"messages"`, `"google"`) ; `None` pour toute autre valeur (= automatique).
     pub fn from_label(label: &str) -> Option<Protocol> {
         match label {
             "chat" => Some(Protocol::Chat),
             "responses" => Some(Protocol::Responses),
             "messages" => Some(Protocol::Messages),
+            "google" => Some(Protocol::Google),
             _ => None,
         }
     }
@@ -57,16 +67,67 @@ impl Protocol {
         match npm {
             Some("@ai-sdk/openai") => Protocol::Responses,
             Some("@ai-sdk/anthropic") => Protocol::Messages,
+            Some("@ai-sdk/google") => Protocol::Google,
             _ => Protocol::Chat,
         }
     }
 
+    /// Format connu à froid par l'identifiant du modèle (chez OpenCode Go).
+    /// Évite de bloquer le premier appel du matin pendant 30 s sur le
+    /// téléchargement du catalogue (`models.opencode.ai/api.json`) puis 2 s
+    /// sur un `400 ModelProtocolUnsupported` (cas réel du 15 octobre 06:07 sur
+    /// `muse-spark-1.3-contributor`).
+    pub fn from_model_hint(model: &str) -> Option<Protocol> {
+        let low = model.trim().to_lowercase();
+        let short = low.rsplit('/').next().unwrap_or(&low);
+        if short.starts_with("muse-spark")
+            || short.starts_with("gpt-5")
+            || short.starts_with("grok-")
+            || short.starts_with("o3")
+            || short.starts_with("o4")
+        {
+            return Some(Protocol::Responses);
+        }
+        if short.starts_with("gemini-") {
+            return Some(Protocol::Google);
+        }
+        if short.starts_with("claude-")
+            || short.starts_with("qwen3.7")
+            || short.starts_with("qwen3.8")
+            || short.starts_with("minimax")
+        {
+            return Some(Protocol::Messages);
+        }
+        if short.starts_with("glm-")
+            || short.starts_with("mimo-")
+            || short.starts_with("deepseek-")
+            || short.starts_with("longcat-")
+            || short.starts_with("kimi-")
+            || short.starts_with("space-bunny")
+            || short.starts_with("step-")
+            || short.starts_with("cat-jam")
+        {
+            return Some(Protocol::Chat);
+        }
+        None
+    }
+
     /// Chemin de l'API, à ajouter à `base_url`.
-    pub fn path(self) -> &'static str {
+    /// Gemini (`Google`) inclut le nom du modèle dans l'URL et distingue le
+    /// chemin en flux (`:streamGenerateContent?alt=sse`) du chemin entier
+    /// (`:generateContent`).
+    pub fn endpoint(self, model: &str, stream: bool) -> String {
         match self {
-            Protocol::Chat => "/chat/completions",
-            Protocol::Responses => "/responses",
-            Protocol::Messages => "/messages",
+            Protocol::Chat => "/chat/completions".into(),
+            Protocol::Responses => "/responses".into(),
+            Protocol::Messages => "/messages".into(),
+            Protocol::Google => {
+                if stream {
+                    format!("/models/{model}:streamGenerateContent?alt=sse")
+                } else {
+                    format!("/models/{model}:generateContent")
+                }
+            }
         }
     }
 
@@ -75,6 +136,7 @@ impl Protocol {
             Protocol::Chat => "chat",
             Protocol::Responses => "responses",
             Protocol::Messages => "messages",
+            Protocol::Google => "google",
         }
     }
 
@@ -88,10 +150,14 @@ impl Protocol {
         max_tokens: u32,
         stream: bool,
     ) -> Value {
+        if self == Protocol::Google {
+            return google_body(messages, tools, temperature, max_tokens);
+        }
         let mut body = match self {
             Protocol::Chat => chat_body(model, messages, tools, max_tokens),
             Protocol::Responses => responses_body(model, messages, tools, max_tokens),
             Protocol::Messages => messages_body(model, messages, tools, max_tokens),
+            Protocol::Google => unreachable!(),
         };
         body["stream"] = json!(stream);
         if let Some(temp) = temperature {
@@ -106,6 +172,7 @@ impl Protocol {
             Protocol::Chat => parse_chat(value),
             Protocol::Responses => parse_responses(value),
             Protocol::Messages => parse_messages(value),
+            Protocol::Google => parse_google(value),
         }
     }
 }
@@ -698,6 +765,301 @@ impl MessagesAccum {
     }
 }
 
+// ── Google (`/models/{model}:generateContent`, Gemini) ───────────────────────
+
+static THOUGHT_SIGNATURES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn remember_thought_signature(call_id: &str, sig: &str) {
+    if call_id.is_empty() || sig.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = THOUGHT_SIGNATURES.lock() {
+        if map.len() >= 512 {
+            map.clear();
+        }
+        map.insert(call_id.to_string(), sig.to_string());
+    }
+}
+
+fn recall_thought_signature(call_id: &str) -> Option<String> {
+    THOUGHT_SIGNATURES.lock().ok().and_then(|map| map.get(call_id).cloned())
+}
+
+/// Ajoute une partie (`part`) au dernier tour s'il a le même rôle (`"user"`
+/// ou `"model"`). Gemini exige l'alternance des rôles dans `contents`.
+fn push_google_part(out: &mut Vec<Value>, role: &str, part: Value) {
+    if let Some(last) = out.last_mut().filter(|m| m["role"] == role) {
+        if let Some(parts) = last["parts"].as_array_mut() {
+            parts.push(part);
+            return;
+        }
+    }
+    out.push(json!({ "role": role, "parts": [part] }));
+}
+
+/// Nettoie un schéma JSON pour `FunctionDeclaration.parameters` de Gemini
+/// (sous-ensemble OpenAPI 3.0 qui refuse `additionalProperties` et `$schema`).
+fn google_schema(value: &Value) -> Value {
+    let Some(obj) = value.as_object() else {
+        return value.clone();
+    };
+    let mut out = serde_json::Map::new();
+    for (k, v) in obj {
+        match k.as_str() {
+            "additionalProperties" | "$schema" => continue,
+            "required" => {
+                if v.as_array().is_some_and(|a| !a.is_empty()) {
+                    out.insert(k.clone(), v.clone());
+                }
+            }
+            "properties" => {
+                if let Some(props) = v.as_object() {
+                    let cleaned: serde_json::Map<String, Value> = props
+                        .iter()
+                        .map(|(pk, pv)| (pk.clone(), google_schema(pv)))
+                        .collect();
+                    if !cleaned.is_empty() {
+                        out.insert(k.clone(), Value::Object(cleaned));
+                    }
+                }
+            }
+            "items" => {
+                out.insert(k.clone(), google_schema(v));
+            }
+            _ => {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+/// Retrouve le nom de l'outil d'un résultat (`Role::Tool`), par le champ
+/// `name` du message ou par son `tool_call_id` dans les tours précédents.
+fn tool_name_for(message: &Message, messages: &[Message]) -> String {
+    if let Some(name) = message.name.as_deref().filter(|n| !n.is_empty()) {
+        return name.to_string();
+    }
+    let Some(id) = message.tool_call_id.as_deref() else {
+        return "tool".into();
+    };
+    messages
+        .iter()
+        .flat_map(tool_calls)
+        .find(|c| c.id == id)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "tool".into())
+}
+
+fn google_body(
+    messages: &[Message],
+    tools: &[ToolSpec],
+    temperature: Option<f32>,
+    max_tokens: u32,
+) -> Value {
+    let mut contents: Vec<Value> = Vec::new();
+    for message in messages {
+        match message.role {
+            Role::System => {}
+            Role::User => {
+                for image in &message.images {
+                    push_google_part(
+                        &mut contents,
+                        "user",
+                        json!({
+                            "inlineData": {
+                                "mimeType": image.media_type,
+                                "data": image.base64,
+                            }
+                        }),
+                    );
+                }
+                if !message.content.trim().is_empty() {
+                    push_google_part(&mut contents, "user", json!({ "text": message.content }));
+                }
+            }
+            Role::Assistant => {
+                if !message.content.trim().is_empty() {
+                    push_google_part(&mut contents, "model", json!({ "text": message.content }));
+                }
+                for call in tool_calls(message) {
+                    let args = if call.arguments.is_object() {
+                        call.arguments.clone()
+                    } else {
+                        json!({})
+                    };
+                    let mut part = json!({
+                        "functionCall": {
+                            "name": call.name,
+                            "args": args,
+                        }
+                    });
+                    if let Some(sig) = recall_thought_signature(&call.id) {
+                        part["thoughtSignature"] = json!(sig);
+                    }
+                    push_google_part(&mut contents, "model", part);
+                }
+            }
+            Role::Tool => {
+                let name = tool_name_for(message, messages);
+                let result = if message.content.is_empty() {
+                    "(vide)"
+                } else {
+                    message.content.as_str()
+                };
+                push_google_part(
+                    &mut contents,
+                    "user",
+                    json!({
+                        "functionResponse": {
+                            "name": name,
+                            "response": { "result": result },
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    let mut gen_config = json!({ "maxOutputTokens": max_tokens });
+    if let Some(temp) = temperature {
+        gen_config["temperature"] = json!(temp);
+    }
+    let mut body = json!({
+        "contents": contents,
+        "generationConfig": gen_config,
+    });
+    let system = system_text(messages);
+    if !system.is_empty() {
+        body["systemInstruction"] = json!({ "parts": [{ "text": system }] });
+    }
+    if !tools.is_empty() {
+        let decls: Vec<Value> = tools
+            .iter()
+            .map(|t| {
+                let mut decl = json!({
+                    "name": t.name,
+                    "description": t.description,
+                });
+                let schema = google_schema(&t.parameters);
+                if schema.get("properties").is_some() {
+                    decl["parameters"] = schema;
+                }
+                decl
+            })
+            .collect();
+        body["tools"] = json!([{ "functionDeclarations": decls }]);
+        body["toolConfig"] = json!({ "functionCallingConfig": { "mode": "AUTO" } });
+    }
+    body
+}
+
+fn parse_google_call(part: &Value, next_index: usize) -> Option<ToolCall> {
+    let fc = part.get("functionCall")?;
+    let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let id = fc
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| format!("call_{next_index}"));
+    if let Some(sig) = part
+        .get("thoughtSignature")
+        .or_else(|| part.get("thought_signature"))
+        .and_then(|v| v.as_str())
+    {
+        remember_thought_signature(&id, sig);
+    }
+    let arguments = fc
+        .get("args")
+        .cloned()
+        .filter(|a| a.is_object())
+        .unwrap_or_else(|| json!({}));
+    Some(ToolCall { id, name, arguments })
+}
+
+fn parse_google_usage(value: &Value, current: &mut Usage) {
+    let Some(u) = value.get("usageMetadata").filter(|u| !u.is_null()) else {
+        return;
+    };
+    if let Some(p) = u.get("promptTokenCount").and_then(|v| v.as_u64()) {
+        current.prompt_tokens = p;
+    }
+    let candidates = u.get("candidatesTokenCount").and_then(|v| v.as_u64()).unwrap_or(0);
+    let thoughts = u.get("thoughtsTokenCount").and_then(|v| v.as_u64()).unwrap_or(0);
+    if candidates + thoughts > 0 {
+        current.completion_tokens = candidates + thoughts;
+    }
+}
+
+fn parse_google(value: &Value) -> Result<LlmReply> {
+    if let Some(message) = server_error(value) {
+        return Err(Error::provider(SERVICE, message));
+    }
+    let mut acc = GoogleAccum::default();
+    acc.ingest(value, &mut |_| {});
+    acc.into_reply()
+}
+
+/// Flux Gemini (`:streamGenerateContent?alt=sse`) : chaque événement `data:`
+/// est un objet `GenerateContentResponse` portant des `parts` (texte visible,
+/// raisonnement marqué `thought: true`, ou `functionCall`) et `usageMetadata`.
+#[derive(Default)]
+pub struct GoogleAccum {
+    content: String,
+    tool_calls: Vec<ToolCall>,
+    finish_reason: Option<String>,
+    usage: Usage,
+    error: Option<String>,
+}
+
+impl GoogleAccum {
+    fn ingest(&mut self, value: &Value, on_delta: &mut dyn FnMut(&str)) {
+        if let Some(message) = server_error(value) {
+            self.error = Some(message);
+            return;
+        }
+        parse_google_usage(value, &mut self.usage);
+        for cand in value.get("candidates").and_then(|c| c.as_array()).into_iter().flatten() {
+            if let Some(reason) = cand.get("finishReason").and_then(|r| r.as_str()).filter(|r| !r.is_empty()) {
+                self.finish_reason = Some(reason.to_string());
+            }
+            let parts = cand.pointer("/content/parts").and_then(|p| p.as_array());
+            for part in parts.into_iter().flatten() {
+                let is_thought = part.get("thought").and_then(|t| t.as_bool()).unwrap_or(false);
+                if !is_thought {
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str()).filter(|t| !t.is_empty()) {
+                        self.content.push_str(text);
+                        on_delta(text);
+                    }
+                }
+                if let Some(call) = parse_google_call(part, self.tool_calls.len() + 1) {
+                    self.tool_calls.push(call);
+                }
+            }
+        }
+    }
+
+    fn into_reply(self) -> Result<LlmReply> {
+        if let Some(message) = self.error {
+            return Err(Error::provider(SERVICE, message));
+        }
+        if self.finish_reason.is_none() && self.content.is_empty() && self.tool_calls.is_empty() {
+            return Err(interrupted());
+        }
+        Ok(LlmReply {
+            truncated: self.finish_reason.as_deref() == Some("MAX_TOKENS"),
+            content: self.content,
+            tool_calls: self.tool_calls,
+            usage: self.usage,
+        })
+    }
+}
+
 // ── Flux, tous formats ───────────────────────────────────────────────────────
 
 /// Assembleur de flux SSE du format utilisé.
@@ -705,6 +1067,7 @@ pub enum StreamAccum {
     Chat(ChatAccum),
     Responses(ResponsesAccum),
     Messages(MessagesAccum),
+    Google(GoogleAccum),
 }
 
 impl StreamAccum {
@@ -713,6 +1076,7 @@ impl StreamAccum {
             Protocol::Chat => StreamAccum::Chat(ChatAccum::default()),
             Protocol::Responses => StreamAccum::Responses(ResponsesAccum::default()),
             Protocol::Messages => StreamAccum::Messages(MessagesAccum::default()),
+            Protocol::Google => StreamAccum::Google(GoogleAccum::default()),
         }
     }
 
@@ -723,6 +1087,7 @@ impl StreamAccum {
             StreamAccum::Chat(acc) => acc.ingest(value, on_delta),
             StreamAccum::Responses(acc) => acc.ingest(value, on_delta),
             StreamAccum::Messages(acc) => acc.ingest(value, on_delta),
+            StreamAccum::Google(acc) => acc.ingest(value, on_delta),
         }
     }
 
@@ -731,6 +1096,7 @@ impl StreamAccum {
             StreamAccum::Chat(acc) => acc.into_reply(),
             StreamAccum::Responses(acc) => acc.into_reply(),
             StreamAccum::Messages(acc) => acc.into_reply(),
+            StreamAccum::Google(acc) => acc.into_reply(),
         }
     }
 }
@@ -776,8 +1142,14 @@ mod tests {
     fn le_format_vient_du_catalogue() {
         assert_eq!(Protocol::from_npm(Some("@ai-sdk/openai")), Protocol::Responses);
         assert_eq!(Protocol::from_npm(Some("@ai-sdk/anthropic")), Protocol::Messages);
+        assert_eq!(Protocol::from_npm(Some("@ai-sdk/google")), Protocol::Google);
         assert_eq!(Protocol::from_npm(Some("@ai-sdk/openai-compatible")), Protocol::Chat);
         assert_eq!(Protocol::from_npm(None), Protocol::Chat);
+        assert_eq!(Protocol::from_model_hint("muse-spark-1.3-contributor"), Some(Protocol::Responses));
+        assert_eq!(Protocol::from_model_hint("gemini-4-argon-contributor"), Some(Protocol::Google));
+        assert_eq!(Protocol::from_model_hint("qwen3.8-flash"), Some(Protocol::Messages));
+        assert_eq!(Protocol::from_model_hint("longcat-2.5-preview-free"), Some(Protocol::Chat));
+        assert_eq!(Protocol::from_model_hint("modele-inconnu-2026"), None);
     }
 
     // ── Chat ──
@@ -996,5 +1368,50 @@ mod tests {
         assert_eq!(reply.tool_calls[0].arguments["ville"], "Paris");
         assert_eq!((reply.usage.prompt_tokens, reply.usage.completion_tokens), (331, 48));
         assert!(!reply.truncated);
+    }
+
+    // ── Google (Gemini) ──
+
+    #[test]
+    fn google_la_conversation_et_le_flux_sont_assembles() {
+        let (reply, seen) = feed(
+            Protocol::Google,
+            &[
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Thinking...","thought":true}]}}]}"#,
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Je regarde."}]}}]}"#,
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_g1","name":"heure","args":{"ville":"Paris"}},"thoughtSignature":"sig_abc"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":18,"thoughtsTokenCount":30}}"#,
+            ],
+        );
+        let reply = reply.unwrap();
+        assert_eq!(seen, "Je regarde.", "le raisonnement thought=true n'est pas affiché");
+        assert_eq!(reply.content, "Je regarde.");
+        assert_eq!(reply.tool_calls.len(), 1);
+        assert_eq!(reply.tool_calls[0].id, "call_g1");
+        assert_eq!(reply.tool_calls[0].name, "heure");
+        assert_eq!(reply.tool_calls[0].arguments["ville"], "Paris");
+        assert_eq!((reply.usage.prompt_tokens, reply.usage.completion_tokens), (120, 48));
+        assert!(!reply.truncated);
+
+        // Tour suivant : la signature de raisonnement et la réponse d'outil repartent.
+        let mut assistant = Message::assistant(reply.content);
+        assistant.tool_calls = Some(reply.tool_calls);
+        let messages = vec![
+            Message::system("Tu es Jimmy."),
+            Message::user("Quelle heure est-il ?"),
+            assistant,
+            Message::tool_result("call_g1", "heure", "14:32"),
+        ];
+        let body = Protocol::Google.body("gemini-4-argon-contributor", &messages, &heure(), None, 1024, true);
+        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "Tu es Jimmy.");
+        assert!(body.get("stream").is_none(), "Gemini n'accepte pas stream dans le corps");
+        let contents = body["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(contents[1]["parts"][1]["functionCall"]["name"], "heure");
+        assert_eq!(contents[1]["parts"][1]["thoughtSignature"], "sig_abc");
+        assert_eq!(contents[2]["role"], "user");
+        assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "heure");
+        assert_eq!(contents[2]["parts"][0]["functionResponse"]["response"]["result"], "14:32");
     }
 }

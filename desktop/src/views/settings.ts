@@ -331,9 +331,30 @@ export function settingsView(ctx: AppContext): HTMLElement {
   async function openPermissions() {
     const permissions = await guard(() => api.getPermissions(), "permissions");
     if (!permissions) return;
-    // Accords « Toujours autoriser » donnés depuis les cartes du Chat.
+    // Accords « Toujours autoriser » donnés depuis les cartes du Chat ou d'ici.
     const always = (await guard(() => api.approvalsAlways(), "autorisations permanentes")) ?? [];
     const alwaysList = h("div", { class: "always-list" });
+    const POWER_SCOPE = "machine : éteindre ou redémarrer l'ordinateur";
+    const POWER_DENIES = ["shutdown*", "reboot*", "halt*", "poweroff*"];
+    const powerSelect = h(
+      "select",
+      { class: "field power-mode-select" },
+      h("option", { value: "ask" }, "Demander à chaque fois (carte ou « confirmé » vocal)"),
+      h("option", { value: "always" }, "Toujours autoriser (sans redemander)"),
+      h("option", { value: "deny" }, "Interdit (jamais)"),
+    ) as HTMLSelectElement;
+
+    const currentPowerMode = (): "ask" | "always" | "deny" => {
+      if (permissions.execute.deny_commands.some((m) => POWER_DENIES.includes(m.toLowerCase()))) {
+        return "deny";
+      }
+      if (always.includes(POWER_SCOPE)) {
+        return "always";
+      }
+      return "ask";
+    };
+    powerSelect.value = currentPowerMode();
+
     const renderAlways = () => {
       if (!always.length) {
         mount(alwaysList, h("p", { class: "note" }, "Aucune : chaque action qui t'engage demande une carte."));
@@ -353,6 +374,8 @@ export function settingsView(ctx: AppContext): HTMLElement {
                 onclick: async () => {
                   if (!(await attempt(() => api.approvalRevoke(key), "autorisation"))) return;
                   always.splice(always.indexOf(key), 1);
+                  powerSelect.value = currentPowerMode();
+                  webcamSelect.value = currentWebcamMode();
                   renderAlways();
                   toast("Autorisation retirée : la carte reviendra");
                 },
@@ -364,6 +387,89 @@ export function settingsView(ctx: AppContext): HTMLElement {
       );
     };
     renderAlways();
+
+    powerSelect.addEventListener("change", async () => {
+      const mode = powerSelect.value as "ask" | "always" | "deny";
+      permissions.execute.deny_commands = permissions.execute.deny_commands.filter(
+        (m) => !POWER_DENIES.includes(m.toLowerCase()),
+      );
+      if (mode === "deny") {
+        permissions.execute.deny_commands.push("shutdown*");
+      }
+      if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
+      if (mode === "always") {
+        if (!always.includes(POWER_SCOPE)) {
+          if (!(await attempt(() => api.approvalGrant(POWER_SCOPE), "autorisation"))) return;
+          always.push(POWER_SCOPE);
+          always.sort();
+        }
+      } else if (always.includes(POWER_SCOPE)) {
+        if (!(await attempt(() => api.approvalRevoke(POWER_SCOPE), "autorisation"))) return;
+        always.splice(always.indexOf(POWER_SCOPE), 1);
+      }
+      renderAlways();
+      toast(
+        mode === "always"
+          ? "Extinction autorisée sans redemander"
+          : mode === "deny"
+            ? "Extinction de l'ordinateur interdite"
+            : "Jimy demandera ton accord avant d'éteindre",
+      );
+    });
+
+    // Webcam (Lot 2) : même modèle à 3 modes que l'extinction — carte par
+    // défaut (vie privée), « Toujours » sans redemander, « Interdit » via
+    // `deny_commands` (`webcam*`).
+    const WEBCAM_SCOPE = "machine : voir via la webcam";
+    const WEBCAM_DENIES = ["webcam*"];
+    const webcamSelect = h(
+      "select",
+      { class: "field webcam-mode-select" },
+      h("option", { value: "ask" }, "Demander à chaque fois (carte ou « confirmé » vocal)"),
+      h("option", { value: "always" }, "Toujours autoriser (sans redemander)"),
+      h("option", { value: "deny" }, "Interdit (jamais)"),
+    ) as HTMLSelectElement;
+
+    const currentWebcamMode = (): "ask" | "always" | "deny" => {
+      if (permissions.execute.deny_commands.some((m) => WEBCAM_DENIES.includes(m.toLowerCase()))) {
+        return "deny";
+      }
+      if (always.includes(WEBCAM_SCOPE)) {
+        return "always";
+      }
+      return "ask";
+    };
+    webcamSelect.value = currentWebcamMode();
+
+    webcamSelect.addEventListener("change", async () => {
+      const mode = webcamSelect.value as "ask" | "always" | "deny";
+      permissions.execute.deny_commands = permissions.execute.deny_commands.filter(
+        (m) => !WEBCAM_DENIES.includes(m.toLowerCase()),
+      );
+      if (mode === "deny") {
+        permissions.execute.deny_commands.push("webcam*");
+      }
+      if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
+      if (mode === "always") {
+        if (!always.includes(WEBCAM_SCOPE)) {
+          if (!(await attempt(() => api.approvalGrant(WEBCAM_SCOPE), "autorisation"))) return;
+          always.push(WEBCAM_SCOPE);
+          always.sort();
+        }
+      } else if (always.includes(WEBCAM_SCOPE)) {
+        if (!(await attempt(() => api.approvalRevoke(WEBCAM_SCOPE), "autorisation"))) return;
+        always.splice(always.indexOf(WEBCAM_SCOPE), 1);
+      }
+      powerSelect.value = currentPowerMode();
+      renderAlways();
+      toast(
+        mode === "always"
+          ? "Webcam autorisée sans redemander (1 photo/min max)"
+          : mode === "deny"
+            ? "Webcam interdite : Jimy ne pourra pas voir"
+            : "Jimy demandera ton accord avant chaque photo (1/min max)",
+      );
+    });
     const keys: (keyof typeof permissions)[] = ["read", "write", "execute", "network"];
     const rows = keys.map((key) => {
       const rule = permissions[key];
@@ -421,6 +527,21 @@ export function settingsView(ctx: AppContext): HTMLElement {
           },
           "Enregistrer",
         ),
+      ),
+      card(
+        "Contrôle de l'ordinateur",
+        h(
+          "p",
+          { class: "note" },
+          "Choisis si Jimy peut éteindre, redémarrer ou mettre en veille ton PC (avec un délai de sécurité de 15 s avant l'arrêt pour te laisser le temps d'annuler).",
+        ),
+        field("Éteindre, redémarrer ou mettre en veille", powerSelect),
+        h(
+          "p",
+          { class: "note" },
+          "Webcam : Jimy ne voit que si tu le lui demandes explicitement (« regarde-moi »), 1 photo par minute au plus, image jointe au modèle puis oubliée (jamais sur disque).",
+        ),
+        field("Voir via la webcam", webcamSelect),
       ),
       card(
         "Autorisations permanentes",

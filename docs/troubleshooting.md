@@ -217,10 +217,10 @@ le profil utilisateur.
 
 ### Un modèle ne répond pas : « ModelProtocolUnsupported »
 
-OpenCode Go sert chaque modèle dans un seul format d'API (Chat, Responses ou
-Messages). Jimmy le lit dans le catalogue et le journal l'indique :
+OpenCode Go sert chaque modèle dans un seul format d'API (Chat, Responses,
+Messages ou Google natif). Jimmy le lit dans le catalogue et le journal l'indique :
 `[llm] « muse-spark-1.3-contributor » : format responses`. Si un modèle hors
-catalogue refuse le format essayé, Jimmy essaie les deux autres et retient le
+catalogue refuse le format essayé, Jimmy essaie les trois autres et retient le
 bon (`format … retenu après essai`). Un échec qui persiste : relancer
 **Tester** dans la bibliothèque de modèles, puis vérifier le format avec
 `cargo test -p jimmy-agent --test protocols '--' --ignored` (HANDOFF, piège 78).

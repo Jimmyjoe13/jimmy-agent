@@ -234,7 +234,9 @@ impl Tool for OpenPath {
     }
 }
 
-/// Ce PID peut-il être arrêté ? Jimmy lui-même et le système, jamais.
+/// Ce PID ou ce nom de processus peut-il être arrêté ? Jimmy lui-même, son
+/// avatar Godot, ses serveurs vocaux et le système, jamais (cas réel du
+/// 14 octobre : « ferme toutes les fenêtres » a tué l'avatar Godot).
 pub fn kill_refused(pid: u32, own: u32) -> Option<String> {
     if pid == own {
         return Some("REFUSÉ : Jimmy ne s'arrête pas lui-même.".into());
@@ -243,6 +245,17 @@ pub fn kill_refused(pid: u32, own: u32) -> Option<String> {
         return Some(format!("REFUSÉ : le PID {pid} appartient au système."));
     }
     None
+}
+
+/// Le nom d'image appartient-il aux processus vitaux de Jimy (avatar Godot,
+/// serveurs Whisper, binaire principal) ?
+pub fn is_protected_process_name(name: &str) -> bool {
+    let low = name.trim().to_lowercase();
+    let stem = low.rsplit(['\\', '/']).next().unwrap_or(&low).trim_end_matches(".exe");
+    stem == "jimmy"
+        || stem == "jimy"
+        || stem.starts_with("godot")
+        || stem.starts_with("whisper-server")
 }
 
 pub struct ProcessKill;
@@ -276,6 +289,16 @@ impl Tool for ProcessKill {
             let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Some(refus) = kill_refused(pid, std::process::id()) {
                 return Err(Error::Tool(refus));
+            }
+            if let Ok(procs) = list_processes().await {
+                if let Some(found) = procs.iter().find(|p| p.pid == pid) {
+                    if is_protected_process_name(&found.name) {
+                        return Err(Error::Tool(format!(
+                            "REFUSÉ : le processus {} ({pid}) appartient à Jimy (avatar ou voix) et ne doit pas être arrêté.",
+                            found.name
+                        )));
+                    }
+                }
             }
             ctx.check(Capability::Execute, &format!("process_kill {pid}"))?;
             // PID validé (entier) : aucune interpolation de texte du modèle.
@@ -321,9 +344,26 @@ pub struct WinEntry {
     pub title: String,
 }
 
+/// La fenêtre appartient-elle à Jimy ou à son avatar Godot ? Écartée de
+/// `window_list` (comme dans `screen::pick`) pour que « ferme toutes les
+/// fenêtres » ne cible jamais l'avatar ni la fenêtre de Jimy.
+pub fn is_own_window(w: &WinEntry, own_pid: u32) -> bool {
+    if w.pid == own_pid {
+        return true;
+    }
+    let app = w.app.trim().to_lowercase();
+    let title = w.title.trim().to_lowercase();
+    app.contains("godot")
+        || app == "jimmy"
+        || app == "jimy"
+        || title == "jimy avatar"
+        || title == "jimmy avatar"
+}
+
 /// Sortie PowerShell (`Id`, tabulation, nom, tabulation, titre) : les lignes
-/// sans titre ne sont pas des fenêtres.
+/// sans titre et les fenêtres propres à Jimy/Godot sont écartées.
 fn parse_window_list_win(text: &str) -> Vec<WinEntry> {
+    let own = std::process::id();
     let mut out = Vec::new();
     for line in text.lines() {
         let mut parts = line.split('\t');
@@ -333,7 +373,10 @@ fn parse_window_list_win(text: &str) -> Vec<WinEntry> {
                 continue;
             }
             if let Ok(pid) = pid.trim().parse::<u32>() {
-                out.push(WinEntry { pid, app: app.trim().to_string(), title });
+                let entry = WinEntry { pid, app: app.trim().to_string(), title };
+                if !is_own_window(&entry, own) {
+                    out.push(entry);
+                }
             }
         }
     }
@@ -342,6 +385,7 @@ fn parse_window_list_win(text: &str) -> Vec<WinEntry> {
 
 /// Sortie `osascript` (`pid, nom` par ligne, macOS, non vérifié sans Mac).
 fn parse_window_list_mac(text: &str) -> Vec<WinEntry> {
+    let own = std::process::id();
     let mut out = Vec::new();
     for line in text.lines() {
         let mut parts = line.splitn(2, ',');
@@ -351,7 +395,10 @@ fn parse_window_list_mac(text: &str) -> Vec<WinEntry> {
                 continue;
             }
             if let Ok(pid) = pid.trim().parse::<u32>() {
-                out.push(WinEntry { pid, app: app.clone(), title: app });
+                let entry = WinEntry { pid, app: app.clone(), title: app };
+                if !is_own_window(&entry, own) {
+                    out.push(entry);
+                }
             }
         }
     }
@@ -536,6 +583,261 @@ impl Tool for AppOpen {
     }
 }
 
+/// Délai par défaut avant extinction ou redémarrage (en secondes) : laisse à
+/// l'utilisateur le temps de dire « STOP » ou d'annuler (`cancel`).
+pub const DEFAULT_POWER_DELAY_SECS: u64 = 15;
+
+/// Construit la commande système fixe (programme + arguments + résumé) pour
+/// `system_power`, sans aucune interpolation de texte libre du modèle.
+pub fn power_command(os: &str, action: &str, delay_secs: u64) -> Result<(&'static str, Vec<String>, String)> {
+    let kind = match action.trim().to_lowercase().as_str() {
+        "shutdown" | "poweroff" | "halt" => "shutdown",
+        "restart" | "reboot" => "restart",
+        "sleep" | "suspend" => "sleep",
+        "cancel" | "abort" => "cancel",
+        other => {
+            return Err(Error::Tool(format!(
+                "action inconnue « {other} » — attendues : shutdown, restart, sleep, cancel"
+            )))
+        }
+    };
+    let delay = delay_secs.clamp(5, 3600);
+    match (os, kind) {
+        ("windows", "shutdown") => Ok((
+            "shutdown.exe",
+            vec!["/s".into(), "/t".into(), delay.to_string()],
+            format!("extinction de l'ordinateur programmée dans {delay} s (`system_power` avec `action: \"cancel\"` pour annuler)"),
+        )),
+        ("windows", "restart") => Ok((
+            "shutdown.exe",
+            vec!["/r".into(), "/t".into(), delay.to_string()],
+            format!("redémarrage de l'ordinateur programmé dans {delay} s (`system_power` avec `action: \"cancel\"` pour annuler)"),
+        )),
+        ("windows", "cancel") => Ok((
+            "shutdown.exe",
+            vec!["/a".into()],
+            "extinction ou redémarrage annulé".into(),
+        )),
+        ("windows", "sleep") => Ok((
+            "rundll32.exe",
+            vec!["powrprof.dll,SetSuspendState".into(), "0,1,0".into()],
+            "mise en veille de l'ordinateur demandée".into(),
+        )),
+        ("macos", "shutdown") => Ok((
+            "shutdown",
+            vec!["-h".into(), "+1".into()],
+            "extinction de l'ordinateur programmée dans 1 min".into(),
+        )),
+        ("macos", "restart") => Ok((
+            "shutdown",
+            vec!["-r".into(), "+1".into()],
+            "redémarrage de l'ordinateur programmé dans 1 min".into(),
+        )),
+        ("macos", "cancel") => Ok((
+            "killall",
+            vec!["shutdown".into()],
+            "extinction ou redémarrage annulé".into(),
+        )),
+        ("macos", "sleep") => Ok((
+            "pmset",
+            vec!["sleepnow".into()],
+            "mise en veille de l'ordinateur demandée".into(),
+        )),
+        (_, "shutdown") => Ok((
+            "shutdown",
+            vec!["-h".into(), "+1".into()],
+            "extinction de l'ordinateur programmée dans 1 min".into(),
+        )),
+        (_, "restart") => Ok((
+            "shutdown",
+            vec!["-r".into(), "+1".into()],
+            "redémarrage de l'ordinateur programmé dans 1 min".into(),
+        )),
+        (_, "cancel") => Ok((
+            "shutdown",
+            vec!["-c".into()],
+            "extinction ou redémarrage annulé".into(),
+        )),
+        (_, "sleep") => Ok((
+            "systemctl",
+            vec!["suspend".into()],
+            "mise en veille de l'ordinateur demandée".into(),
+        )),
+        _ => unreachable!(),
+    }
+}
+
+pub struct SystemPower;
+
+impl Tool for SystemPower {
+    fn name(&self) -> &str {
+        "system_power"
+    }
+    fn description(&self) -> &str {
+        "Éteint (`shutdown`), redémarre (`restart`) ou met en veille (`sleep`) l'ordinateur, ou annule un arrêt programmé (`cancel`). \
+         Appelle directement cet outil quand l'utilisateur demande d'éteindre ou redémarrer son PC : c'est l'application qui demande l'accord (carte ou « confirmé » vocal) sauf s'il l'a autorisé en permanence dans les Paramètres."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "action": {
+                    "type": "string",
+                    "enum": ["shutdown", "restart", "sleep", "cancel"],
+                    "description": "Action : « shutdown » (éteindre), « restart » (redémarrer), « sleep » (mettre en veille), « cancel » (annuler un arrêt en cours)."
+                },
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "Délai en secondes avant arrêt ou redémarrage (défaut 15, minimum 5)."
+                }
+            }),
+            &["action"],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Execute
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            let action = arg_str(args, "action").ok_or_else(|| Error::Tool("« action » manquant".into()))?;
+            let delay = arg_u64(args, "delay_seconds", DEFAULT_POWER_DELAY_SECS);
+            let (program, cmd_args, summary) = power_command(std::env::consts::OS, &action, delay)?;
+            // Si l'utilisateur a placé `shutdown*` dans `deny_commands` (mode
+            // « Interdit » dans Paramètres → Permissions), ce contrôle refuse
+            // avant toute exécution (sauf `cancel` qui reste toujours libre).
+            if !action.eq_ignore_ascii_case("cancel") && !action.eq_ignore_ascii_case("abort") {
+                ctx.check(Capability::Execute, &format!("shutdown {action}"))?;
+            }
+            ctx.check(Capability::Execute, &format!("system_power {action}"))?;
+            let mut command = tokio::process::Command::new(program);
+            command
+                .args(&cmd_args)
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true);
+            #[cfg(windows)]
+            {
+                command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            let output = tokio::time::timeout(std::time::Duration::from_secs(15), command.output())
+                .await
+                .map_err(|_| Error::Timeout)?
+                .map_err(|e| Error::Tool(format!("action système impossible : {e}")))?;
+            if output.status.success() {
+                Ok(summary)
+            } else {
+                let code = output.status.code().unwrap_or(-1);
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                Err(Error::Tool(format!(
+                    "action refusée par le système (code {code}) : {stderr}"
+                )))
+            }
+        })
+    }
+}
+
+/// Voir l'utilisateur via sa webcam, **à sa demande seulement** (Lot 2).
+/// La photo part au modèle avec le tour (comme `screen.rs`) : jamais sur
+/// disque, jamais dans l'historique — seule une note y figure. **1 capture
+/// par minute au plus** (`webcam::MIN_INTERVAL`) et nettoyage automatique
+/// (panier d'images vidé à chaque tour) : pas de stockage qui grossit, pas
+/// de jetons brûlés en boucle.
+pub struct WebcamCapture;
+
+impl Tool for WebcamCapture {
+    fn name(&self) -> &str {
+        "webcam_capture"
+    }
+    fn description(&self) -> &str {
+        "Prend une photo avec la webcam pour voir l'utilisateur ou ce qu'il montre (« regarde-moi », « tu me vois ? »). \
+         À n'appeler que si l'utilisateur l'a explicitement demandé : c'est l'application qui demande son accord (carte ou « confirmé » vocal) sauf s'il l'a autorisé en permanence. \
+         1 photo par minute au plus ; l'image est jointe au modèle puis oubliée (jamais sur disque)."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "camera": {"type": "integer", "description": "Index de la caméra (voir `webcam_list`, défaut 0)."},
+                "detail": {"type": "string", "description": "Ce que l'utilisateur veut montrer (visage, objet tenu) : une phrase pour le contexte."}
+            }),
+            &[],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Execute
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            let camera = args.get("camera").and_then(|v| v.as_u64()).map(|n| n as u32);
+            let detail = arg_str(args, "detail").unwrap_or_default();
+            // Mode « Interdit » (Paramètres → Permissions) : refus sec avant
+            // d'allumer la caméra.
+            ctx.check(Capability::Execute, "webcam_capture")?;
+            let capture = tokio::task::spawn_blocking(move || crate::webcam::capture_photo(camera))
+                .await
+                .map_err(|e| Error::Tool(format!("capture webcam interrompue : {e}")))??;
+            let label = if detail.trim().is_empty() {
+                capture.camera.clone()
+            } else {
+                format!("{} — {}", capture.camera, detail.trim())
+            };
+            let summary = format!(
+                "photo webcam prise ({} — {}×{}, {} Ko) : image jointe au modèle pour ce tour, puis oubliée (jamais sur disque). Décris ce que tu vois en une phrase, sans jargon technique.",
+                label,
+                capture.width,
+                capture.height,
+                capture.image.base64.len() * 3 / 4 / 1024
+            );
+            // Panier du tour : la boucle de l'agent joint ces images au
+            // prochain appel au modèle, puis les oublie (nettoyage auto).
+            if let Ok(mut pending) = ctx.pending_images.lock() {
+                pending.clear();
+                let mut image = capture.image.clone();
+                image.label = label.chars().take(120).collect();
+                pending.push(image);
+            }
+            log::info!("[webcam] {}", summary);
+            Ok(summary)
+        })
+    }
+}
+
+/// Liste les webcams vues par le système, sans allumer de caméra.
+pub struct WebcamList;
+
+impl Tool for WebcamList {
+    fn name(&self) -> &str {
+        "webcam_list"
+    }
+    fn description(&self) -> &str {
+        "Liste les webcams disponibles (index + nom), sans les allumer. À appeler avant `webcam_capture` quand l'index est inconnu."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(serde_json::json!({}), &[])
+    }
+    fn capability(&self) -> Capability {
+        Capability::Read
+    }
+    fn call<'a>(
+        &'a self,
+        _args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            ctx.check_granted(Capability::Read, "webcams")?;
+            let cameras = tokio::task::spawn_blocking(crate::webcam::list_cameras)
+                .await
+                .map_err(|e| Error::Tool(format!("liste des webcams interrompue : {e}")))?;
+            Ok(crate::webcam::format_cameras(&cameras))
+        })
+    }
+}
+
 #[cfg(test)]
 mod sys_tests {
     use super::*;
@@ -604,5 +906,45 @@ mod sys_tests {
             assert!(kill_refused(protege, moi).is_some(), "PID {protege} protégé");
         }
         assert_eq!(kill_refused(1234, moi), None);
+        // Avatar Godot et Whisper protégés par leur nom d'image (14 octobre).
+        for vital in ["Godot_v4.5.1-stable_win64.exe", "whisper-server.exe", "jimmy.exe"] {
+            assert!(is_protected_process_name(vital), "{vital} doit être protégé");
+        }
+        assert!(!is_protected_process_name("chrome.exe"));
+        assert!(!is_protected_process_name("notepad.exe"));
+    }
+
+    #[test]
+    fn fenetre_avatar_godot_ecartee_de_window_list() {
+        let win = "1234\tnotepad\tSans titre - Bloc-notes\n4321\tGodot_v4.5.1-stable_win64\tJimy Avatar\n5678\tchrome\tGoogle Chrome\n";
+        let fenetres = parse_window_list_win(win);
+        assert_eq!(fenetres.len(), 2, "Godot ne doit pas remonter dans window_list");
+        assert!(fenetres.iter().all(|w| !w.app.to_lowercase().contains("godot")));
+    }
+
+    #[test]
+    fn system_power_construit_les_commandes_avec_delai_de_securite() {
+        let (prog, args, msg) = power_command("windows", "shutdown", 15).expect("shutdown win");
+        assert_eq!(prog, "shutdown.exe");
+        assert_eq!(args, vec!["/s", "/t", "15"]);
+        assert!(msg.contains("15 s"));
+
+        // Un délai 0 est relevé à 5 s minimum pour laisser le temps d'annuler.
+        let (_, args_min, _) = power_command("windows", "restart", 0).expect("restart min");
+        assert_eq!(args_min, vec!["/r", "/t", "5"]);
+
+        let (prog_c, args_c, _) = power_command("windows", "cancel", 15).expect("cancel");
+        assert_eq!(prog_c, "shutdown.exe");
+        assert_eq!(args_c, vec!["/a"]);
+
+        assert!(power_command("windows", "explode", 15).is_err());
+    }
+
+    #[test]
+    fn webcam_outils_branches_et_capabilites() {
+        assert_eq!(WebcamCapture.spec().name, "webcam_capture");
+        assert_eq!(WebcamCapture.capability(), Capability::Execute);
+        assert_eq!(WebcamList.spec().name, "webcam_list");
+        assert_eq!(WebcamList.capability(), Capability::Read);
     }
 }

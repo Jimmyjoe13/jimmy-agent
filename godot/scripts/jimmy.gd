@@ -150,7 +150,8 @@ const SKIN_OPTIONAL_COLOR_KEYS := ["outline", "eye_ring", "rim"]
 ## et l'œil est procédural, fixé sur la tête. Clés du JSON :
 ##   `model_height` (hauteur à l'écran), `model_lift` (lévitation),
 ##   `model_min_y` (bas du modèle, unités du .glb), `head_center` et
-##   `eye_offset` (unités du .glb), `eye_radius`, `companion`.
+##   `eye_offset` (unités du .glb), `eye_radius`, `two_eyes` (visage humain :
+##   deux yeux symétriques au lieu de l'œil unique), `companion`.
 ## Liseré lumineux additif posé sur le modèle (aucun fichier : code GLSL).
 const RIM_SHADER := """
 shader_type spatial;
@@ -1304,10 +1305,17 @@ func _build_model_body() -> void:
 		_rig.add_child(attach)
 		attach.bone_name = "head"
 		var head_origin := _rig.get_bone_global_rest(_rig_ids["head"]).origin
-		_build_model_eye(p, attach, center + eye_offset - head_origin, 1.0)
+		var at := center + eye_offset - head_origin
+		_build_model_eye(p, attach, at, 1.0)
+		# Visage humain (Thibault) : deux yeux symétriques, pas un œil unique.
+		if float(p.get("two_eyes", 0.0)) > 0.0:
+			_build_model_eye(p, attach, Vector3(-at.x, at.y, at.z), 1.0)
 		_gaze_scale = 0.8
 	else:
 		_build_model_eye(p, _head, eye_offset * s, s)
+		if float(p.get("two_eyes", 0.0)) > 0.0:
+			var at2 := eye_offset * s
+			_build_model_eye(p, _head, Vector3(-at2.x, at2.y, at2.z), s)
 	_build_data_bits(p)
 	if p.has("aura"):
 		_build_aura(p, model_pos + center * s, s)

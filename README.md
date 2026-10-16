@@ -424,7 +424,7 @@ automatiquement après l'onboarding). Sinon Jimy reste muet : c'est voulu.
 
 Les tests qui consultent de vrais services sont marqués `#[ignore]` et se
 lancent explicitement (le `'--'` entre guillemets : PowerShell avale le `--`
-nu), par exemple les trois formats d'API des modèles :
+nu), par exemple les quatre formats d'API des modèles :
 
 ```powershell
 .\scripts\with-msvc.ps1 cargo test -p jimmy-agent --test protocols '--' --ignored --nocapture

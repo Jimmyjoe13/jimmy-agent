@@ -99,10 +99,11 @@ pub async fn learn(
     // coupure passe ; sur une réponse illisible, 800 ms suffisent.
     for attempt in 1..=2 {
         let mut wait = SHORT_RETRY;
-        // `max_tokens` : 400 coupait un JSON bien formaté d'un ```fence``` en
-        // pleine trajectoire incidente (observé à l'usage, 12:50) — la tâche
-        // est de fond, 800 ne retardent jamais une réponse.
-        match llm.complete(settings.memory_model(), &messages, 800, None).await {
+        // `max_tokens` : un modèle à raisonnement caché (`muse-spark`…)
+        // consomme 1 000 à 2 500 jetons en `reasoning` avant d'écrire sa
+        // réponse : à 800, le texte arrivait vide (`""`, 16 échecs les 14-15
+        // octobre). Aligné sur `recap::MAX_TOKENS` (4 000, piège 70).
+        match llm.complete(settings.memory_model(), &messages, LEARN_MAX_TOKENS, None).await {
             Ok(raw) => {
                 if extract_json_array(&raw).is_some() {
                     return parse(&raw);
@@ -132,6 +133,10 @@ pub async fn learn(
     }
     Vec::new()
 }
+
+/// Plafond de jetons pour l'extraction mémoire : couvre le raisonnement caché
+/// (`muse-spark`, piège 70) + le tableau JSON.
+pub const LEARN_MAX_TOKENS: u32 = 4_000;
 
 /// Délai avant la seconde tentative d'extraction.
 pub const SHORT_RETRY: std::time::Duration = std::time::Duration::from_millis(800);
@@ -223,6 +228,7 @@ mod tests {
     fn delais_reseau_et_court() {
         assert_eq!(SHORT_RETRY, std::time::Duration::from_millis(800));
         assert_eq!(NETWORK_RETRY, std::time::Duration::from_secs(5));
+        assert!(LEARN_MAX_TOKENS >= 4_000, "couvre le raisonnement caché");
     }
 
     #[test]

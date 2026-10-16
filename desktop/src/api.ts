@@ -280,7 +280,7 @@ export interface ProviderConfig {
   base_url: string;
   /** Toujours vide dans `get_settings` : la clé ne quitte jamais Rust. */
   api_key: string;
-  /** `"chat" | "responses" | "messages"`, ou vide = automatique. */
+  /** `"chat" | "responses" | "messages" | "google"`, ou vide = automatique. */
   protocol: string | null;
   /** `"api-key"` ou `"claude-plan"` (abonnement Claude via Claude Code). */
   auth: string;
@@ -560,12 +560,16 @@ export const api = {
   voiceDevices: () => invoke<string[]>("voice_devices"),
   voiceStart: () => invoke<void>("voice_start"),
   voiceStop: () => invoke<void>("voice_stop"),
+  /** Active ou coupe la voix à la volée (`voice` = principal, `listen` = micro, `speech` = synthèse). */
+  voiceSetEnabled: (scope: "voice" | "listen" | "speech", enabled: boolean) =>
+    invoke<{ voice: boolean; listen: boolean; speech: boolean }>("voice_set_enabled", { scope, enabled }),
   /** Accord ou refus d'une modification de fichier sensible ; `false` = demande expirée. */
   approvalRespond: (id: string, approved: boolean, always = false) =>
     invoke<boolean>("approval_respond", { id, approved, always }),
-  /** Accords « Toujours autoriser » en vigueur, et leur retrait. */
+  /** Accords « Toujours autoriser » en vigueur, leur ajout et leur retrait. */
   approvalsAlways: () => invoke<string[]>("approvals_always"),
   approvalRevoke: (key: string) => invoke<boolean>("approval_revoke", { key }),
+  approvalGrant: (key: string) => invoke<void>("approval_grant", { key }),
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   sttTranscribe: (wav: number[]) => invoke<string>("stt_transcribe", { wav }),
   avatarStart: () => invoke<void>("avatar_start"),

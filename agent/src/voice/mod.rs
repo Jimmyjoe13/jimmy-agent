@@ -38,6 +38,47 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::error::{Error, Result};
 use crate::providers::stt::{float_to_i16, is_speech, pcm_to_wav, resample};
 
+/// Applique l'interrupteur voix à `settings` (Lot 2) : `voice` (principal :
+/// écoute + synthèse), `listen` (micro/VAD et reconnaissance) ou `speech`
+/// (synthèse TTS). Renvoie `(couper_micro, interrompre_lecture)` pour que
+/// l'appelant arrête l'écoute en cours et la lecture vocale aussitôt, sans
+/// toucher à la boucle de l'agent. Fonction pure (sans micro ni Tauri),
+/// testée unitairement ; la commande Tauri ne fait que l'appeler puis
+/// persister.
+pub fn apply_enabled(settings: &mut crate::config::Settings, scope: &str, enabled: bool) -> Result<(bool, bool)> {
+    match scope.trim().to_lowercase().as_str() {
+        "voice" => {
+            settings.voice.enabled = enabled;
+            if enabled {
+                Ok((false, false))
+            } else {
+                settings.voice.listen_on_start = false;
+                Ok((true, true))
+            }
+        }
+        "listen" => {
+            settings.stt.enabled = enabled;
+            if enabled {
+                Ok((false, false))
+            } else {
+                settings.voice.listen_on_start = false;
+                Ok((true, false))
+            }
+        }
+        "speech" => {
+            settings.tts.enabled = enabled;
+            if enabled {
+                Ok((false, false))
+            } else {
+                Ok((false, true))
+            }
+        }
+        other => Err(Error::Tool(format!(
+            "portée inconnue : {other} (attendues : voice, listen, speech)"
+        ))),
+    }
+}
+
 /// Ce que la couche d'écoute remonte à l'agent.
 #[derive(Debug, Clone)]
 pub enum VoiceEvent {
@@ -1056,5 +1097,33 @@ mod tests {
         assert_eq!(levenshtein("jimmy", "jimi"), 2);
         assert_eq!(levenshtein("", "abc"), 3);
         assert_eq!(levenshtein("abc", "abc"), 0);
+    }
+
+    /// Interrupteur voix (Lot 2) : la coupure arrête le micro et/ou la
+    /// lecture, l'état est persisté via `settings` ; une portée inconnue est
+    /// refusée sans rien toucher.
+    #[test]
+    fn interrupteur_voix_coupe_micro_et_lecture() {
+        use crate::config::Settings;
+        let mut s = Settings::default();
+        assert!(s.voice.enabled && s.stt.enabled && s.tts.enabled);
+        // Coupure principale : micro + lecture, écoute non reprise au lancement.
+        let (stop, cut) = apply_enabled(&mut s, "voice", false).expect("voice off");
+        assert!((stop, cut) == (true, true));
+        assert!(!s.voice.enabled && !s.voice.listen_on_start);
+        assert!(s.stt.enabled && s.tts.enabled, "les sous-interrupteurs ne bougent pas");
+        // Réactivation : rien à couper.
+        let (stop, cut) = apply_enabled(&mut s, "voice", true).expect("voice on");
+        assert!((stop, cut) == (false, false));
+        assert!(s.voice.enabled);
+        // Micro seul : coupe l'écoute, pas la synthèse.
+        let (stop, cut) = apply_enabled(&mut s, "listen", false).expect("listen off");
+        assert!((stop, cut) == (true, false));
+        assert!(!s.stt.enabled && s.tts.enabled);
+        // Synthèse seule : coupe la lecture, pas le micro.
+        let (stop, cut) = apply_enabled(&mut s, "speech", false).expect("speech off");
+        assert!((stop, cut) == (false, true));
+        assert!(!s.tts.enabled && s.stt.enabled == false);
+        assert!(apply_enabled(&mut s, "oreilles", true).is_err());
     }
 }

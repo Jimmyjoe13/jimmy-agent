@@ -117,7 +117,7 @@ async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
 /// d'erreur : un son manquant ne doit pas interrompre l'agent.
 pub async fn play(app: &App, cue: Cue) {
     let settings = app.settings();
-    if !settings.tts.enabled || !settings.tts.cues {
+    if !settings.voice.enabled || !settings.tts.enabled || !settings.tts.cues {
         return;
     }
     let (rate, bytes) = match load(app, cue).await {
@@ -137,7 +137,7 @@ pub async fn play(app: &App, cue: Cue) {
 /// Pré-génère les sons manquants, pour que le premier « Oui ? » soit immédiat.
 pub async fn warm(app: &App) {
     let settings = app.settings();
-    if !settings.tts.enabled || !settings.tts.cues {
+    if !settings.voice.enabled || !settings.tts.enabled || !settings.tts.cues {
         return;
     }
     for cue in Cue::ALL {

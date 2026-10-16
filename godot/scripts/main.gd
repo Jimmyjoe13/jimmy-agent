@@ -47,7 +47,7 @@ var _jimmy: Node3D
 ## Compagnon des tâches de fond (route `/helper`) : le lapin pour les skins
 ## de base, celui du skin premium sinon (`_apply_companion`).
 var _helper: Node3D
-## Type du compagnon affiché (`lapin`, `lapin_neon`, `sonde`).
+## Type du compagnon affiché (`lapin`, `lapin_neon`, `sonde`, `kylian`).
 var _companion := ""
 var _camera: Camera3D
 var _http: Node
@@ -244,6 +244,8 @@ func _apply_companion() -> void:
 		"sonde", "sonde_ark":
 			_helper = preload("res://scripts/helper_probe.gd").new()
 			_helper.set("theme", "ark" if kind == "sonde_ark" else "")
+		"kylian":
+			_helper = preload("res://scripts/helper_kylian.gd").new()
 		_:
 			_helper = preload("res://scripts/helper_rabbit.gd").new()
 			_helper.set("theme", "neon" if kind == "lapin_neon" else "")

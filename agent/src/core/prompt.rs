@@ -56,18 +56,21 @@ n'existe : c'est un programme personnel.
 7. Lis efficacement : un gros fichier arrive par morceaux (`read_file` indique
    le `start_line` de la suite) ; `search_files` donne le numéro de ligne de
    ce qu'il trouve, lis autour au lieu de relire tout le fichier.
-8. Fichiers sensibles (`.env`, clés, secrets, identifiants), en local comme sur
-   un serveur : pour en modifier un à la demande de l'utilisateur, **appelle
-   directement l'outil**. C'est l'application qui lui demande son accord (une
-   carte s'affiche, l'outil attend sa réponse) : ne demande pas l'accord en
-   texte, n'annonce pas que tu ne peux pas. À la voix, dis ce que tu veux
-   faire et demande-lui de dire « confirmé » (un « confirmé » réduit compte
-   comme accord, une fois). Refusé ou sans réponse = abandonné : ne le
-   contourne jamais (autre commande, script intermédiaire). Pour les lire,
-   vise le fichier précis (`read_file` sur le `.env` nommé) et masque les
-   valeurs à l'affichage ; ne vide jamais tout l'environnement
-   (`Get-ChildItem Env:`, `printenv`, `set`) : les clés qui en sortent
-   partent au modèle et bloquent l'envoi suivant.
+8. Actions soumises à accord — fichiers sensibles (`.env`, clés, secrets,
+   identifiants), arrêt de processus (`process_kill`), extinction/redémarrage
+   du PC (`system_power`), webcam (`webcam_capture`, 1/minute, à ta demande
+   seulement), envoi d'email ou de message (`gmail_send_message`…) :
+   pour les exécuter à la demande de l'utilisateur, **appelle directement
+   l'outil**. C'est l'application qui lui demande son accord (une carte
+   s'affiche, l'outil attend sa réponse) : ne demande pas l'accord en texte,
+   n'annonce pas que tu ne peux pas. À la voix, dis ce que tu veux faire et
+   demande-lui de dire « confirmé » (un « confirmé » réduit compte comme
+   accord, une fois). Refusé ou sans réponse = abandonné : ne le contourne
+   jamais (autre commande, script intermédiaire). Pour lire un secret, vise
+   le fichier précis (`read_file` sur le `.env` nommé) et masque les valeurs
+   à l'affichage ; ne vide jamais tout l'environnement (`Get-ChildItem Env:`,
+   `printenv`, `set`) : les clés qui en sortent partent au modèle et bloquent
+   l'envoi suivant.
 9. Serveur MCP à brancher (`mcp_add_server`) : jamais de clé en clair dans
    la commande ni dans `env` (piège 108) — `--header "Authorization: Bearer
    ${NOM_VAR}"` avec `"env": {"NOM_VAR": "secret:nom"}`, la clé rangée par
@@ -174,6 +177,17 @@ renvoient pas. Ne saisis jamais de mot de passe : si un site demande une connexi
 se connecter lui-même dans la fenêtre du navigateur, puis continue. Envoyer, payer, publier ou supprimer \
 demande son accord (carte dans le Chat) : décris précisément l'élément cliqué.";
 
+/// Mode d'emploi de la webcam, ajouté seulement si `webcam_capture` est
+/// branché. Vie privée + anti-jetons : à la demande seulement, 1/minute.
+const WEBCAM_GUIDE: &str = "\n\n## Webcam\nTu peux voir l'utilisateur avec `webcam_capture` (photo jointe au tour, \
+puis oubliée : jamais sur disque, jamais dans l'historique) et `webcam_list` pour les caméras. Règles : appelle \
+`webcam_capture` uniquement si l'utilisateur te l'a explicitement demandé (« regarde-moi », « tu me vois ? », \
+« regarde ce que je te montre »), jamais spontanément ; une capture explicite déjà jointe à la demande suffit \
+(ne la refais pas) ; 1 photo par minute au plus (un refus dit dans combien de temps réessayer) ; chaque photo \
+demande son accord (carte ou « confirmé » vocal) sauf « Toujours autoriser ». Décris ce que tu vois en une \
+phrase simple. Pour mettre un visage sur lui : décris-le en texte via `remember`/`vault_write` (lunettes, barbe…), \
+jamais de photo enregistrée sauf s'il le demande explicitement — et alors un seul fichier écrasé, pas une collection.";
+
 /// Liste des outils pour le prompt système. Les définitions complètes sont
 /// déjà envoyées à l'API : ici, seulement un repère. Les outils MCP sont
 /// regroupés par serveur (« aggregate : 74 outils ») au lieu d'être recopiés
@@ -208,6 +222,11 @@ pub fn tools_summary(names: &[String]) -> String {
         if mcp.iter().any(|(_, tools)| tools.iter().any(|t| t == "browser_navigate")) {
             out.push_str(BROWSER_GUIDE);
         }
+    }
+    // Webcam (outil local) : à la demande seulement, 1/minute, vie privée.
+    // Hors du bloc MCP : elle est branchée même sans serveur MCP.
+    if local.iter().any(|n| *n == "webcam_capture") {
+        out.push_str(WEBCAM_GUIDE);
     }
     out
 }
@@ -421,6 +440,18 @@ mod tests {
         // Les préfixes ne sont pas répétés : la liste reste légère.
         assert!(!summary.contains("mcp_aggregate__"), "{summary}");
         assert!(summary.chars().count() < 1500, "{} caractères", summary.chars().count());
+    }
+
+    /// Webcam (Lot 2) : le guide n'est injecté que si `webcam_capture` est
+    /// branché — vie privée (demande explicite), 1/minute, image oubliée.
+    #[test]
+    fn le_guide_webcam_suit_le_registre() {
+        let sans = tools_summary(&["read_file".to_string(), "run_command".to_string()]);
+        assert!(!sans.contains("## Webcam"), "{sans}");
+        let avec = tools_summary(&["read_file".to_string(), "webcam_capture".to_string(), "webcam_list".to_string()]);
+        assert!(avec.contains("## Webcam"), "{avec}");
+        assert!(avec.contains("1 photo par minute"), "{avec}");
+        assert!(avec.contains("jamais sur disque"), "{avec}");
     }
 
     /// Le prompt ne porte jamais le catalogue : ni nom ni description d'un

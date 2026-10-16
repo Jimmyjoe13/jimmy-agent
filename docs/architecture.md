@@ -361,8 +361,8 @@ change de nom, il n'y a qu'un fichier à corriger.
 | Fenêtre flottante sur le bureau | ✅ Godot transparent + always-on-top | — |
 | Clic sur Jimmy ouvre l'interface | ✅ pont HTTP | — |
 | Trois niveaux graphiques | ✅ `low`/`medium`/`high` | — |
-| Webcam / streaming vidéo | ❌ hors périmètre prototype | — |
-| Provider LLM configurable | ✅ catalogue OpenCode Go, sélection en direct, trois formats d'API (Chat, Responses, Messages) | — |
+| Webcam (voir l'utilisateur) | ✅ `webcam_capture` (1/min max, carte d'accord, image mémoire seule) | pas de streaming continu |
+| Provider LLM configurable | ✅ catalogue OpenCode Go, sélection en direct, quatre formats d'API (Chat, Responses, Messages, Google natif) | — |
 | Mémoire vectorielle locale | ✅ embeddings LM Studio, repli hachage 512 dim, + FTS5 | sémantique seulement si LM Studio tourne |
 | Skills auto-créés | ✅ | — |
 | MCP | ✅ client stdio | pas de transport HTTP, pas de marketplace |
