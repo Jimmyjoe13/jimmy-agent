@@ -14,6 +14,14 @@
 //! * **fin de phrase** : le silence ne s'accumule que sur des trames non
 //!   voisées, et se remet à zéro dès qu'une parole *confirmée* revient.
 //!
+//! Et une **hystérésis** contre les voix qui baissent : une fois de la parole
+//! confirmée entendue dans la prise, une trame entre le seuil de maintien
+//! (60 % du seuil d'attaque) et le seuil d'attaque ne compte ni comme parole
+//! ni comme silence — elle gèle l'état. Une intonation qui retombe ou un
+//! « euh » doux ne closent plus la phrase ; seul un vrai silence l'achève.
+//! Sans parole confirmée au préalable, la même trame reste du silence (un
+//! bruit de fond élevé ne démarre jamais une prise).
+//!
 //! Le temps est celui de l'audio (nombre d'échantillons), pas l'horloge : si la
 //! transcription rapide prend 2 s pendant que l'utilisateur parle, l'audio
 //! accumulé est analysé d'un coup, sans retard sur la détection de fin.
@@ -40,6 +48,13 @@ pub const LONG_SPEECH_FROM_MS: u64 = 1500;
 /// (700 ms réglés → 1,2 s). Cas réel : « Je viens de voir que dans ta mémoire
 /// tu as mis... » coupé par une pause de réflexion.
 pub const MAX_EXTRA_END_MS: u64 = 500;
+
+/// Part du seuil d'attaque qui maintient une phrase commencée : une trame
+/// au-dessus de `seuil × KEEP_RATIO` (parole confirmée déjà entendue) gèle
+/// le compteur de silence au lieu de l'incrémenter. 60 % : avec le seuil
+/// minimal (0,0035), le maintien est à 0,0021 — au-dessus du bruit de fond
+/// typique (0,002), qui reste du vrai silence.
+pub const KEEP_RATIO: f32 = 0.6;
 
 /// Énergie RMS d'un bloc d'échantillons.
 pub fn rms(samples: &[f32]) -> f32 {
@@ -70,6 +85,8 @@ pub fn voiced_fraction(samples: &[f32], frame: usize, threshold: f32) -> f32 {
 pub struct SpeechTracker {
     frame: usize,
     threshold: f32,
+    /// Seuil de maintien (hystérésis) : `threshold × KEEP_RATIO`.
+    keep: f32,
     /// Trames de silence qui closent la phrase.
     end_frames: usize,
     /// Les trames *voisées* avant cet échantillon ne déclenchent pas « la
@@ -94,6 +111,7 @@ impl SpeechTracker {
         SpeechTracker {
             frame,
             threshold,
+            keep: threshold * KEEP_RATIO,
             end_frames: (end_of_speech_ms as usize / FRAME_MS).max(1),
             armed_at,
             processed: 0,
@@ -114,7 +132,8 @@ impl SpeechTracker {
             let start = self.processed;
             let end = start + self.frame;
             self.processed = end;
-            if rms(&buffer[start..end]) > self.threshold {
+            let level = rms(&buffer[start..end]);
+            if level > self.threshold {
                 self.run += 1;
                 if self.run >= 2 {
                     // Deuxième trame voisée d'affilée : la précédente est
@@ -134,6 +153,10 @@ impl SpeechTracker {
                         self.pre_frames += newly;
                     }
                 }
+            } else if self.first_any.is_some() && level > self.keep {
+                // Hystérésis : parole confirmée déjà entendue, et niveau
+                // entre maintien et attaque (intonation qui retombe, « euh »
+                // doux). Trame gelée : ni parole comptée, ni silence accumulé.
             } else {
                 self.run = 0;
                 self.silence += 1;
@@ -155,8 +178,8 @@ impl SpeechTracker {
     /// La phrase est-elle terminée (parole puis silence suffisant) ?
     ///
     /// Le silence exigé grandit avec la parole déjà dite : une commande brève
-    /// (« Non, c'est bon ») se clôt au réglage (700 ms), une longue phrase
-    /// tolère une pause de réflexion jusqu'à 500 ms de plus.
+    /// (« Non, c'est bon ») se clôt au réglage (1 200 ms par défaut), une
+    /// longue phrase tolère une pause de réflexion jusqu'à 500 ms de plus.
     pub fn ended(&self) -> bool {
         self.started() && self.silence >= self.end_frames + self.extra_end_frames()
     }
@@ -274,6 +297,35 @@ mod tests {
         let mut tracker = SpeechTracker::new(RATE, 0.0035, 700, 0);
         tracker.feed(&audio);
         assert!(tracker.ended());
+    }
+
+    #[test]
+    fn une_baisse_de_volume_ne_coupe_pas_la_phrase() {
+        // Cas réel (17 octobre) : la voix baisse en fin de phrase (intonation
+        // qui retombe, « euh » doux) sans se taire — niveau sous le seuil
+        // d'attaque mais au-dessus du seuil de maintien, 1,2 s. Ça ne doit
+        // pas clore la prise ; seul le vrai silence final la clôt.
+        let debut = concat(&[tone(1000, 0.02), tone(1200, 0.0028)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 1200, 0);
+        tracker.feed(&debut);
+        assert!(tracker.started());
+        assert!(
+            !tracker.ended(),
+            "1,2 s de voix basse n'est pas un silence de fin"
+        );
+        // Reprise puis vrai silence : la phrase se clôt normalement (2 s,
+        // car l'extension « longue phrase » porte le hangover à 1,7 s ici).
+        tracker.feed(&concat(&[debut, tone(1500, 0.02), tone(2000, 0.001)]));
+        assert!(tracker.ended(), "le vrai silence final doit clore la phrase");
+    }
+
+    #[test]
+    fn un_vrai_silence_clot_meme_avec_un_hangover_long() {
+        // Garde-fou : l'hystérésis ne doit pas empêcher une vraie fin.
+        let audio = concat(&[tone(1000, 0.02), tone(1300, 0.001)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 1200, 0);
+        tracker.feed(&audio);
+        assert!(tracker.ended(), "1,3 s de vrai silence closent la phrase");
     }
 
     #[test]

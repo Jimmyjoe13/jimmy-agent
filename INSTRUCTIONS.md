@@ -141,6 +141,11 @@ om.json`, champ `api_key`) et `${VAR}` dans
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 17 octobre 2026 (soir) : release **v0.2.1** (tag `v0.2.1`, CI
+  installeur) — fluidité vocale (hangover 1200 ms + hystérésis VAD,
+  select Rapide/Naturel/Patient) et lecture vocale intégrale du naturel
+  (borne 900 réglable Court/Standard/Intégral, filtre `strip_technical`) ;
+  pièges 131-133, site web refait à la main par l'utilisateur.
 - État au 16 octobre 2026 (soir) : release **v0.2.0** publiée (tag `v0.2.0`,
   CI verte) — extinction/redémarrage du PC sur accord (`system_power`, délai
   15 s, 3 modes dans Permissions), interrupteur voix dans l'onglet Voix

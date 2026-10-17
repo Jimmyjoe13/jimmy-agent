@@ -1351,11 +1351,12 @@ impl App {
         if cleaned.is_empty() {
             return;
         }
-        // La voix ne récite pas toute la réponse : on ne dit que le début utile
-        // (borne), l'essentiel étant placé en tête par la consigne « Sortie » du
-        // prompt ; le reste demeure dans la bulle. Une analyse d'un tour a déjà
-        // été lue en 9 000 caractères, soit plusieurs minutes.
-        let spoken = providers::tts::limit_for_speech(&cleaned, providers::tts::SPOKEN_MAX_CHARS);
+        // La voix dit le texte naturel en entier jusqu'à la borne réglée
+        // (onglet Voix, 900 par défaut) ; le filtre technique a déjà retiré
+        // le code et les payloads, et le reste demeure dans la bulle.
+        // Un « STOP » pendant la lecture coupe le reste de la réponse.
+        let spoken =
+            providers::tts::limit_for_speech(&cleaned, settings.tts.max_spoken_chars as usize);
         if spoken.is_empty() {
             return;
         }

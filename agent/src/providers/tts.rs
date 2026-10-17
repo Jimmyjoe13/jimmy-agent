@@ -307,7 +307,8 @@ impl Tts {
 
 /// Rend un texte écrit pour l'écran lisible à voix haute.
 pub fn prepare_for_speech(text: &str) -> String {
-    let text = strip_markdown(text);
+    let text = strip_technical(text);
+    let text = strip_markdown(&text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -332,9 +333,10 @@ pub fn prepare_for_speech(text: &str) -> String {
     cleaned.trim().to_string()
 }
 
-/// Longueur maximale de ce qui est **dit** à voix haute. L'essentiel est en
-/// tête (consigne « Sortie » du prompt) ; au-delà, la voix se tairait pendant
-/// des minutes — une analyse d'un tour a déjà été lue en 9 000 caractères.
+/// Longueur de la version courte lue à voix haute (choix « Court » de
+/// l'onglet Voix). La borne effective est le réglage `tts.max_spoken_chars`
+/// (900 par défaut) : le filtre technique s'applique dans tous les cas, et
+/// le reste demeure à l'écran.
 pub const SPOKEN_MAX_CHARS: usize = 240;
 
 /// La ponctuation à l'indice `i` termine-t-elle vraiment une phrase ? Un point
@@ -441,6 +443,149 @@ pub fn split_for_speech(text: &str, max_chars: usize) -> Vec<String> {
         }
     }
     parts
+}
+
+/// Retire ce qui ne se dit jamais à voix haute mais que le seul Markdown
+/// laisse passer : payloads JSON/XML bruts, code inline technique, chemins
+/// de fichiers, tableaux ASCII, stacktraces et balises d'outil résiduelles.
+/// Contrairement à `strip_markdown`, les fences de code sont reconnus même en
+/// milieu de ligne, et leur contenu n'est jamais lu (signalé une fois).
+/// Le texte conversationnel passe intact, du début à la fin.
+pub fn strip_technical(text: &str) -> String {
+    // Balise d'outil résiduelle : tout ce qui suit est un appel, pas du texte.
+    let text = match text.find("<tool_call>") {
+        Some(at) => &text[..at],
+        None => text,
+    };
+    let mut out = String::new();
+    // Segments pairs = prose, impairs = code (le fence ouvrant compte 1).
+    for (i, part) in text.split("```").enumerate() {
+        if i % 2 == 1 {
+            if !part.trim().is_empty() {
+                out.push_str("(code affiché à l'écran). ");
+            }
+            continue;
+        }
+        for line in part.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Payloads JSON bruts (« {"status": "ok"} »).
+            if let Some(first) = trimmed.chars().next() {
+                if first == '{' || first == '}' || first == '[' || first == ']' {
+                    continue;
+                }
+            }
+            // Balises XML brutes (« <parameter=…> »).
+            if trimmed.starts_with('<') && trimmed.contains('>') {
+                continue;
+            }
+            // Tableaux ASCII (« | Nom | État | »).
+            if trimmed.chars().filter(|&c| c == '|').count() >= 2 {
+                continue;
+            }
+            // Stacktraces («     at charger (src/main.rs:42) »).
+            if is_stacktrace_line(trimmed) {
+                continue;
+            }
+            out.push_str(&scrub_inline_code(trimmed));
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Ligne de stacktrace : `at fonction (fichier:ligne)`. Une phrase comme
+/// « at home » n'a ni parenthèse ni deux-points et passe.
+fn is_stacktrace_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("at ") else {
+        return false;
+    };
+    rest.contains('(') && rest.contains(':') && rest.contains(')')
+}
+
+/// Retire le contenu des codes inline techniques (« `run_command` »), garde
+/// celui des mots simples (« `STOP` »), et masque les chemins de fichiers.
+/// Un backtick orphelin passe tel quel (`strip_markdown` le retire ensuite).
+fn scrub_inline_code(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(open) = rest.find('`') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('`') {
+            Some(close) => {
+                let code = &after[..close];
+                if is_technical_inline(code) {
+                    // Supprimé : jointure propre avec ce qui précède.
+                    if !out.is_empty() && !out.ends_with(' ') {
+                        out.push(' ');
+                    }
+                } else {
+                    out.push_str(code);
+                }
+                rest = &after[close + 1..];
+            }
+            None => {
+                out.push('`');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    scrub_paths(&out)
+}
+
+/// Un code inline est technique s'il porte un marqueur de code (chemin,
+/// appel, opérateur, soulignés), un point collé à du texte (« todo.md »),
+/// ou une syntaxe typée (« :: », « -> », « @ »).
+fn is_technical_inline(code: &str) -> bool {
+    if code.chars().any(|c| "/\\()={}[]<>|;_#*~".contains(c)) {
+        return true;
+    }
+    if code.contains("::") || code.contains("->") || code.contains('@') {
+        return true;
+    }
+    let chars: Vec<char> = code.chars().collect();
+    chars.windows(3).any(|w| {
+        w[1] == '.'
+            && (w[0].is_alphanumeric() || w[0] == '_')
+            && (w[2].is_alphanumeric() || w[2] == '_')
+    })
+}
+
+/// Masque les chemins de fichiers hors code (« agent/src/notes.md »,
+/// « C:\Dev\Godot »). Gardés : les expressions courtes sans point
+/// (« oui/non », « et/ou »), qui sont de la prose.
+fn scrub_paths(text: &str) -> String {
+    text.split_whitespace()
+        .filter(|w| !is_path_word(w))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_path_word(word: &str) -> bool {
+    // Constructions Markdown (`[texte](url)`) : strip_markdown les convertit
+    // (« la doc », « lien ») — ne jamais les amputer ici.
+    if word.chars().any(|c| "[]()".contains(c)) {
+        return false;
+    }
+    let trimmed = word.trim_matches(|c: char| {
+        !(c.is_alphanumeric() || "/\\.~-_".contains(c))
+    });
+    if trimmed.contains('\\') {
+        return true;
+    }
+    if !trimmed.contains('/') {
+        return false;
+    }
+    trimmed.contains('.')
+        || trimmed.len() > 12
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('~')
 }
 
 /// Retire ce qui ne se lit pas à voix haute : blocs de code, balises
@@ -630,6 +775,61 @@ Voir [la doc](https://exemple.fr) ou https://x.fr/a";
         assert!(oral.contains("code affiché"), "{oral}");
         assert!(oral.contains("la doc") && !oral.contains("https"), "{oral}");
         assert!(oral.starts_with("Résumé Trois points"), "{oral}");
+    }
+
+    /// Réponse longue mêlant explications, code et payload : la voix lit
+    /// tout le naturel (7 phrases) et rien du technique. Reproduit la
+    /// plainte du 17 octobre 2026 (« il ne lit qu'une ou deux phrases ») :
+    /// avant le filtre renforcé, le JSON brut passait tel quel à la voix.
+    #[test]
+    fn la_voix_lit_tout_le_naturel_sans_le_technique() {
+        let reponse = "J'ai terminé l'analyse du dossier. Il contient trois scripts utiles \
+            et un fichier de configuration. Le script principal lit les données puis calcule \
+            les totaux par jour. La configuration active la sauvegarde chaque soir à \
+            vingt-trois heures. Pour lancer le tout, ouvre un terminal dans le dossier du \
+            projet. La commande exacte et le fichier sont affichés à l'écran pour les \
+            recopier. Dis-moi si tu veux que je modifie un réglage. \
+            ```rust\nfn total(lignes: &[i64]) -> i64 {\n    lignes.iter().sum()\n}\n```\n\
+            {\"status\": \"ok\", \"fichiers\": 4}";
+        let oral = prepare_for_speech(reponse);
+        for phrase in [
+            "J'ai terminé l'analyse du dossier",
+            "trois scripts utiles",
+            "calcule les totaux par jour",
+            "vingt-trois heures",
+            "Dis-moi si tu veux",
+        ] {
+            assert!(oral.contains(phrase), "{oral}");
+        }
+        for interdit in ["fn total", "lignes.iter", "{\"status\"", "\"fichiers\"", "```"] {
+            assert!(!oral.contains(interdit), "{oral}");
+        }
+        // Tient sous la borne Standard (900) : rien n'est coupé.
+        assert_eq!(limit_for_speech(&oral, 900), oral);
+    }
+
+    /// Le contenu d'un code inline technique n'est pas dit ; un mot simple
+    /// entre backticks, si. Avant, seul le marqueur était retiré et
+    /// `run_command` était prononcé.
+    #[test]
+    fn le_code_inline_technique_n_est_pas_dit() {
+        let oral = prepare_for_speech("Exécute `run_command` maintenant, ou dis `STOP` pour arrêter.");
+        assert!(!oral.contains("run_command"), "{oral}");
+        assert!(oral.contains("STOP"), "{oral}");
+    }
+
+    /// Chemins, tableaux ASCII et stacktraces : à l'écran, jamais à la voix.
+    #[test]
+    fn chemins_tableaux_et_stacktrace_ne_sont_pas_dits() {
+        let oral = prepare_for_speech(
+            "Le rapport est prêt. Détail dans agent/src/notes.md.\n\
+            | Nom | État |\n| A | ok |\n\
+            L'erreur venait de là :\n    at charger (src/main.rs:42)",
+        );
+        assert!(!oral.contains("agent/src"), "{oral}");
+        assert!(!oral.contains('|'), "{oral}");
+        assert!(!oral.contains("at charger"), "{oral}");
+        assert!(oral.contains("Le rapport est prêt"), "{oral}");
     }
 
     /// La voix ne dit pas toute la réponse : elle s'arrête sur des phrases

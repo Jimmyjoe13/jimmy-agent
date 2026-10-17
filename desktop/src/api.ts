@@ -334,6 +334,7 @@ export interface TtsSettings {
   voice: string;
   chars_per_minute: number;
   cues: boolean;
+  max_spoken_chars: number;
   library?: VoiceInfo[];
 }
 

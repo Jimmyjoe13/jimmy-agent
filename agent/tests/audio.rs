@@ -354,6 +354,33 @@ async fn phrase_16k(app: &App, texte: &str, rms_cible: f32) -> Vec<f32> {
     phrase
 }
 
+/// Comme [`phrase_avec_nom`], mais avec le mot d'éveil en vigueur (le nom du
+/// skin premium actif, sinon le réglage) : les clips en dur sur « Jimmy » ne
+/// réveillent plus Jimmy depuis les skins premium (17 octobre 2026 : le nom
+/// en vigueur est « thibault », et les tests d'écoute échouaient tous sur
+/// « le mot d'éveil n'a pas été reconnu », sans lien avec l'écoute elle-même).
+async fn phrase_avec_reveil(app: &App, suite: &str, rms_cible: f32) -> Vec<f32> {
+    let nom = app.wake_word();
+    let mut lettres = nom.chars();
+    let texte = match lettres.next() {
+        Some(premiere) => format!("{}{}, {}", premiere.to_uppercase(), lettres.as_str(), suite),
+        None => suite.to_string(),
+    };
+    let mut dernier = Vec::new();
+    for essai in 1..=4 {
+        let clip = phrase_16k(app, &texte, rms_cible).await;
+        let reference = app
+            .transcribe_command(jimmy_agent::voice::window_to_wav(&clip, 16_000))
+            .await
+            .unwrap_or_default();
+        println!("clip {essai} : « {reference} »");
+        if jimmy_agent::voice::matches_wake_word(&reference, &nom) {
+            return clip;
+        }
+        dernier = clip;
+    }
+    dernier
+}
 /// Comme [`phrase_16k`], mais régénère le clip (4 essais au plus) tant que
 /// Whisper n'y entend pas le nom : la synthèse prononce parfois mal
 /// « Jimmy », et aucun détecteur ne retrouve un nom absent de l'audio. Le
@@ -560,7 +587,7 @@ async fn ecoute_hesitation_ne_coupe_pas_la_phrase() {
     app.ensure_stt().await.expect("serveurs whisper");
     let mut graine = 2024;
     let mut flux = bruit(32_000, &mut graine);
-    flux.extend(phrase_avec_nom(&app, "Jimmy, donne-moi le nom de", 0.02).await);
+    flux.extend(phrase_avec_reveil(&app, "donne-moi le nom de", 0.02).await);
     flux.extend(bruit(16_000 * 18 / 10, &mut graine));
     flux.extend(phrase_16k(&app, "la capitale de l'Italie.", 0.02).await);
 
@@ -571,7 +598,40 @@ async fn ecoute_hesitation_ne_coupe_pas_la_phrase() {
         minuscule.contains("capitale") || minuscule.contains("italie"),
         "la suite après la pause a été perdue : « {commande} »"
     );
-    assert!(minuscule.contains("nom"), "le début de la phrase a été perdu : « {commande} »");
+    // « donne » (le début, avant la pause) et pas « nom » : Whisper confond
+    // parfois « le nom de » avec « une autre » (mesuré le 17 octobre 2026) —
+    // ce qui compte, c'est que le début ne soit pas perdu, pas la lettre.
+    assert!(minuscule.contains("donne"), "le début de la phrase a été perdu : « {commande} »");
+    assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu");
+}
+
+/// Voix qui baisse après une hésitation : le début à volume normal, 1,2 s de
+/// pause, puis la suite dite doucement (RMS bas). La commande doit contenir
+/// les deux moitiés en un seul bloc, sans que la partie douce soit perdue.
+/// La preuve fine de l'hystérésis est unitaire (`vad`, sans micro) ; ici c'est
+/// la non-régression de bout en bout, micro et Whisper réels.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "whisper-server, Fish Audio et le modèle de langage réels"]
+async fn ecoute_baisse_de_volume_ne_coupe_pas() {
+    let Some(app) = app_reel() else {
+        panic!("environnement de test indisponible");
+    };
+    app.ensure_stt().await.expect("serveurs whisper");
+    let mut graine = 777;
+    let mut flux = bruit(32_000, &mut graine);
+    flux.extend(phrase_avec_reveil(&app, "donne-moi le nom de", 0.02).await);
+    flux.extend(bruit(16_000 * 12 / 10, &mut graine));
+    flux.extend(phrase_16k(&app, "la capitale de l'Italie.", 0.006).await);
+
+    let (reveil, reponse, commande) = faire_ecouter_detail(&app, flux, None).await;
+    assert!(reveil, "le mot d'éveil n'a pas été reconnu");
+    let minuscule = commande.to_lowercase();
+    assert!(
+        minuscule.contains("capitale") || minuscule.contains("italie"),
+        "la suite dite doucement a été perdue : « {commande} »"
+    );
+    // Même robustesse que le test d'hésitation : « donne », pas « nom ».
+    assert!(minuscule.contains("donne"), "le début de la phrase a été perdu : « {commande} »");
     assert!(!reponse.trim().is_empty(), "l'agent n'a pas répondu");
 }
 

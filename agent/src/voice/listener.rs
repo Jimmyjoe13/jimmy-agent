@@ -825,7 +825,7 @@ const DANGLING_WORDS: &[&str] = &[
     "euh", "heu", "hum", "bah", "que", "qu'", "de", "du", "des", "d'", "le", "la", "les", "l'", "un", "une",
     "et", "ou", "mais", "à", "au", "aux", "pour", "dans", "avec", "sur", "par", "mon", "ma", "mes", "ton",
     "ta", "tes", "son", "sa", "ses", "ce", "cette", "ces", "quand", "comme", "parce", "je", "j'", "tu",
-    "il", "elle", "est-ce",
+    "il", "elle", "est-ce", "donc", "alors", "coup", "car",
 ];
 
 /// La transcription semble-t-elle coupée au milieu d'une phrase ?
@@ -977,6 +977,10 @@ mod tests {
         assert!(looks_unfinished("Cherche dans le vault la note sur le."));
         assert!(looks_unfinished("Euh,"));
         assert!(looks_unfinished("Regarde, euh"));
+        assert!(looks_unfinished("Je te laisse donc"));
+        assert!(looks_unfinished("On part, et alors"));
+        assert!(looks_unfinished("C'est décidé, du coup"));
+        assert!(looks_unfinished("Prends un parapluie car"));
         // Phrases complètes : aucune attente ajoutée.
         assert!(!looks_unfinished("Non, c'est bon."));
         assert!(!looks_unfinished("Quelle heure est-il ?"));

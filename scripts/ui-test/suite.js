@@ -713,8 +713,8 @@ let stepPage = null;
     await p.waitForTimeout(800);
     const follow = await p.locator(".field-row", { hasText: "Conversation continue" }).locator("select").inputValue();
     expect(follow === "8", `conversation continue : ${follow} s (attendu 8)`);
-    const pause = await p.locator(".field-row", { hasText: "Pause qui termine" }).locator("input").inputValue();
-    expect(Number(pause) === 700, `pause de fin de phrase : ${pause} ms (attendu 700)`);
+    const pause = await p.locator(".field-row", { hasText: "Tolérance aux pauses" }).locator("select").inputValue();
+    expect(Number(pause) === 1200, `tolérance aux pauses : ${pause} ms (attendu 1200)`);
     const lang = await p.locator(".field-row", { hasText: "Langue" }).locator("select").inputValue();
     expect(lang === "fr", `langue : ${lang}`);
     return `${follow} s, ${pause} ms, langue ${lang}`;
@@ -730,6 +730,14 @@ let stepPage = null;
     expect(shown === before.model, `modèle affiché « ${shown} », attendu « ${before.model} »`);
     const keyState = await p.locator(".tts-key-state").textContent();
     expect(before.has_key === !keyState.includes("Aucune clé"), `état de clé incohérent : has_key=${before.has_key}, « ${keyState} »`);
+    // Longueur lue (lecture seule : le réglage de l'utilisateur n'est pas touché).
+    await p.waitForFunction(
+      () => document.querySelector(".tts-length")?.value !== "",
+      null,
+      { timeout: 10000 },
+    );
+    const length = await p.locator(".tts-length").inputValue();
+    expect(Number(length) === 900, `longueur lue : ${length} caractères (attendu 900)`);
     const save = () => p.locator(".card", { hasText: "Synthèse vocale" }).locator("button.primary", { hasText: "Enregistrer" }).click();
     try {
       await p.locator(".tts-model").fill("fish-audio/test-ui");

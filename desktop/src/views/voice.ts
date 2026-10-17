@@ -9,7 +9,7 @@ import { api } from "../api";
 import { Recorder } from "../audio";
 import { QUALITY_LABEL, attempt, capitalize, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
-import { card, field, toggle, FOLLOW_UP_CHOICES, LANGUAGES } from "./settings";
+import { card, field, toggle, FOLLOW_UP_CHOICES, HESITATION_CHOICES, SPOKEN_LENGTH_CHOICES, LANGUAGES } from "./settings";
 import { modelsPanel } from "./models";
 import { voicesPanel } from "./voices";
 
@@ -336,7 +336,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
   const wakeWordInput = h("input", { class: "field", type: "text" }) as HTMLInputElement;
   const cuesEnabled = h("input", { type: "checkbox" }) as HTMLInputElement;
   const followSelect = h("select", { class: "field" }) as HTMLSelectElement;
-  const pauseInput = h("input", { class: "field", type: "number", min: "400", max: "1500", step: "50" }) as HTMLInputElement;
+  const pauseInput = h("select", { class: "field" }) as HTMLSelectElement;
   const debugAudio = h("input", { type: "checkbox" }) as HTMLInputElement;
 
   async function loadVoiceSettings() {
@@ -371,7 +371,16 @@ export function voiceView(ctx: AppContext): HTMLElement {
       followSelect.append(h("option", { value: String(current) }, `${current} s`));
     }
     followSelect.value = String(current);
-    pauseInput.value = String(loaded.voice.end_of_speech_ms);
+    mount(pauseInput);
+    for (const [ms, label] of HESITATION_CHOICES) {
+      pauseInput.append(h("option", { value: String(ms) }, label));
+    }
+    // Une valeur personnalisée (fichier de config édité) reste sélectionnable.
+    const pauseCurrent = loaded.voice.end_of_speech_ms;
+    if (![...HESITATION_CHOICES].some(([ms]) => ms === pauseCurrent)) {
+      pauseInput.append(h("option", { value: String(pauseCurrent) }, `${pauseCurrent} ms`));
+    }
+    pauseInput.value = String(pauseCurrent);
     debugAudio.checked = loaded.voice.debug_audio;
   }
 
@@ -385,7 +394,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
     fresh.stt.wake_word = wakeWordInput.value.trim() || "jimy";
     fresh.tts.cues = cuesEnabled.checked;
     fresh.voice.follow_up_ms = Number(followSelect.value) * 1000;
-    fresh.voice.end_of_speech_ms = Math.min(1500, Math.max(400, Number(pauseInput.value) || 700));
+    fresh.voice.end_of_speech_ms = Math.min(2000, Math.max(400, Number(pauseInput.value) || 1200));
     fresh.voice.debug_audio = debugAudio.checked;
     const before = ctx.status.stt;
     if (!(await attempt(() => api.saveSettings(fresh), "enregistrement"))) return;
@@ -431,6 +440,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
     placeholder: openrouter?.key_from === "interface" ? "inchangée si vide" : "sk-or-…",
   }) as HTMLInputElement;
   const ttsModelInput = h("input", { class: "field tts-model", type: "text", value: ctx.status.tts.model }) as HTMLInputElement;
+  const spokenLengthSelect = h("select", { class: "field tts-length" }) as HTMLSelectElement;
 
   async function persistTts() {
     // Clé d'abord : une erreur garde la saisie à l'écran.
@@ -440,12 +450,31 @@ export function voiceView(ctx: AppContext): HTMLElement {
     const fresh = await guard(() => api.getSettings(), "réglages voix");
     if (!fresh) return;
     fresh.tts.model = ttsModelInput.value.trim() || DEFAULT_TTS_MODEL;
+    fresh.tts.max_spoken_chars = Math.min(20000, Math.max(100, Number(spokenLengthSelect.value) || 900));
     if (!(await attempt(() => api.saveSettings(fresh), "enregistrement"))) return;
     ttsKeyInput.value = "";
     ttsModelInput.value = fresh.tts.model;
+    syncSpokenLength(fresh.tts.max_spoken_chars);
     await ctx.refreshStatus();
     toast("Synthèse vocale enregistrée — « Lire » pour l'essayer");
   }
+
+  function syncSpokenLength(value: number) {
+    mount(spokenLengthSelect);
+    for (const [chars, label] of SPOKEN_LENGTH_CHOICES) {
+      spokenLengthSelect.append(h("option", { value: String(chars) }, label));
+    }
+    // Une valeur personnalisée (fichier de config édité) reste sélectionnable.
+    if (![...SPOKEN_LENGTH_CHOICES].some(([chars]) => chars === value)) {
+      spokenLengthSelect.append(h("option", { value: String(value) }, `${value} caractères`));
+    }
+    spokenLengthSelect.value = String(value);
+  }
+
+  // Longueur lue : valeur réglée côté Rust, 900 par défaut (config ancienne).
+  void guard(() => api.getSettings(), "réglages voix").then((loaded) => {
+    if (loaded) syncSpokenLength(loaded.tts.max_spoken_chars ?? 900);
+  });
 
   // Installation neuve : whisper.cpp se télécharge au premier lancement.
   // Tant qu'il manque, l'écoute ne peut pas démarrer : on dit où on en est.
@@ -539,7 +568,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
           )
         : null,
       field("Conversation continue (écoute sans redire le nom)", followSelect),
-      field("Pause qui termine ta phrase (ms)", pauseInput),
+      field("Tolérance aux pauses (silence qui termine ta phrase)", pauseInput),
       h(
         "p",
         { class: "note" },
@@ -575,6 +604,7 @@ export function voiceView(ctx: AppContext): HTMLElement {
       ttsKeyState,
       field("Clé OpenRouter", ttsKeyInput),
       field("Modèle TTS", ttsModelInput, DEFAULT_TTS_MODEL),
+      field("Longueur lue à voix haute", spokenLengthSelect),
       h(
         "p",
         { class: "note" },

@@ -284,6 +284,12 @@ pub struct TtsSettings {
     pub voice: String,
     /// Vitesse de lecture simulée (utilisée pour l'estimation de durée).
     pub chars_per_minute: f32,
+    /// Longueur maximale lue à voix haute, en caractères (900 par défaut :
+    /// ~6-8 phrases ; 240 = court, 6000 = tout le texte naturel). Le filtre
+    /// technique (`strip_technical`) s'applique toujours, et le reste demeure
+    /// à l'écran. Réglage : onglet Voix → « Longueur lue à voix haute ».
+    #[serde(default = "default_max_spoken_chars")]
+    pub max_spoken_chars: u64,
     /// Sons d'état (« Oui ? », « C'est prêt. », « Oups… »), voir `voice::cues`.
     #[serde(default = "default_true")]
     pub cues: bool,
@@ -318,6 +324,7 @@ impl Default for TtsSettings {
             // 2026 : voir `TtsVoice::NARRATEUR`.
             voice: "4f2a0684dd0247dda68f339738c780e6".into(),
             chars_per_minute: 1000.0,
+            max_spoken_chars: default_max_spoken_chars(),
             cues: true,
             library: Vec::new(),
         }
@@ -358,6 +365,10 @@ pub struct SttSettings {
 
 fn default_command_audio_ctx() -> u32 {
     640
+}
+
+fn default_max_spoken_chars() -> u64 {
+    900
 }
 
 fn default_follow_up_ms() -> u64 {
@@ -402,7 +413,9 @@ pub struct VoiceSettings {
     pub input_sample_rate: u32,
     /// Seuil de détection d'activité vocale (0.0 à 1.0).
     pub vad_threshold: f32,
-    /// Nombre de millisecondes de silence qui clôturent une phrase.
+    /// Nombre de millisecondes de silence qui clôturent une phrase
+    /// (1200 par défaut : une pause de réflexion ou d'hésitation ne coupe
+    /// plus ; 700 = réactif, 1600 = patient — voir l'onglet Voix).
     pub end_of_speech_ms: u64,
     /// Conversation continue : après une réponse, Jimmy écoute encore ce
     /// nombre de millisecondes **sans** qu'il faille redire son nom
@@ -428,7 +441,7 @@ impl Default for VoiceSettings {
             volume: 0.9,
             input_sample_rate: 16_000,
             vad_threshold: 0.012,
-            end_of_speech_ms: 700,
+            end_of_speech_ms: 1200,
             follow_up_ms: default_follow_up_ms(),
             debug_audio: false,
             listen_on_start: false,
@@ -755,8 +768,12 @@ impl Settings {
                     if s.llm.max_tokens == 4096 {
                         s.llm.max_tokens = DEFAULT_MAX_TOKENS;
                     }
-                    if s.voice.end_of_speech_ms == 900 {
-                        s.voice.end_of_speech_ms = 700;
+                    if s.voice.end_of_speech_ms == 900 || s.voice.end_of_speech_ms == 700 {
+                        // 900 puis 700 ms étaient les défauts successifs : trop
+                        // secs, ils coupaient les hésitations (17 octobre 2026).
+                        // Migrés vers 1200 ms ; un réglage choisi à la main,
+                        // autre que ces deux-là, est conservé.
+                        s.voice.end_of_speech_ms = 1200;
                     }
                     s
                 }

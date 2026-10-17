@@ -568,6 +568,20 @@ export const FOLLOW_UP_CHOICES: [number, string][] = [
   [20, "20 secondes"],
 ];
 
+/** Tolérance aux hésitations (silence qui termine la phrase) : [ms, libellé]. */
+export const HESITATION_CHOICES: [number, string][] = [
+  [700, "Rapide (700 ms — répond vite, peut couper)"],
+  [1200, "Naturel (1,2 s — recommandé)"],
+  [1600, "Patient (1,6 s — laisse chercher ses mots)"],
+];
+
+/** Longueur lue à voix haute : [caractères, libellé]. */
+export const SPOKEN_LENGTH_CHOICES: [number, string][] = [
+  [240, "Court (~240 caractères, 1-2 phrases)"],
+  [900, "Standard (~900 caractères, recommandé)"],
+  [6000, "Intégral (tout le texte naturel)"],
+];
+
 /** Langues proposées pour la reconnaissance vocale (codes Whisper). */
 export const LANGUAGES: [string, string][] = [
   ["fr", "Français"],
