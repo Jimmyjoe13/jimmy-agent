@@ -13,7 +13,12 @@ use crate::error::Result;
 /// Version 2 : table `memory_semantic` (embeddings LM Studio). Toute table
 /// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
 /// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
-pub const SCHEMA_VERSION: i64 = 5;
+/// Version 6 : sessions épinglées, archivées, titre verrouillé.
+pub const SCHEMA_VERSION: i64 = 6;
+
+/// Titres génériques donnés à la création d'une session, remplacés dès
+/// qu'une vraie demande arrive (`History::auto_title`).
+pub const GENERIC_TITLES: [&str; 3] = ["Nouvelle session", "Session vocale", ""];
 
 pub struct Db {
     conn: Connection,
@@ -60,7 +65,10 @@ impl Db {
                 title       TEXT NOT NULL DEFAULT 'Nouvelle session',
                 created_at  TEXT NOT NULL,
                 updated_at  TEXT NOT NULL,
-                project     TEXT
+                project     TEXT,
+                pinned       INTEGER NOT NULL DEFAULT 0,
+                archived     INTEGER NOT NULL DEFAULT 0,
+                title_locked INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -192,8 +200,53 @@ impl Db {
             self.conn.execute_batch("ALTER TABLE sessions ADD COLUMN project TEXT;")?;
         }
 
+        // v6 : sessions épinglées, archivées, titre verrouillé (renommé par
+        // l'utilisateur). Même règle : ALTER explicite pour les bases existantes.
+        for column in ["pinned", "archived", "title_locked"] {
+            let exists = self
+                .conn
+                .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = ?1")?
+                .exists([column])?;
+            if !exists {
+                self.conn
+                    .execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0;"))?;
+            }
+        }
+        if version < 6 {
+            self.retitle_generic_sessions()?;
+        }
+
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// Rattrapage unique (passage en v6) : une session restée « Session
+    /// vocale » / « Nouvelle session » prend sa première demande d'au moins
+    /// trois mots (« Jimy. » ne fait pas un titre), sinon sa première demande.
+    /// Audit du 21 octobre : 89 sessions sur 195 sans vrai titre.
+    fn retitle_generic_sessions(&self) -> Result<()> {
+        // Contenu sur une ligne : retours à la ligne remplacés par des espaces.
+        const FLAT: &str = "trim(replace(replace(m.content, char(13), ''), char(10), ' '))";
+        let first = |filter: &str| {
+            format!(
+                "(SELECT substr({FLAT}, 1, 60) FROM messages m
+                  WHERE m.session_id = sessions.id AND m.role = 'user' AND {FLAT} != '' {filter}
+                  ORDER BY m.created_at LIMIT 1)"
+            )
+        };
+        let three_words = format!("AND length({FLAT}) - length(replace({FLAT}, ' ', '')) >= 2");
+        let generic = GENERIC_TITLES.iter().map(|t| format!("'{t}'")).collect::<Vec<_>>().join(", ");
+        self.conn.execute(
+            &format!(
+                "UPDATE sessions SET title = coalesce({}, {})
+                 WHERE title IN ({generic}) AND {} IS NOT NULL",
+                first(&three_words),
+                first(""),
+                first("")
+            ),
+            [],
+        )?;
         Ok(())
     }
 
@@ -272,6 +325,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Une base v5 (la vraie base au 21 octobre) reçoit épinglage, archivage
+    /// et verrou de titre ; les sessions au titre générique prennent leur
+    /// première vraie demande (au moins trois mots) comme titre.
+    #[test]
+    fn migration_v5_vers_v6_sessions_titrees_et_classables() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-v6-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v5.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'x',
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL, project TEXT);
+                 CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,
+                     content TEXT NOT NULL DEFAULT '', tool_name TEXT, tool_calls TEXT,
+                     tokens INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+                 INSERT INTO sessions VALUES ('v', 'Session vocale', 'a', 'a', NULL);
+                 INSERT INTO sessions VALUES ('n', 'Nouvelle session', 'a', 'a', NULL);
+                 INSERT INTO sessions VALUES ('k', 'Mon titre', 'a', 'a', NULL);
+                 INSERT INTO messages VALUES ('1', 'v', 'user', 'Jimy.', NULL, NULL, 0, '1');
+                 INSERT INTO messages VALUES ('2', 'v', 'user', 'prépare la relance
+de Caroline', NULL, NULL, 0, '2');
+                 INSERT INTO messages VALUES ('3', 'k', 'user', 'une demande quelconque', NULL, NULL, 0, '1');
+                 PRAGMA user_version = 5;",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        let title = |id: &str| -> String {
+            db.conn().query_row("SELECT title FROM sessions WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(title("v"), "prépare la relance de Caroline");
+        assert_eq!(title("n"), "Nouvelle session", "aucune demande : titre inchangé");
+        assert_eq!(title("k"), "Mon titre");
+        let cols: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('sessions') WHERE name IN ('pinned', 'archived', 'title_locked')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 3);
+        let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 6);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Une base v4 (la vraie base au 14 octobre) reçoit le carnet de travail.
     #[test]
     fn migration_v4_vers_v5_cree_le_carnet_de_travail() {
@@ -293,7 +396,7 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1, "table work_notes absente");
         let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, SCHEMA_VERSION);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

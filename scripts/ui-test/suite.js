@@ -37,6 +37,9 @@ let stepPage = null;
   const expect = (cond, msg) => {
     if (!cond) throw new Error(msg);
   };
+  /** Session la plus récente : la liste met les épinglées en tête (lot A,
+   *  21 octobre), le premier élément n'est donc plus forcément le dernier. */
+  const newest = (list) => [...(list ?? [])].sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : b.updatedAt < a.updatedAt ? -1 : 0))[0];
   /** Fin du tour. Avec le streaming, la bulle d'attente part au premier
    *  fragment, la bulle en flux redevient une bulle d'attente à chaque appel
    *  d'outil, et seule `final` libère le bouton d'envoi : la fin du tour, c'est
@@ -151,7 +154,7 @@ let stepPage = null;
   await step("Chat : le second message garde le fil (même session)", async () => {
     // `sessions` est plafonné à 50 : on compare la session la plus récente,
     // pas leur nombre. Une session neuve passerait en tête de liste.
-    const latest = async () => (await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("sessions")))[0]?.id;
+    const latest = async () => newest(await p.evaluate(() => window.__TAURI_INTERNALS__.invoke("sessions")))?.id;
     const sessionBefore = await latest();
     await p.locator(".composer-input").fill("Quel mot viens-tu d'écrire juste avant ? Réponds en un seul mot.");
     await p.keyboard.press("Enter");
@@ -177,7 +180,7 @@ let stepPage = null;
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
     const repo = (await invoke("paths_info")).app;
     const repoName = repo.split(/[\\/]/).filter(Boolean).pop();
-    const session = (await invoke("sessions"))[0];
+    const session = newest(await invoke("sessions"));
     // Le sélecteur de dossier natif ne se pilote pas : on rattache le projet
     // par la commande qu'il appelle, puis on vérifie tout le reste à l'écran.
     await invoke("session_set_project", { sessionId: session.id, project: repo });
@@ -381,7 +384,7 @@ let stepPage = null;
     expect(/Arrêté/.test(text), `réponse après l'arrêt : « ${text} »`);
     expect(await p.locator(".stop-button").isHidden(), "le bouton Arrêter reste visible");
     // La conversation de test ne reste pas dans l'historique de l'utilisateur.
-    const latest = (await invoke("sessions"))[0];
+    const latest = newest(await invoke("sessions"));
     if (latest?.title?.startsWith("Lis un par un")) await invoke("delete_session", { sessionId: latest.id });
     return `arrêté en ${ms} ms`;
   });
@@ -425,7 +428,7 @@ let stepPage = null;
     await p.waitForSelector(".bubble.from-background", { timeout: 180_000 });
     await p.waitForSelector(".tasks-band[hidden]", { state: "attached", timeout: 10_000 });
     const fin = ((await p.locator(".bubble.from-background").last().textContent()) ?? "").trim();
-    const session = (await invoke("sessions"))[0];
+    const session = newest(await invoke("sessions"));
     if (session?.title?.startsWith("Exécute avec run_command")) await invoke("delete_session", { sessionId: session.id });
     return `fond après ${detachedAfter} s, « ${parallel.trim()} » en parallèle, fin : « ${fin.slice(0, 40)} »`;
   });
@@ -452,7 +455,7 @@ let stepPage = null;
     const ms = Date.now() - t0;
     const tasks = await invoke("tasks_list");
     expect(!tasks.some((t) => t.background), "la tâche de fond tourne encore");
-    const session = (await invoke("sessions"))[0];
+    const session = newest(await invoke("sessions"));
     if (session?.title?.startsWith("Exécute avec run_command")) await invoke("delete_session", { sessionId: session.id });
     return `bandeau retiré ${ms} ms après le clic`;
   });
@@ -474,7 +477,7 @@ let stepPage = null;
     const ms = Date.now() - t0;
     const text = ((await p.locator(".stream .bubble.assistant").last().textContent()) ?? "").trim();
     expect(/Arrêté/.test(text), `réponse après Échap : « ${text} »`);
-    const latest = (await invoke("sessions"))[0];
+    const latest = newest(await invoke("sessions"));
     if (latest?.title?.startsWith("Lis un par un")) await invoke("delete_session", { sessionId: latest.id });
     return `arrêté par Échap en ${ms} ms`;
   });
@@ -998,6 +1001,69 @@ let stepPage = null;
     return `${groups.length} groupe(s), recherche et Ctrl+K OK`;
   });
 
+  // Lot D1 (21 octobre) : la réponse d'une conversation quittée en cours de
+  // route ne s'affiche jamais dans la nouvelle ; elle reste dans la sienne.
+  await step("Sessions : une réponse reste dans sa conversation", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    await nav("Chat");
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
+    await p.keyboard.press("Enter");
+    await p.waitForSelector(".bubble.pending", { timeout: 5000 });
+    // Conversation quittée avant la réponse.
+    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    let origin = null;
+    for (let i = 0; i < 60 && !origin; i++) {
+      await p.waitForTimeout(1000);
+      const s = newest(await invoke("sessions"));
+      const msgs = s ? await invoke("session_messages", { sessionId: s.id }) : [];
+      if (msgs.some((m) => m.role === "assistant" && /banane/i.test(m.content))) origin = s;
+    }
+    expect(origin, "pas de réponse « banane » en 60 s");
+    await p.waitForTimeout(800);
+    const leaked = await p.locator(".stream .bubble.assistant", { hasText: /banane/i }).count();
+    expect(leaked === 0, `la réponse s'affiche dans la nouvelle conversation (${leaked} bulle(s))`);
+    return "réponse gardée dans sa conversation, nouvelle conversation vide";
+  });
+
+  // Lot A (21 octobre) : recherche dans le contenu, épingler, renommer, archiver.
+  await step("Historique : épingler, renommer, archiver, chercher dans le contenu", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    const origin = newest(await invoke("sessions"));
+    expect(origin && origin.title.includes("banane"), `session de test introuvable : ${origin?.title}`);
+    const row = () => p.locator(`.list-row[data-session="${origin.id}"]`);
+    await nav("Historique");
+    try {
+      await row().waitFor({ timeout: 5000 });
+      // Épingler : la session passe dans le groupe « Épinglées ».
+      await row().locator("button", { hasText: "Épingler" }).click();
+      await p.waitForSelector(`.history-pinned ~ .list-row[data-session="${origin.id}"].pinned`, { timeout: 5000 });
+      // Renommer : titre verrouillé, plus réécrit automatiquement.
+      p.once("dialog", (d) => d.accept("Test UI renommée"));
+      await row().locator("button", { hasText: "Renommer" }).click();
+      await p.waitForFunction((id) => document.querySelector(`.list-row[data-session="${id}"] strong`)?.textContent === "Test UI renommée", origin.id, { timeout: 5000 });
+      // Recherche dans le contenu : la phrase n'est plus dans le titre.
+      await p.locator(".history-search").fill("uniquement par le mot");
+      await row().waitFor({ timeout: 5000 });
+      await p.locator(".history-search").fill("");
+      await p.waitForTimeout(500);
+      // Archiver : sort des actives, présente dans les archivées, puis restaurée.
+      await row().locator("button", { hasText: "Archiver" }).click();
+      await row().waitFor({ state: "detached", timeout: 5000 });
+      await p.locator(".history-archived-toggle").click();
+      await row().waitFor({ timeout: 5000 });
+      await row().locator("button", { hasText: "Désarchiver" }).click();
+      await row().waitFor({ state: "detached", timeout: 5000 });
+      await p.locator(".history-archived-toggle").click();
+      const info = await invoke("session_get", { sessionId: origin.id });
+      expect(info.pinned && !info.archived && info.title === "Test UI renommée", JSON.stringify(info));
+    } finally {
+      // Session de test supprimée quoi qu'il arrive.
+      await invoke("delete_session", { sessionId: origin.id });
+    }
+    return "épinglée, renommée, trouvée par son contenu, archivée puis restaurée";
+  });
+
   await step("Mémoire : libellés traduits", async () => {
     await nav("Mémoire");
     await p.waitForTimeout(800);
@@ -1045,7 +1111,7 @@ let stepPage = null;
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
     await attendreReponse(120_000);
-    const session = (await invoke("sessions"))[0];
+    const session = newest(await invoke("sessions"));
     // `session_messages` n'expose pas les résultats d'outils : lecture seule
     // de la base (la clé passe par l'environnement, jamais en argument).
     const { execFileSync } = require("child_process");

@@ -676,9 +676,18 @@ fn strip_unknown_links(texte: &str, known: &std::collections::HashSet<String>) -
 /// dizaine de lignes « test travaux » dans le journal.
 pub fn is_test_noise(texte: &str) -> bool {
     let bas = texte.to_lowercase();
-    ["tests-ui", "reussite-", "réussite-", "test travaux", "fini-fond"]
+    if ["tests-ui", "reussite-", "réussite-", "test travaux", "fini-fond"]
         .iter()
         .any(|marque| bas.contains(marque))
+    {
+        return true;
+    }
+    // Fichiers sensibles du parcours « autorisation » : `garde-3344.env`,
+    // `toujours-3850.env` (préfixe suivi de chiffres, pas le mot seul).
+    ["garde-", "toujours-"].iter().any(|prefixe| {
+        bas.match_indices(prefixe)
+            .any(|(i, _)| bas[i + prefixe.len()..].chars().next().is_some_and(|c| c.is_ascii_digit()))
+    })
 }
 
 /// Une fusion est acceptable si elle a un titre et ne fait pas fondre la note.
@@ -909,6 +918,9 @@ mod tests {
     fn le_bruit_des_tests_d_interface_est_ecarte() {
         assert!(is_test_noise("Jimmy a écrit le fichier tests-ui/reussite-9641.txt contenant « test travaux »."));
         assert!(is_test_noise("Il a écrit la ligne « test travaux » dans reussite-47.txt."));
+        assert!(is_test_noise("Création fichier garde-3344"));
+        assert!(is_test_noise("Écriture de toujours-3850.env"));
+        assert!(!is_test_noise("Mettre en garde-fou le budget"), "le mot seul n'est pas du bruit");
         assert!(!is_test_noise("La suite complète est passée au vert : 381 tests."));
     }
 

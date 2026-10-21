@@ -193,9 +193,14 @@ pub async fn run_with_images(
         // Carnet de bord (lots 2 et 4) : le début de la conversation sorti de
         // la fenêtre, et les chantiers suivis d'une conversation à l'autre.
         earlier: crate::core::recap::summary_block(&recap),
+        // Chantiers du projet de la conversation (et ceux sans projet) :
+        // un chantier Emile n'a rien à faire dans une session de dev.
         chantiers: deps
             .history
-            .chantiers(crate::core::recap::CHANTIERS_SHOWN)
+            .chantiers_for(
+                deps.history.project(&session_id).ok().flatten().as_deref(),
+                crate::core::recap::CHANTIERS_SHOWN,
+            )
             .ok()
             .and_then(|list| crate::core::recap::chantiers_block(&list, &session_id)),
         // Carnet de travail (14 octobre) : les acquis vérifiés des tours

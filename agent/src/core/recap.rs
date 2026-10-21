@@ -39,8 +39,10 @@ pub const SUMMARY_MAX_CHARS: usize = 1500;
 /// Chantiers montrés, et taille maximale de leurs lignes.
 pub const CHANTIERS_SHOWN: usize = 5;
 pub const CHANTIERS_MAX_CHARS: usize = 600;
-/// Un chantier qui n'a pas bougé depuis ce délai n'est plus montré.
-const STALE_DAYS: i64 = 21;
+/// Un chantier qui n'a pas bougé depuis ce délai n'est plus montré (« en
+/// sommeil ») : audit du 21 octobre, 17 chantiers figés depuis plus de 7 jours
+/// encombraient le prompt.
+const STALE_DAYS: i64 = 14;
 /// Nouveaux chantiers acceptés par mise à jour (garde-fou contre un modèle
 /// qui transformerait chaque phrase en chantier).
 const MAX_NEW: usize = 3;
@@ -52,7 +54,9 @@ const MAX_TOKENS: u32 = 4000;
 const RECAPPER: &str = r#"Tu tiens le carnet de bord de Jimy, l'assistant personnel de l'utilisateur. On te donne le résumé actuel du début d'une conversation (peut être vide), des messages anciens à y fondre (peut être vide), les derniers échanges, et les chantiers déjà suivis.
 
 Réponds UNIQUEMENT par un objet JSON, sans texte autour :
-{"resume": "…", "chantiers": [{"id": "c1", "titre": "…", "statut": "ouvert", "prochaine": "…"}]}
+{"titre": "…", "resume": "…", "chantiers": [{"id": "c1", "titre": "…", "statut": "ouvert", "prochaine": "…"}]}
+
+"titre" : nom court de la conversation (3 à 7 mots) qui dit de quoi elle parle surtout, comme un titre de dossier (« Relance des leads Maxence »). Sans date, sans « conversation », sans guillemets. Vide si rien de clair.
 
 "resume" : le résumé actuel complété par les messages anciens (s'il n'y en a pas, recopie le résumé actuel tel quel). Moins de 1200 caractères, en français, des faits concrets : sujets, décisions, fichiers, résultats, demandes restées ouvertes. Pas de politesse, pas de méta-commentaire.
 
@@ -106,6 +110,9 @@ pub fn plan(total: usize, recap: &Recap) -> Option<Plan> {
 
 #[derive(Debug, Deserialize)]
 struct Output {
+    /// Titre court de la conversation (absent des anciennes réponses).
+    #[serde(default)]
+    titre: String,
     #[serde(default)]
     resume: String,
     #[serde(default)]
@@ -174,15 +181,25 @@ impl History {
         Ok(())
     }
 
-    /// Chantiers non finis et récents, du plus récent au plus ancien.
+    /// Chantiers non finis et récents, du plus récent au plus ancien, tous
+    /// projets confondus.
     pub fn chantiers(&self, limit: usize) -> Result<Vec<Chantier>> {
+        self.chantiers_for(None, limit)
+    }
+
+    /// Chantiers vus depuis une conversation rattachée à `project` : ceux du
+    /// projet d'abord, puis ceux sans projet ; jamais ceux d'un autre projet.
+    /// Sans projet : tous.
+    pub fn chantiers_for(&self, project: Option<&str>, limit: usize) -> Result<Vec<Chantier>> {
         let since = (Utc::now() - chrono::Duration::days(STALE_DAYS)).to_rfc3339();
         let conn = self.db.lock().unwrap();
         let mut stmt = conn.conn().prepare(
             "SELECT id, title, status, next_step, session_id, updated_at FROM chantiers
-             WHERE status != 'fini' AND updated_at >= ?1 ORDER BY updated_at DESC LIMIT ?2",
+             WHERE status != 'fini' AND updated_at >= ?1
+               AND (?3 IS NULL OR project IS NULL OR project = '' OR project = ?3)
+             ORDER BY (project = ?3) DESC, updated_at DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![since, limit as i64], |r| {
+        let rows = stmt.query_map(params![since, limit as i64, project], |r| {
             Ok(Chantier {
                 id: r.get(0)?,
                 title: r.get(1)?,
@@ -216,8 +233,13 @@ impl History {
                     )?;
                     changed += 1;
                 }
-                // Nouveau chantier : jamais déjà fini, jamais sans titre.
-                None if status != "fini" && !title.is_empty() && created < MAX_NEW => {
+                // Nouveau chantier : jamais déjà fini, jamais sans titre,
+                // jamais né d'un test d'interface (« garde-3344 »).
+                None if status != "fini"
+                    && !title.is_empty()
+                    && created < MAX_NEW
+                    && !crate::memory::sort::is_test_noise(&format!("{title} {next}")) =>
+                {
                     conn.conn().execute(
                         "INSERT INTO chantiers (id, title, status, next_step, project, session_id, updated_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -325,8 +347,11 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
     let Ok(conversation) = history.conversation(session_id, usize::MAX) else { return };
     let Ok(recap) = history.recap(session_id) else { return };
     let Some(plan) = plan(conversation.len(), &recap) else { return };
+    // Projet de la conversation : le modèle ne voit (et ne touche) que les
+    // chantiers de ce projet et ceux sans projet.
+    let project = history.project(session_id).ok().flatten();
     let known: Vec<(String, Chantier)> = history
-        .chantiers(12)
+        .chantiers_for(project.as_deref(), 12)
         .unwrap_or_default()
         .into_iter()
         .enumerate()
@@ -371,7 +396,11 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
         log::info!("[contexte] carnet non écrit (conversation supprimée ?) : {error}");
         return;
     }
-    let project = history.project(session_id).ok().flatten();
+    // Titre de la conversation (« Session vocale » ne dit rien) ; jamais
+    // par-dessus un titre choisi par l'utilisateur (`History::set_title_auto`).
+    if let Err(error) = history.set_title_auto(session_id, &output.titre) {
+        log::warn!("[contexte] titre non écrit : {error}");
+    }
     let changed = history
         .apply_chantiers(session_id, project.as_deref(), &known, output.chantiers)
         .unwrap_or_else(|error| {
@@ -485,6 +514,52 @@ mod tests {
         let done = vec![Update { id: Some("c1".into()), titre: String::new(), statut: "fini".into(), prochaine: String::new() }];
         h.apply_chantiers(&b, None, &known, done).unwrap();
         assert!(h.chantiers(5).unwrap().is_empty());
+    }
+
+    fn nouveau(titre: &str, prochaine: &str) -> Update {
+        Update { id: None, titre: titre.into(), statut: "ouvert".into(), prochaine: prochaine.into() }
+    }
+
+    /// Audit du 21 octobre : un chantier Emile s'affichait dans une session de
+    /// développement de Jimy. Une conversation rattachée à un projet ne voit
+    /// que les chantiers de ce projet et ceux sans projet ; sans projet, tout.
+    #[test]
+    fn les_chantiers_d_un_autre_projet_sont_masques() {
+        let h = history();
+        let s = h.create_session("s").unwrap();
+        h.apply_chantiers(&s, Some("C:\\emile"), &[], vec![nouveau("Campagnes Emile", "relancer")]).unwrap();
+        h.apply_chantiers(&s, Some("C:\\jimy"), &[], vec![nouveau("Refonte des sessions", "tester")]).unwrap();
+        h.apply_chantiers(&s, None, &[], vec![nouveau("Journal de bord", "clore la journée")]).unwrap();
+
+        let titres = |p: Option<&str>| h.chantiers_for(p, 10).unwrap().into_iter().map(|c| c.title).collect::<Vec<_>>();
+        let jimy = titres(Some("C:\\jimy"));
+        assert_eq!(jimy[0], "Refonte des sessions", "le projet courant d'abord : {jimy:?}");
+        assert!(jimy.contains(&"Journal de bord".to_string()), "{jimy:?}");
+        assert!(!jimy.contains(&"Campagnes Emile".to_string()), "{jimy:?}");
+        assert_eq!(titres(None).len(), 3);
+    }
+
+    /// `test-ui` créait des chantiers (« Création fichier garde-3344 ») :
+    /// jamais un chantier.
+    #[test]
+    fn un_chantier_de_test_n_est_pas_cree() {
+        let h = history();
+        let s = h.create_session("s").unwrap();
+        let bruit = vec![
+            nouveau("Création fichier garde-3344", "Obtenir confirmation pour écrire TEST=1"),
+            nouveau("Écriture toujours-3850.env", "réécrire"),
+        ];
+        assert_eq!(h.apply_chantiers(&s, None, &[], bruit).unwrap(), 0);
+        assert!(h.chantiers(10).unwrap().is_empty());
+    }
+
+    /// Le carnet donne un titre court à la conversation.
+    #[test]
+    fn le_carnet_rend_un_titre() {
+        let output = parse("{\"titre\": \"Relance des leads Maxence\", \"resume\": \"\", \"chantiers\": []}").unwrap();
+        assert_eq!(output.titre, "Relance des leads Maxence");
+        // Ancien format (sans titre) : toujours lisible.
+        assert_eq!(parse("{\"resume\": \"x\", \"chantiers\": []}").unwrap().titre, "");
     }
 
     #[test]

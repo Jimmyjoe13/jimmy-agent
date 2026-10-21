@@ -23,6 +23,23 @@ use tauri::{Emitter, State, WebviewWindow};
 
 use crate::AppState;
 
+/// Événement prêt pour l'interface, marqué de sa conversation (`sessionId`).
+/// Le Chat n'affiche que ceux de la conversation ouverte (lot D1) ; un
+/// événement qui porte déjà la sienne (tâche de fond, commande vocale) la
+/// garde.
+fn event_payload(session_id: Option<&str>, event: &AgentEvent) -> serde_json::Value {
+    let mut value = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    if let (Some(id), Some(map)) = (session_id, value.as_object_mut()) {
+        map.entry("sessionId").or_insert_with(|| id.into());
+    }
+    value
+}
+
+/// Émet un événement vers la fenêtre, marqué de sa conversation.
+fn emit_event(window: &WebviewWindow, session_id: Option<&str>, event: &AgentEvent) {
+    let _ = window.emit("agent-event", event_payload(session_id, event));
+}
+
 fn err(message: impl std::fmt::Display) -> String {
     message.to_string()
 }
@@ -106,9 +123,10 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
     // Vision : capture du bouton, ou phrase explicite (« regarde mon écran »).
     let (images, note) = app.images_for(&message, request.capture_id.as_deref(), false).await;
     if let (Some(image), Some(window)) = (images.first(), &window_label) {
-        let _ = window.emit(
-            "agent-event",
-            AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) },
+        emit_event(
+            window,
+            Some(&session_id),
+            &AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) },
         );
     }
     let avatar = app.avatar.clone();
@@ -119,6 +137,7 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
         let forward_window: Option<WebviewWindow> = window_label.clone();
         let relay_avatar = avatar.clone();
+        let relay_session = answer_session.clone();
 
         // Relais des événements vers le frontend et vers l'avatar Godot.
         let relay = tauri::async_runtime::spawn(async move {
@@ -128,7 +147,7 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
             let mut failed = false;
             while let Some(event) = rx.recv().await {
                 if let Some(window) = &forward_window {
-                    let _ = window.emit("agent-event", &event);
+                    emit_event(window, Some(&relay_session), &event);
                 }
                 // L'avatar Godot n'a besoin que de l'état et de la phrase.
                 match &event {
@@ -190,9 +209,10 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
                 &jimmy_agent::core::types::Message::assistant("(Tâche arrêtée à la demande de l'utilisateur, avant la fin.)"),
             );
             if let Some(window) = &window_label {
-                let _ = window.emit(
-                    "agent-event",
-                    AgentEvent::Final { text: "Arrêté à ta demande. Dis-moi quoi faire.".into() },
+                emit_event(
+                    window,
+                    Some(&stop_session),
+                    &AgentEvent::Final { text: "Arrêté à ta demande. Dis-moi quoi faire.".into() },
                 );
             }
             let _ = avatar.set_state(AvatarState::Idle, "").await;
@@ -207,12 +227,7 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         if let Err(error) = outcome {
             log::error!("[agent] {error}");
             if let Some(window) = &window_label {
-                let _ = window.emit(
-                    "agent-event",
-                    AgentEvent::Failed {
-                        message: error.to_string(),
-                    },
-                );
+                emit_event(window, Some(&stop_session), &AgentEvent::Failed { message: error.to_string() });
             }
             let _ = avatar.set_state(AvatarState::Error, "").await;
         }
@@ -244,13 +259,14 @@ async fn update_chat(
         let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(64);
         let forward_window: Option<WebviewWindow> = window_label.clone();
         let relay_avatar = avatar.clone();
+        let relay_session = answer_session.clone();
 
         // Relais allégé : tout vers la fenêtre, la réponse finale dans la
         // bulle de l'avatar.
         let relay = tauri::async_runtime::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Some(window) = &forward_window {
-                    let _ = window.emit("agent-event", &event);
+                    emit_event(window, Some(&relay_session), &event);
                 }
                 match &event {
                     AgentEvent::ToolStart { .. } => {
@@ -289,9 +305,10 @@ async fn update_chat(
                 &jimmy_agent::core::types::Message::assistant("(Mise à jour arrêtée à la demande de l'utilisateur, avant la fin.)"),
             );
             if let Some(window) = &window_label {
-                let _ = window.emit(
-                    "agent-event",
-                    AgentEvent::Final { text: "Arrêté à ta demande. Le Jimy actuel tourne toujours.".into() },
+                emit_event(
+                    window,
+                    Some(&stop_session),
+                    &AgentEvent::Final { text: "Arrêté à ta demande. Le Jimy actuel tourne toujours.".into() },
                 );
             }
             let _ = avatar.set_state(AvatarState::Idle, "").await;
@@ -318,12 +335,7 @@ async fn update_chat(
         if let Err(error) = outcome {
             log::error!("[agent] {error}");
             if let Some(window) = &window_label {
-                let _ = window.emit(
-                    "agent-event",
-                    AgentEvent::Failed {
-                        message: error.to_string(),
-                    },
-                );
+                emit_event(window, Some(&stop_session), &AgentEvent::Failed { message: error.to_string() });
             }
             let _ = avatar.set_state(AvatarState::Error, "").await;
         }
@@ -370,19 +382,54 @@ pub async fn approval_grant(state: State<'_, AppState>, key: String) -> std::res
     Ok(())
 }
 
+/// Session telle que l'interface la lit (`Session` dans `api.ts`).
+fn session_json(s: jimmy_agent::core::history::SessionSummary) -> serde_json::Value {
+    serde_json::json!({
+        "id": s.id, "title": s.title,
+        "createdAt": s.created_at, "updatedAt": s.updated_at,
+        "messageCount": s.message_count, "project": s.project,
+        "pinned": s.pinned, "archived": s.archived
+    })
+}
+
+/// Sessions de l'Historique : toutes (plus seulement les 50 dernières),
+/// filtrées côté base par `query` (titre, projet, résumé, texte des échanges).
+/// `archived` : la liste des archivées au lieu des actives.
 #[tauri::command]
-pub async fn sessions(state: State<'_, AppState>) -> std::result::Result<Vec<serde_json::Value>, String> {
-    let list = state.app.history.sessions(50).map_err(err)?;
-    Ok(list
-        .into_iter()
-        .map(|s| {
-            serde_json::json!({
-                "id": s.id, "title": s.title,
-                "createdAt": s.created_at, "updatedAt": s.updated_at,
-                "messageCount": s.message_count, "project": s.project
-            })
-        })
-        .collect())
+pub async fn sessions(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    archived: Option<bool>,
+) -> std::result::Result<Vec<serde_json::Value>, String> {
+    let list = state
+        .app
+        .history
+        .search_sessions(query.as_deref(), archived.unwrap_or(false), 500)
+        .map_err(err)?;
+    Ok(list.into_iter().map(session_json).collect())
+}
+
+/// Une session (projet de la conversation affichée dans le Chat), quel que
+/// soit son âge.
+#[tauri::command]
+pub async fn session_get(state: State<'_, AppState>, session_id: String) -> std::result::Result<Option<serde_json::Value>, String> {
+    Ok(state.app.history.session(&session_id).map_err(err)?.map(session_json))
+}
+
+/// Renommage par l'utilisateur : titre verrouillé contre les titres automatiques.
+#[tauri::command]
+pub async fn session_rename(state: State<'_, AppState>, session_id: String, title: String) -> std::result::Result<(), String> {
+    state.app.history.rename(&session_id, &title).map_err(err)
+}
+
+#[tauri::command]
+pub async fn session_pin(state: State<'_, AppState>, session_id: String, pinned: bool) -> std::result::Result<(), String> {
+    state.app.history.set_pinned(&session_id, pinned).map_err(err)
+}
+
+#[tauri::command]
+pub async fn session_archive(state: State<'_, AppState>, session_id: String, archived: bool) -> std::result::Result<(), String> {
+    state.app.history.set_archived(&session_id, archived).map_err(err)
 }
 
 #[tauri::command]
@@ -1048,9 +1095,15 @@ pub async fn start_listening(
         // outillée qui aboutit, jamais après un « STOP » (voir STOPPED_REPLY).
         let mut tools_seen = false;
         let mut failed = false;
+        // Conversation de la commande vocale en cours : annoncée par `Spoken`,
+        // elle marque les événements qui suivent (lot D1).
+        let mut voice_session: Option<String> = None;
         while let Some(event) = rx.recv().await {
+            if let AgentEvent::Spoken { session_id, .. } = &event {
+                voice_session = Some(session_id.clone());
+            }
             if let Some(window) = &handle {
-                let _ = window.emit("agent-event", &event);
+                emit_event(window, voice_session.as_deref(), &event);
             }
             match &event {
                 AgentEvent::State { state, detail } => {
@@ -1451,5 +1504,25 @@ mod tests {
         // Premier message : pas encore de session.
         let first: ChatRequest = serde_json::from_value(serde_json::json!({ "sessionId": null, "message": "salut" })).unwrap();
         assert!(first.session_id.is_none());
+    }
+
+    /// Audit du 21 octobre (lot D1) : les événements du premier plan ne
+    /// disaient pas de quelle conversation ils venaient ; avec deux tâches
+    /// (Chat + voix) ou un changement de conversation en cours de réponse, le
+    /// texte s'affichait dans la mauvaise.
+    #[test]
+    fn chaque_evenement_porte_sa_conversation() {
+        let delta = event_payload(Some("s-chat"), &AgentEvent::Delta { text: "Bon".into() });
+        assert_eq!(delta["type"], "delta");
+        assert_eq!(delta["sessionId"], "s-chat");
+        // Une tâche de fond garde SA conversation, pas celle du relais.
+        let fond = event_payload(
+            Some("s-chat"),
+            &AgentEvent::Detached { task_id: "t".into(), session_id: "s-fond".into(), title: "x".into() },
+        );
+        assert_eq!(fond["sessionId"], "s-fond");
+        // Sans conversation connue : rien d'inventé.
+        let notice = event_payload(None, &AgentEvent::Notice { message: "m".into() });
+        assert!(notice.get("sessionId").is_none());
     }
 }

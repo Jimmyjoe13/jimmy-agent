@@ -55,7 +55,9 @@ export interface AgentEvent {
    *  thinking, speaking) et temps restant en ms pour `your_turn`. */
   phase?: string;
   remaining?: number;
-  /** `spoken` : session de la conversation vocale (adoptée par le Chat). */
+  /** Conversation de l'événement (lot D1, posé par le relais Rust) : le Chat
+   *  n'affiche que ceux de la conversation ouverte. `spoken` : conversation
+   *  vocale, adoptée par le Chat. */
   sessionId?: string;
   /** `approval` : demande d'autorisation (fichier sensible) ; `approvalResolved` : sa clôture. */
   id?: string;
@@ -178,6 +180,10 @@ export interface Session {
   messageCount: number;
   /** Dossier du projet de la conversation (onglet Chat). */
   project?: string | null;
+  /** Épinglée : en tête de l'Historique. */
+  pinned?: boolean;
+  /** Archivée : hors de la liste par défaut. */
+  archived?: boolean;
 }
 
 /** Un projet proposé dans le sélecteur du Chat. */
@@ -495,7 +501,13 @@ export const api = {
   fsDiff: (file: string) => invoke<{ diff: string; reason: string }>("fs_diff", { file }),
   fsOpen: (path: string) => invoke<"opened" | "revealed">("fs_open", { path }),
   fsReveal: (path: string) => invoke<void>("fs_reveal", { path }),
-  sessions: () => invoke<Session[]>("sessions"),
+  /** Toutes les sessions (actives, ou archivées), filtrées côté base. */
+  sessions: (query?: string | null, archived = false) =>
+    invoke<Session[]>("sessions", { query: query ?? null, archived }),
+  sessionGet: (sessionId: string) => invoke<Session | null>("session_get", { sessionId }),
+  sessionRename: (sessionId: string, title: string) => invoke<void>("session_rename", { sessionId, title }),
+  sessionPin: (sessionId: string, pinned: boolean) => invoke<void>("session_pin", { sessionId, pinned }),
+  sessionArchive: (sessionId: string, archived: boolean) => invoke<void>("session_archive", { sessionId, archived }),
   sessionMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("session_messages", { sessionId }),
   deleteSession: (sessionId: string) => invoke<void>("delete_session", { sessionId }),

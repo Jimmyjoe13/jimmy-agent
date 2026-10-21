@@ -27,6 +27,33 @@ pub struct SessionSummary {
     pub message_count: i64,
     /// Dossier du projet de la conversation (onglet Chat), s'il y en a un.
     pub project: Option<String>,
+    /// Épinglée : toujours en tête de l'Historique.
+    pub pinned: bool,
+    /// Archivée : hors de la liste par défaut, retrouvable à part.
+    pub archived: bool,
+}
+
+/// Colonnes lues par `session_row` (même ordre).
+const SUMMARY_COLUMNS: &str = "s.id, s.title, s.created_at, s.updated_at,
+     (SELECT count(*) FROM messages m WHERE m.session_id = s.id), s.project, s.pinned, s.archived";
+
+fn session_row(row: &Row) -> rusqlite::Result<SessionSummary> {
+    Ok(SessionSummary {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+        message_count: row.get(4)?,
+        project: row.get(5)?,
+        pinned: row.get::<_, i64>(6)? != 0,
+        archived: row.get::<_, i64>(7)? != 0,
+    })
+}
+
+/// Clause SQL « le titre est encore générique » (`db::GENERIC_TITLES`).
+fn generic_title_clause() -> String {
+    let list = crate::db::GENERIC_TITLES.iter().map(|t| format!("'{t}'")).collect::<Vec<_>>().join(", ");
+    format!("title IN ({list})")
 }
 
 impl History {
@@ -52,14 +79,74 @@ impl History {
         Ok(())
     }
 
-    /// Titre automatique à partir du premier message de la session.
+    /// Titre automatique à partir du premier message de la session : remplace
+    /// un titre générique (« Nouvelle session », « Session vocale »), jamais
+    /// un titre déjà posé.
     pub fn auto_title(&self, session_id: &str, from: &str) -> Result<()> {
-        let trimmed: String = from.chars().take(60).collect();
+        let flat = from.split_whitespace().collect::<Vec<_>>().join(" ");
+        let trimmed: String = flat.chars().take(60).collect();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
         self.db.lock().unwrap().conn().execute(
-            "UPDATE sessions SET title = ?2 WHERE id = ?1 AND (title = 'Nouvelle session' OR title = '')",
+            &format!("UPDATE sessions SET title = ?2 WHERE id = ?1 AND title_locked = 0 AND {}", generic_title_clause()),
             params![session_id, trimmed],
         )?;
         Ok(())
+    }
+
+    /// Titre proposé par le carnet de bord (`core::recap`) : remplace le titre
+    /// provisoire, sauf si l'utilisateur a renommé la session.
+    pub fn set_title_auto(&self, session_id: &str, title: &str) -> Result<()> {
+        let title: String = title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+        if title.is_empty() {
+            return Ok(());
+        }
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET title = ?2 WHERE id = ?1 AND title_locked = 0",
+            params![session_id, title],
+        )?;
+        Ok(())
+    }
+
+    /// Renommage par l'utilisateur : le titre est verrouillé (plus aucun titre
+    /// automatique ne le remplace).
+    pub fn rename(&self, session_id: &str, title: &str) -> Result<()> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(crate::error::Error::Tool("titre vide".into()));
+        }
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET title = ?2, title_locked = 1 WHERE id = ?1",
+            params![session_id, title.chars().take(120).collect::<String>()],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_pinned(&self, session_id: &str, pinned: bool) -> Result<()> {
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET pinned = ?2 WHERE id = ?1",
+            params![session_id, pinned as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_archived(&self, session_id: &str, archived: bool) -> Result<()> {
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET archived = ?2 WHERE id = ?1",
+            params![session_id, archived as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Une session, si elle existe.
+    pub fn session(&self, session_id: &str) -> Result<Option<SessionSummary>> {
+        let conn = self.db.lock().unwrap();
+        let row = conn
+            .conn()
+            .query_row(&format!("SELECT {SUMMARY_COLUMNS} FROM sessions s WHERE s.id = ?1"), params![session_id], session_row)
+            .optional()?;
+        Ok(row)
     }
 
     pub fn append(&self, session_id: &str, message: &Message) -> Result<String> {
@@ -218,23 +305,31 @@ impl History {
         Ok(Some(format!("{header}\n{}", blocks.join("\n"))))
     }
 
+    /// Sessions non archivées, épinglées d'abord puis les plus récentes.
     pub fn sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
+        self.search_sessions(None, false, limit)
+    }
+
+    /// Recherche dans **toutes** les sessions : titre, projet, résumé du
+    /// carnet et texte des échanges (pas les résultats d'outils). `archived`
+    /// choisit la liste (actives ou archivées). Épinglées en tête.
+    pub fn search_sessions(&self, query: Option<&str>, archived: bool, limit: usize) -> Result<Vec<SessionSummary>> {
+        let needle = query.map(str::trim).filter(|q| !q.is_empty()).map(|q| {
+            // `LIKE` : % et _ de l'utilisateur pris littéralement.
+            let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            format!("%{escaped}%")
+        });
         let conn = self.db.lock().unwrap();
-        let mut stmt = conn.conn().prepare(
-            "SELECT s.id, s.title, s.created_at, s.updated_at,
-                    (SELECT count(*) FROM messages m WHERE m.session_id = s.id), s.project
-             FROM sessions s ORDER BY s.updated_at DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit as i64], |row: &Row| {
-            Ok(SessionSummary {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
-                message_count: row.get(4)?,
-                project: row.get(5)?,
-            })
-        })?;
+        let mut stmt = conn.conn().prepare(&format!(
+            "SELECT {SUMMARY_COLUMNS} FROM sessions s
+             WHERE s.archived = ?1 AND (?2 IS NULL
+                OR s.title LIKE ?2 ESCAPE '\\' OR coalesce(s.project, '') LIKE ?2 ESCAPE '\\'
+                OR EXISTS (SELECT 1 FROM session_recaps r WHERE r.session_id = s.id AND r.summary LIKE ?2 ESCAPE '\\')
+                OR EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id
+                           AND m.role IN ('user', 'assistant') AND m.content LIKE ?2 ESCAPE '\\'))
+             ORDER BY s.pinned DESC, s.updated_at DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![archived as i64, needle, limit as i64], session_row)?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -441,5 +536,69 @@ mod tests {
         let s = h.create_session("t").unwrap();
         tour_avec_outils(&h, &s, "Analyse", "Fini", 2);
         assert_eq!(h.messages(&s, 500).unwrap().len(), 1 + 1 + 2 + 1);
+    }
+
+    fn titre(h: &History, id: &str) -> String {
+        h.session(id).unwrap().expect("session").title
+    }
+
+    /// Audit du 21 octobre : 85 « Session vocale » jamais titrées, car
+    /// `auto_title` ne remplaçait que « Nouvelle session ».
+    #[test]
+    fn une_session_vocale_recoit_un_titre() {
+        let h = history();
+        let s = h.create_session("Session vocale").unwrap();
+        h.auto_title(&s, "Prépare la relance pour Caroline").unwrap();
+        assert_eq!(titre(&h, &s), "Prépare la relance pour Caroline");
+        // Le premier titre reste : la demande suivante ne l'écrase pas.
+        h.auto_title(&s, "ok go").unwrap();
+        assert_eq!(titre(&h, &s), "Prépare la relance pour Caroline");
+    }
+
+    /// Un titre choisi par l'utilisateur n'est plus jamais réécrit
+    /// automatiquement (ni par le premier message, ni par le carnet).
+    #[test]
+    fn un_titre_renomme_est_verrouille() {
+        let h = history();
+        let s = h.create_session("Nouvelle session").unwrap();
+        h.rename(&s, "  Mission Maxence  ").unwrap();
+        h.auto_title(&s, "autre chose").unwrap();
+        h.set_title_auto(&s, "Titre du carnet").unwrap();
+        assert_eq!(titre(&h, &s), "Mission Maxence");
+        // Sans verrou, le titre du carnet remplace le titre provisoire.
+        let t = h.create_session("Nouvelle session").unwrap();
+        h.auto_title(&t, "salut jimy tu peux regarder").unwrap();
+        h.set_title_auto(&t, "Audit des campagnes Emile").unwrap();
+        assert_eq!(titre(&h, &t), "Audit des campagnes Emile");
+        assert!(h.rename(&t, "   ").is_err(), "titre vide refusé");
+    }
+
+    /// La recherche porte sur toutes les sessions (plus seulement les 50
+    /// dernières) et sur le contenu des messages ; archivées à part,
+    /// épinglées en tête.
+    #[test]
+    fn recherche_archivage_et_epinglage() {
+        let h = history();
+        let a = h.create_session("Rapport du jour").unwrap();
+        h.append(&a, &Message::user("parle-moi du lead Solebio")).unwrap();
+        let b = h.create_session("Vieille session").unwrap();
+        h.append(&b, &Message::user("rien à voir")).unwrap();
+        let c = h.create_session("Épinglée").unwrap();
+
+        let trouve = h.search_sessions(Some("solebio"), false, 50).unwrap();
+        assert_eq!(trouve.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec![a.as_str()]);
+
+        h.set_pinned(&c, true).unwrap();
+        h.touch(&b).unwrap();
+        let liste = h.search_sessions(None, false, 50).unwrap();
+        assert_eq!(liste[0].id, c, "épinglée en tête");
+        assert!(liste[0].pinned);
+
+        h.set_archived(&b, true).unwrap();
+        let actives = h.search_sessions(None, false, 50).unwrap();
+        assert!(!actives.iter().any(|s| s.id == b), "archivée masquée");
+        let archives = h.search_sessions(None, true, 50).unwrap();
+        assert_eq!(archives.len(), 1);
+        assert!(archives[0].archived);
     }
 }

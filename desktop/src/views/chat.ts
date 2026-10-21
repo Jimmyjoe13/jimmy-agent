@@ -994,6 +994,14 @@ export function chatView(ctx: AppContext): HTMLElement {
   }
 
   ctx.onEvent((event: AgentEvent) => {
+    // Lot D1 : un événement d'une autre conversation n'entre jamais dans le
+    // fil affiché (deux tâches en parallèle, ou conversation changée pendant
+    // une réponse). Sa fin est signalée ; elle reste dans sa conversation.
+    if (fromOtherConversation(event)) {
+      if (event.type === "final") toast("Réponse prête dans une autre conversation (voir Historique).", "info");
+      else if (event.type === "failed") toast(`Échec dans une autre conversation : ${event.message ?? ""}`, "error");
+      return;
+    }
     switch (event.type) {
       case "toolStart":
         // Ce qui a été écrit en flux n'était qu'une annonce (« Je lis le
@@ -1140,13 +1148,26 @@ export function chatView(ctx: AppContext): HTMLElement {
     );
   }
 
-  /** Projet de la conversation courante, lu dans la liste des sessions. */
+  /**
+   * L'événement vient d'une autre conversation que celle affichée ? Ne
+   * passent jamais le filtre : les cartes d'autorisation (la tâche attend une
+   * réponse), la commande vocale (le Chat adopte sa conversation), les tâches
+   * de fond (traitées à part) et l'état global (avatar, écoute). Sans
+   * conversation affichée (premier message en cours d'envoi), rien n'est filtré.
+   */
+  function fromOtherConversation(event: AgentEvent): boolean {
+    const global = ["spoken", "approval", "approvalResolved", "background", "detached", "state", "listen", "heard"];
+    return !!event.sessionId && !!sessionId && event.sessionId !== sessionId && !global.includes(event.type);
+  }
+
+  /** Projet de la conversation courante. */
   async function loadProject() {
     const data = await guard(() => api.projectsRecent(), "projets");
     if (data) defaultFolder = data.default;
     if (sessionId) {
-      const sessions = await guard(() => api.sessions(), "sessions");
-      project = sessions?.find((s) => s.id === sessionId)?.project ?? null;
+      // Lu directement : une vieille session (hors des dernières) garde son projet.
+      const session = await guard(() => api.sessionGet(sessionId as string), "session");
+      project = session?.project ?? null;
     }
     renderProject();
   }
