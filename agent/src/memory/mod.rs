@@ -185,6 +185,25 @@ impl MemoryStore {
         self.recall_with(query, target, limit)
     }
 
+    /// Bloc mémoire rapide (Fast-Path conversationnel) : socle des souvenirs
+    /// les plus importants + rappel par hachage local, en **zéro appel réseau**
+    /// vers LM Studio. Économise ~50–500 ms sur les questions directes.
+    pub fn context_block_fast(&self, query: &str, limit: usize) -> Result<String> {
+        let base = self.list(BASE_MEMORY_COUNT)?;
+        let hits = self.recall_with(query, None, limit)?;
+        let (block, recalled) = Self::format_context_block(hits, base);
+        self.note_usage(&recalled);
+        Ok(block)
+    }
+
+    /// Compte l'usage des souvenirs rappelés. Un échec d'écriture ne doit pas
+    /// priver le tour de sa mémoire : il est seulement journalisé.
+    fn note_usage(&self, ids: &[String]) {
+        if let Err(e) = self.mark_used(ids) {
+            log::warn!("[memory] compteur d'usage non mis à jour : {e}");
+        }
+    }
+
     pub fn count(&self) -> Result<i64> {
         Ok(self
             .db
@@ -324,12 +343,22 @@ impl MemoryStore {
     pub async fn context_block(&self, query: &str, limit: usize) -> Result<String> {
         let base = self.list(BASE_MEMORY_COUNT)?;
         let hits = self.recall_semantic(query, limit).await?;
+        let (block, recalled) = Self::format_context_block(hits, base);
+        self.note_usage(&recalled);
+        Ok(block)
+    }
+
+    /// Bloc texte + identifiants des souvenirs **rappelés** qui y sont
+    /// entrés (le socle n'en fait pas partie : il est chargé à chaque tour).
+    fn format_context_block(hits: Vec<MemoryHit>, base: Vec<Memory>) -> (String, Vec<String>) {
         let mut seen = std::collections::HashSet::new();
         let mut lines = Vec::new();
+        let mut recalled = Vec::new();
         let mut used = 0usize;
         // Le rappel passe d'abord : il est propre à la demande ; le socle
         // complète dans le budget restant.
-        for memory in hits.into_iter().map(|h| h.memory).chain(base) {
+        let tagged = hits.into_iter().map(|h| (h.memory, true)).chain(base.into_iter().map(|m| (m, false)));
+        for (memory, from_recall) in tagged {
             if !seen.insert(memory.id.clone()) {
                 continue;
             }
@@ -340,11 +369,14 @@ impl MemoryStore {
             }
             used += size;
             lines.push(line);
+            if from_recall {
+                recalled.push(memory.id);
+            }
         }
         if lines.is_empty() {
-            return Ok(String::new());
+            return (String::new(), recalled);
         }
-        Ok(format!("Ce que Jimy sait de l'utilisateur :\n{}\n", lines.join("\n")))
+        (format!("Ce que Jimy sait de l'utilisateur :\n{}\n", lines.join("\n")), recalled)
     }
 
     pub fn mark_used(&self, ids: &[String]) -> Result<()> {
@@ -481,6 +513,27 @@ mod tests {
         // Pas de doublon si le rappel retrouve aussi un souvenir du socle.
         let block = store.context_block("Jimmy parle français", 6).await.unwrap();
         assert_eq!(block.matches("s'appelle Jimmy").count(), 1, "{block}");
+    }
+
+    /// Un souvenir ramené par le rappel et injecté dans le prompt compte comme
+    /// utilisé ; le socle, chargé à chaque tour sans rapport avec la demande,
+    /// ne compte pas (sinon le compteur ne mesure plus rien).
+    #[tokio::test]
+    async fn le_rappel_compte_l_usage() {
+        let store = store();
+        let rust = store
+            .remember(MemoryKind::Semantic, "Jimmy utilise Rust pour son backend", "test", 0.5)
+            .unwrap();
+        let socle = store
+            .remember(MemoryKind::Semantic, "L'utilisateur aime le café noir", "test", 0.9)
+            .unwrap();
+        let usage = |id: &str| store.list(10).unwrap().into_iter().find(|m| m.id == id).unwrap().use_count;
+
+        store.context_block("quel langage pour le backend Rust", 6).await.unwrap();
+        assert_eq!(usage(&rust), 1, "rappel du chemin complet");
+        store.context_block_fast("backend Rust", 6).unwrap();
+        assert_eq!(usage(&rust), 2, "rappel du chemin rapide");
+        assert_eq!(usage(&socle), 0, "le socle seul ne compte pas");
     }
 
     #[test]

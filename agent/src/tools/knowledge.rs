@@ -47,6 +47,11 @@ impl Tool for SearchMemory {
             if hits.is_empty() {
                 return Ok("Rien dans la mémoire pour cette requête.".into());
             }
+            // Souvenirs remis au modèle : ils comptent comme utilisés.
+            let ids: Vec<String> = hits.iter().map(|hit| hit.memory.id.clone()).collect();
+            if let Err(e) = ctx.memory.mark_used(&ids) {
+                log::warn!("[memory] compteur d'usage non mis à jour : {e}");
+            }
             Ok(hits
                 .iter()
                 .map(|hit| format!("- ({:.2}) [{}] {}", hit.score, hit.memory.kind.as_str(), hit.memory.content))
