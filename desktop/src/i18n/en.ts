@@ -27,6 +27,8 @@ export const en: Messages = {
   // ── Brand and "System" card ─────────────────────────────────────────────
   "brand.local": "local",
   "brand.devRepo": "local repository",
+  "sidebar.collapse": "Collapse sidebar",
+  "sidebar.expand": "Expand sidebar",
   "system.title": "System",
   "system.update": "update",
   "system.updateHint": "Update available: type /update in the Chat",

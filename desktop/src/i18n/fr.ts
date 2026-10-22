@@ -30,6 +30,8 @@ export const fr = {
   // ── Marque et carte « Système » ─────────────────────────────────────────
   "brand.local": "local",
   "brand.devRepo": "dépôt local",
+  "sidebar.collapse": "Réduire le menu latéral",
+  "sidebar.expand": "Déplier le menu latéral",
   "system.title": "Système",
   "system.update": "mise à jour",
   "system.updateHint": "Mise à jour disponible : tape /update dans le Chat",

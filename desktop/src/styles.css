@@ -120,6 +120,10 @@ body {
   grid-template-columns: 272px 1fr;
 }
 
+#app.sidebar-collapsed {
+  grid-template-columns: 64px 1fr;
+}
+
 /* Étiquette en capitales espacées (« PROJET », « SYSTÈME ») : le motif
    récurrent de la maquette, réutilisable par toutes les vues. */
 .kicker {
@@ -3159,27 +3163,33 @@ button.icon-only {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 14px 10px 8px 16px;
+  padding: 12px 8px 8px 12px;
+  min-width: 0;
 }
 
 .conv-head h2 {
   margin: 0 auto 0 0;
-  font: 800 15px/1 var(--display);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 800 13.5px/1.2 var(--display);
   letter-spacing: -0.01em;
   color: var(--title);
 }
 
 .conv-new {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 10px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 9px;
   border: 0;
   border-radius: 8px;
   background: var(--accent);
   color: var(--on-accent);
-  font: 800 12px/1 var(--sans);
+  font: 800 11.5px/1 var(--sans);
   cursor: pointer;
 }
 
@@ -3189,8 +3199,9 @@ button.icon-only {
 
 .conv-toggle,
 .conv-new-mini {
-  width: 30px;
-  height: 30px;
+  flex: none;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3683,4 +3694,85 @@ button.icon-only {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+/* ── Menu latéral gauche repliable (.sidebar.collapsed) ──────────────────── */
+.sidebar-toggle {
+  margin-left: auto;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-raised);
+  color: var(--title);
+}
+
+.sidebar.collapsed {
+  padding: 36px 8px 14px;
+  align-items: center;
+}
+
+.sidebar.collapsed .brand {
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+}
+
+.sidebar.collapsed .brand-mark {
+  width: 38px;
+  height: 38px;
+}
+
+.sidebar.collapsed .brand-text {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-toggle {
+  margin-left: 0;
+}
+
+.sidebar.collapsed .nav {
+  width: 100%;
+  align-items: center;
+}
+
+.sidebar.collapsed .nav-item {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
+.sidebar.collapsed .nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sidebar.collapsed .sidebar-status {
+  padding: 8px 4px;
+  align-items: center;
+}
+
+.sidebar.collapsed .sidebar-status .status-line,
+.sidebar.collapsed .sidebar-status .kicker,
+.sidebar.collapsed .sidebar-status .uptodate-badge {
+  display: none;
 }

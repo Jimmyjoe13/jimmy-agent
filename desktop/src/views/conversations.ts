@@ -38,11 +38,6 @@ export interface Rail {
   dispose: () => void;
 }
 
-/** Sous cette largeur de fenêtre, la liste se replie d'elle-même : la
- *  fenêtre par défaut (1 040 px) avec l'explorateur ouvert ne laissait au
- *  fil qu'environ 180 px (22 octobre). */
-const NARROW_QUERY = "(max-width: 1279px)";
-
 /** Nom affiché d'un chemin de projet : son dernier dossier. */
 export function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -104,18 +99,11 @@ export function conversationRail(options: RailOptions): Rail {
   let tasks: TaskInfo[] = [];
   // Filtre de projet (chemin), null = tous.
   let filter: string | null = null;
-  // Préférence de l'utilisateur (fenêtre large), mémorisée.
+  // Préférence de l'utilisateur, mémorisée : la liste des conversations reste
+  // visible par défaut (c'est le menu latéral principal de gauche qui se
+  // replie en fenêtre étroite pour lui laisser de la place).
   let collapsed = loadCollapsed();
-  // Fenêtre étroite : repliée d'office, sauf si l'utilisateur la déplie
-  // (le temps de la vue, sans toucher à sa préférence).
-  const narrow = window.matchMedia(NARROW_QUERY);
-  let openWhileNarrow = false;
-  const isCollapsed = () => (narrow.matches ? !openWhileNarrow : collapsed);
-  const onWidth = () => {
-    openWhileNarrow = false;
-    render();
-  };
-  narrow.addEventListener("change", onWidth);
+  const isCollapsed = () => collapsed;
   let searchTimer: number | undefined;
 
   const element = h("aside", { class: "conv-rail", "aria-label": t("rail.title") });
@@ -291,17 +279,12 @@ export function conversationRail(options: RailOptions): Rail {
   }
 
   function toggle() {
-    if (narrow.matches) {
-      // Fenêtre étroite : dépliée pour un temps, préférence intacte.
-      openWhileNarrow = !openWhileNarrow;
-    } else {
-      collapsed = !collapsed;
-      saveCollapsed(collapsed);
-    }
+    collapsed = !collapsed;
+    saveCollapsed(collapsed);
     render();
   }
 
   render();
   void refresh();
-  return { element, refresh, dispose: () => narrow.removeEventListener("change", onWidth) };
+  return { element, refresh, dispose: () => undefined };
 }

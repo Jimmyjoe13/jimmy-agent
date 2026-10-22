@@ -244,7 +244,42 @@ async function main() {
     for (const handler of handlers) handler(event);
   });
 
+  const SIDEBAR_KEY = "jimy.sidebar.collapsed";
+  const narrowWindow = window.matchMedia("(max-width: 1180px)");
+  let sidebarPref: boolean | null = (() => {
+    try {
+      const v = localStorage.getItem(SIDEBAR_KEY);
+      return v === "1" ? true : v === "0" ? false : null;
+    } catch {
+      return null;
+    }
+  })();
+  const isSidebarCollapsed = () => (sidebarPref !== null ? sidebarPref : narrowWindow.matches);
+  const applySidebarState = () => {
+    const collapsed = isSidebarCollapsed();
+    root.classList.toggle("sidebar-collapsed", collapsed);
+    sidebar.classList.toggle("collapsed", collapsed);
+  };
+  narrowWindow.addEventListener("change", () => {
+    applySidebarState();
+    renderSidebar();
+  });
+
+  function toggleSidebar() {
+    const next = !isSidebarCollapsed();
+    sidebarPref = next;
+    try {
+      localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
+    } catch {
+      /* stockage indisponible */
+    }
+    applySidebarState();
+    renderSidebar();
+  }
+
   function renderSidebar() {
+    applySidebarState();
+    const collapsed = isSidebarCollapsed();
     const info = ctx.status;
     const voice = ctx.voice;
     const voiceLabel = info.tts.voices.find((v) => v.id === info.tts.voice)?.label ?? t("system.voiceNone");
@@ -262,6 +297,17 @@ async function main() {
           h("strong", {}, "Jimy"),
           h("span", { class: "brand-sub" }, `v${info.version} · ${info.dev ? t("brand.devRepo") : t("brand.local")}`),
         ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "sidebar-toggle",
+            title: collapsed ? t("sidebar.expand") : t("sidebar.collapse"),
+            "aria-label": collapsed ? t("sidebar.expand") : t("sidebar.collapse"),
+            onclick: () => toggleSidebar(),
+          },
+          icon(collapsed ? "chevron-right" : "chevron-left", 16, 2.2),
+        ),
       ),
       h(
         "nav",
@@ -271,10 +317,11 @@ async function main() {
             "button",
             {
               class: `nav-item ${route === entry.id ? "active" : ""}`,
+              title: routeLabel(entry.id),
               onclick: () => ctx.navigate(entry.id),
             },
             h("span", { class: "nav-icon" }, icon(entry.icon, 20, 1.6)),
-            routeLabel(entry.id),
+            h("span", { class: "nav-label" }, routeLabel(entry.id)),
           ),
         ),
       ),

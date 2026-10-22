@@ -92,6 +92,12 @@ let stepPage = null;
   });
 
   await step("Navigation : une seule vue montée par page", async () => {
+    const toggle = p.locator(".sidebar-toggle");
+    expect((await toggle.count()) === 1, "bouton de repli du menu latéral absent");
+    const wasCollapsed = await p.locator(".sidebar.collapsed").count();
+    await toggle.click();
+    expect((await p.locator(".sidebar.collapsed").count()) === (wasCollapsed ? 0 : 1), "le menu latéral ne change pas d'état");
+    await toggle.click();
     for (const label of ["Discuter", "Voix", "Mémoire", "Outils", "Apparence", "Archives", "Réglages", "Diagnostic"]) {
       await nav(label);
       const n = await p.$$eval("main.content > *", (els) => els.length);
@@ -99,7 +105,7 @@ let stepPage = null;
       const title = await p.locator(".topbar h1").textContent();
       expect(title === label, `titre « ${title} » au lieu de « ${label} »`);
     }
-    return "8 vues";
+    return "8 vues + repli du menu latéral OK";
   });
 
   await step("Fenêtre : barre de titre intégrée (agrandir puis restaurer)", async () => {
