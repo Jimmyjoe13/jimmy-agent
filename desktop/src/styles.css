@@ -3575,3 +3575,112 @@ button.icon-only {
   background: var(--bg-input);
   border: 1px solid var(--border);
 }
+
+/* ── Étape 5 : Accueil & Chantiers dans Discuter ──────────────────────────── */
+.home-chantiers-host {
+  width: 100%;
+  max-width: 680px;
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.home-resume-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px rgba(255, 106, 69, 0.35);
+}
+
+.home-resume-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.home-resume-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.home-resume-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.home-resume-title {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.home-chantiers-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+
+.home-chantiers-head {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.home-chantier-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+}
+
+.home-chantier-row:hover {
+  background: var(--bg-hover);
+}
+
+.home-chantier-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  margin-top: 6px;
+  flex: none;
+  background: var(--jimy-mid, #5b5bf0);
+}
+
+.home-chantier-dot.waiting {
+  background: var(--accent);
+}
+
+.home-chantier-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}

@@ -1010,6 +1010,7 @@ let stepPage = null;
     await p.keyboard.press("Control+k");
     await p.waitForSelector(".history-search", { timeout: 5000 });
     await p.locator(".history-search").fill("");
+    await p.waitForSelector(".list-row", { timeout: 5000 });
     const full = await p.locator(".list-row").count();
     expect(full > 0, "le filtre remis à zéro : aucune session listée");
     return `${groups.length} groupe(s), recherche et Ctrl+K OK`;

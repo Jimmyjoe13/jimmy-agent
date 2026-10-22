@@ -375,6 +375,33 @@ impl App {
                     detected_at.elapsed().as_millis()
                 );
 
+                // Commande vocale « nouvelle conversation » / « nouveau sujet » (lot C) :
+                // ouvre immédiatement une session neuve sans passer par le modèle.
+                if super::is_new_session_command(&command) {
+                    log::info!("[voice] nouvelle conversation demandée à la voix");
+                    self.focus_conversation(None);
+                    let session = self.conversation_for_voice();
+                    emit(&events, AgentEvent::Spoken { text: command.clone(), session_id: session.clone() }).await;
+                    let reply = crate::i18n::new_session_reply(self.lang());
+                    let _ = self.history.append(&session, &crate::core::types::Message::user(command));
+                    let _ = self.history.append(&session, &crate::core::types::Message::assistant(reply));
+                    emit(&events, AgentEvent::Final { text: reply.into() }).await;
+                    self.speak(reply).await;
+                    tokio::time::sleep(SPEAKER_TAIL).await;
+                    runtime.drain();
+                    let window_ms = self.settings().voice.follow_up_ms;
+                    if window_ms > 0 {
+                        let window = Duration::from_millis(window_ms);
+                        follow_until = Some(Instant::now() + window);
+                        emit(&events, AgentEvent::State { state: AvatarState::Listening, detail: "À toi".into() }).await;
+                        phase(&events, "your_turn", window).await;
+                    } else {
+                        emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
+                        phase(&events, "idle", Duration::ZERO).await;
+                    }
+                    continue;
+                }
+
                 // 5. L'agent répond, Jimmy le dit à voix haute.
                 follow_until = None;
                 let ok = answer_command(&self, &events, &command, &runtime, rate, threshold).await;

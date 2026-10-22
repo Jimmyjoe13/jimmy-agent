@@ -486,6 +486,13 @@ impl App {
         let approvals = Arc::new(sensitive::Approvals::load(paths.data.join("approvals.json")));
         let licences = Arc::new(licence::Licences::load(paths.data.join("licences.json")));
         let premium_dir = paths.data.join("premium");
+        let tasks = Arc::new(tasks::Tasks::default());
+        let tasks_state_file = paths.data.join("tasks_state.json");
+        let recovered = tasks::Tasks::recover_interrupted(&tasks_state_file, &history);
+        if recovered > 0 {
+            log::info!("[tasks] {recovered} tâche(s) de fond interrompue(s) notée(s) dans l'historique");
+        }
+        tasks.set_state_file(tasks_state_file);
 
         Ok(Arc::new(App {
             paths,
@@ -516,7 +523,7 @@ impl App {
             voice_session: std::sync::Mutex::new(None),
             stop_signal: tokio::sync::watch::channel(0).0,
             running: std::sync::atomic::AtomicUsize::new(0),
-            tasks: Arc::new(tasks::Tasks::default()),
+            tasks,
             pending_captures: std::sync::Mutex::new(Vec::new()),
             prefetched_tts: std::sync::Mutex::new(None),
         }))
@@ -1578,7 +1585,7 @@ impl App {
     /// et la boucle vocale : avant, la voix ignorait le projet.
     pub fn session_context(&self, session_id: &str) -> (Settings, tools::ToolContext) {
         let mut settings = self.settings();
-        let mut context = self.tool_context();
+        let mut context = self.tool_context().with_session(self.history.clone(), session_id.to_string());
         if let Some(project) = self
             .history
             .project(session_id)

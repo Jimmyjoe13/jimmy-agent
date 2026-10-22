@@ -1150,6 +1150,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       );
     const title = h("h2", { class: "chat-empty-title" }, t("chat.empty.before"));
     title.append(h("em", {}, capitalize(ctx.status.stt.wake_word)), t("chat.empty.after"));
+    const chantiersHost = h("div", { class: "home-chantiers-host" });
     mount(
       stream,
       h(
@@ -1171,8 +1172,74 @@ export function chatView(ctx: AppContext): HTMLElement {
           suggest(t("chat.suggest.vault"), t("chat.suggest.vaultPrompt")),
           suggest(t("chat.suggest.day"), t("chat.suggest.dayPrompt")),
         ),
+        chantiersHost,
       ),
     );
+    void api
+      .chantiersList(project)
+      .then((chantiers) => {
+        if (!chantiersHost.isConnected || chantiers.length === 0) return;
+        const lead = chantiers.find((c) => c.status === "attente") ?? chantiers[0];
+        const resumeLead = () => {
+          if (lead.sessionId) void openSession(lead.sessionId);
+          else {
+            input.value = `${lead.title}${lead.nextStep ? ` — ${lead.nextStep}` : ""}`;
+            autosize();
+            input.focus();
+          }
+        };
+        const hero = h(
+          "section",
+          { class: "home-resume-card", "aria-label": t("home.resumeKicker") },
+          h(
+            "div",
+            { class: "home-resume-main" },
+            h(
+              "span",
+              { class: "home-resume-kicker" },
+              h("span", { class: "home-resume-dot" }),
+              `${t("home.resumeKicker")} · ${lead.status === "attente" ? t("home.waiting") : t("home.open")}`,
+            ),
+            h("strong", { class: "home-resume-title" }, lead.title),
+            lead.nextStep ? h("span", { class: "note" }, t("home.nextStep", { next: lead.nextStep })) : null,
+          ),
+          h("button", { type: "button", class: "primary home-resume-btn", onclick: resumeLead }, t("home.resumeBtn")),
+        );
+        const listCard =
+          chantiers.length > 1
+            ? h(
+                "section",
+                { class: "home-chantiers-card" },
+                h("strong", { class: "home-chantiers-head" }, `${t("home.chantiersTitle")} · ${chantiers.length}`),
+                ...chantiers.slice(0, 5).map((c) =>
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "home-chantier-row",
+                      onclick: () => {
+                        if (c.sessionId) void openSession(c.sessionId);
+                        else {
+                          input.value = `${c.title}${c.nextStep ? ` — ${c.nextStep}` : ""}`;
+                          autosize();
+                          input.focus();
+                        }
+                      },
+                    },
+                    h("span", { class: `home-chantier-dot${c.status === "attente" ? " waiting" : ""}` }),
+                    h(
+                      "span",
+                      { class: "home-chantier-text" },
+                      h("strong", {}, c.title),
+                      c.nextStep ? h("span", { class: "note" }, c.nextStep) : null,
+                    ),
+                  ),
+                ),
+              )
+            : null;
+        mount(chantiersHost, hero, listCard);
+      })
+      .catch(() => undefined);
   }
 
   /**

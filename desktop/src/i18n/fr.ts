@@ -857,6 +857,12 @@ export const fr = {
   "settings.brain.roleVoiceHint": "Réponses parlées (onglet Voix)",
   "settings.brain.roleMemory": "Mémoire",
   "settings.brain.roleMemoryHint": "Résumés, titres, chantiers",
+  "home.resumeKicker": "À reprendre",
+  "home.waiting": "t'attend",
+  "home.open": "en cours",
+  "home.nextStep": "Prochaine étape : {next}",
+  "home.resumeBtn": "Reprendre",
+  "home.chantiersTitle": "Chantiers ouverts",
 } as const;
 
 export type Key = keyof typeof fr;

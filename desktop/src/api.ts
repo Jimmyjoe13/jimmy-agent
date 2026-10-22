@@ -94,6 +94,16 @@ export interface TaskInfo {
   elapsedSecs: number;
 }
 
+/** Chantier suivi entre conversations (`chantiers_list`). */
+export interface ChantierInfo {
+  id: string;
+  title: string;
+  status: string;
+  nextStep: string;
+  sessionId: string | null;
+  updatedAt: string;
+}
+
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
 export interface VoiceStatus {
   running: boolean;
@@ -572,6 +582,7 @@ export const api = {
   /** Arrêt d'urgence de la tâche en cours (et de la voix de Jimy). */
   agentStop: () => invoke<boolean>("agent_stop"),
   tasksList: () => invoke<TaskInfo[]>("tasks_list"),
+  chantiersList: (project?: string | null) => invoke<ChantierInfo[]>("chantiers_list", { project: project ?? null }),
   taskStop: (id: string) => invoke<boolean>("task_stop", { id }),
   ttsVoices: () => invoke<{ current: string; presets: VoiceInfo[]; library: VoiceInfo[] }>("tts_voices"),
   ttsSearchVoices: (query: string) => invoke<VoiceInfo[]>("tts_search_voices", { query }),

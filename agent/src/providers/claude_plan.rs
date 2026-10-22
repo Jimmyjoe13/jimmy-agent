@@ -227,6 +227,8 @@ const CC_ALIASES: &[(&str, &str)] = &[
     ("mcp_call", "Agent"),
     ("mcp_list_tools", "LSP"),
     ("mcp_add_server", "ExitPlanMode"),
+    ("search_sessions", "SessionSearch"),
+    ("set_project", "ProjectSwitch"),
 ];
 
 /// Alias Claude Code d'un nom d'outil Jimmy (`None` = nom sans équivalent,

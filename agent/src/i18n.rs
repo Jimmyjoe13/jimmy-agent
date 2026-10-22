@@ -202,6 +202,13 @@ pub fn bg_failed_speech(lang: Lang) -> &'static str {
     }
 }
 
+pub fn new_session_reply(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Fr => "Nouvelle conversation ouverte. Dis-moi de quoi on parle.",
+        Lang::En => "New conversation started. Tell me what's next.",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -695,6 +695,35 @@ pub fn is_confirm_command(text: &str) -> bool {
         })
 }
 
+/// Commande vocale pour ouvrir une nouvelle conversation sans attendre les 10
+/// minutes d'inactivité (« nouvelle conversation », « nouveau sujet », « on
+/// change de sujet », « new conversation »).
+pub fn is_new_session_command(text: &str) -> bool {
+    let normalized = crate::memory::embed::normalize(text);
+    let words: Vec<&str> = normalized
+        .split(' ')
+        .filter(|w| !w.is_empty() && !matches_wake_word(w, "jimmy"))
+        .collect();
+    if words.is_empty() || words.len() > 6 {
+        return false;
+    }
+    let joined = words.join(" ");
+    matches!(
+        joined.as_str(),
+        "nouvelle conversation"
+            | "nouvelle session"
+            | "nouveau sujet"
+            | "change de sujet"
+            | "on change de sujet"
+            | "ouvre une nouvelle conversation"
+            | "ouvre une nouvelle session"
+            | "new conversation"
+            | "new session"
+            | "new topic"
+            | "change topic"
+    )
+}
+
 pub fn play_bytes(bytes: &[u8], sample_rate: u32) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
@@ -916,6 +945,10 @@ mod tests {
         for text in ["Confirme le serveur de dev.", "Je confirme que le rapport est prêt", "", "Jimmy.", "c'est confirmé depuis hier ?"] {
             assert!(!is_confirm_command(text), "« {text} » ne doit pas confirmer");
         }
+        for text in ["Nouvelle conversation.", "nouveau sujet !", "On change de sujet", "New conversation"] {
+            assert!(is_new_session_command(text), "« {text} » doit ouvrir une nouvelle conversation");
+        }
+        assert!(!is_new_session_command("Explique-moi ce nouveau sujet en détail"));
     }
 
     /// Stéréo 48 kHz → mono 16 kHz : une seconde d'entrée doit donner une

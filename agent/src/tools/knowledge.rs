@@ -236,6 +236,168 @@ impl Tool for VaultWrite {
         })
     }
 }
+
+// ── Sessions et Projets (Lots B et C) ────────────────────────────────────────
+
+pub struct SearchSessions;
+
+impl Tool for SearchSessions {
+    fn name(&self) -> &str {
+        "search_sessions"
+    }
+    fn description(&self) -> &str {
+        "Cherche dans les conversations passées de Jimy (titres, projets, résumés et texte des échanges) pour retrouver ce qui a été dit ou fait sur un sujet."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "query": {"type": "string", "description": "Mots-clés ou sujet à chercher dans les conversations."},
+                "limit": {"type": "integer", "description": "Nombre maximal de conversations (défaut 5)."}
+            }),
+            &["query"],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Read
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            ctx.check_granted(Capability::Read, "historique des conversations")?;
+            let history = ctx
+                .history
+                .as_ref()
+                .ok_or_else(|| Error::Tool("historique indisponible".into()))?;
+            let query = arg_str(args, "query").ok_or_else(|| Error::Tool("« query » manquant".into()))?;
+            let limit = arg_u64(args, "limit", 5).min(15) as usize;
+            let found = history.search_sessions(Some(&query), false, limit)?;
+            if found.is_empty() {
+                return Ok("Aucune conversation trouvée pour cette recherche.".into());
+            }
+            let mut out = Vec::new();
+            for s in found {
+                let project = s.project.as_deref().unwrap_or("sans projet");
+                let recap = history.recap(&s.id).ok().map(|r| r.summary).unwrap_or_default();
+                let msgs = history.conversation(&s.id, 4).unwrap_or_default();
+                let tail: String = msgs
+                    .iter()
+                    .map(|m| {
+                        let snippet: String = m.content.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
+                        format!("  {} : {snippet}", m.role.as_str())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let mut block = format!("- « {} » [id={}, projet={}, {} message(s), màj {}]", s.title, s.id, project, s.message_count, s.updated_at);
+                if !recap.trim().is_empty() {
+                    let r: String = recap.chars().take(300).collect();
+                    block.push_str(&format!("\n  Résumé : {r}"));
+                }
+                if !tail.is_empty() {
+                    block.push_str(&format!("\n{tail}"));
+                }
+                out.push(block);
+            }
+            Ok(super::clip(&out.join("\n\n"), MAX_TOOL_OUTPUT))
+        })
+    }
+}
+
+pub struct SetProject;
+
+impl Tool for SetProject {
+    fn name(&self) -> &str {
+        "set_project"
+    }
+    fn description(&self) -> &str {
+        "Rattache la conversation courante à un projet (dossier sur le disque), notamment quand l'utilisateur dit à la voix « on bosse sur X » ou « passe sur le projet Y ». Accepte un nom de projet approximatif ou un chemin."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "project": {"type": "string", "description": "Nom du projet (ex. « jimmy-agent », « synaptiq ») ou chemin complet du dossier."}
+            }),
+            &["project"],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Read
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            let query = arg_str(args, "project").ok_or_else(|| Error::Tool("« project » manquant".into()))?;
+            let history = ctx
+                .history
+                .as_ref()
+                .ok_or_else(|| Error::Tool("historique indisponible".into()))?;
+            let session_id = ctx
+                .session_id
+                .as_deref()
+                .ok_or_else(|| Error::Tool("aucune conversation active".into()))?;
+
+            // 1. Chemin direct existant ?
+            let direct = std::path::PathBuf::from(&query);
+            let chosen = if direct.is_dir() {
+                Some(direct)
+            } else {
+                // 2. Cherche parmi les projets récents de l'historique et les sous-dossiers de `workspace`.
+                let needle = crate::memory::embed::normalize(&query);
+                let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+                if let Ok(recents) = history.recent_projects(30) {
+                    for p in recents {
+                        let pb = std::path::PathBuf::from(p);
+                        if pb.is_dir() && !candidates.contains(&pb) {
+                            candidates.push(pb);
+                        }
+                    }
+                }
+                if let Ok(entries) = std::fs::read_dir(&ctx.workspace) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() && !candidates.contains(&p) {
+                            candidates.push(p);
+                        }
+                    }
+                }
+                if let Some(parent) = ctx.workspace.parent() {
+                    if let Ok(entries) = std::fs::read_dir(parent) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            if p.is_dir() && !candidates.contains(&p) {
+                                candidates.push(p);
+                            }
+                        }
+                    }
+                }
+                candidates.into_iter().find(|p| {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    let norm = crate::memory::embed::normalize(name);
+                    !norm.is_empty() && (norm == needle || norm.contains(&needle) || needle.contains(&norm))
+                })
+            };
+
+            let Some(folder) = chosen else {
+                return Err(Error::Tool(format!(
+                    "Projet « {query} » introuvable parmi les projets récents et le dossier de travail ({}).",
+                    ctx.workspace.display()
+                )));
+            };
+            let folder_str = folder.to_string_lossy().to_string();
+            ctx.check(Capability::Read, &folder_str)?;
+            history.set_project(session_id, Some(&folder_str))?;
+            let extra = crate::core::prompt::read_project_instructions(&folder_str)
+                .map(|ins| format!("\n\n{ins}"))
+                .unwrap_or_default();
+            Ok(format!("Projet de la conversation réglé sur : {folder_str}{extra}"))
+        })
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +445,49 @@ mod tests {
         ctx.permissions.write().unwrap().write.granted = false;
         assert!(VaultWrite.call(&args, &ctx).await.is_err());
         assert!(Remember.call(&args, &ctx).await.is_err());
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    #[tokio::test]
+    async fn search_sessions_et_set_project_fonctionnent() {
+        let racine = std::env::temp_dir().join(format!("knowledge-proj-{}", uuid::Uuid::new_v4()));
+        let proj = racine.join("Maxence_Leads");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("AGENTS.md"), "# Consignes Maxence\nRelancer à J+3.").unwrap();
+
+        let db = Arc::new(Mutex::new(crate::db::Db::open_in_memory().expect("db")));
+        let history = Arc::new(crate::core::history::History::new(db.clone()));
+        let s1 = history.create_session("Relance des leads Maxence").unwrap();
+        history.append(&s1, &crate::core::types::Message::user("On prépare les 3 brouillons Maxence")).unwrap();
+
+        let s2 = history.create_session("Session vocale").unwrap();
+        let skills_dir = racine.join("skills");
+        let mut perms = Permissions::default();
+        perms.read.granted = true;
+        perms.read.allow_paths = vec![format!("{}/**", racine.to_string_lossy().replace('\\', "/"))];
+        let ctx = ToolContext::with_empty_images(
+            racine.clone(),
+            Arc::new(RwLock::new(perms)),
+            Arc::new(crate::memory::MemoryStore::new(db)),
+            Arc::new(crate::skills::SkillStore::new(skills_dir).unwrap()),
+            None,
+        )
+        .with_session(history.clone(), s2.clone());
+
+        let found = SearchSessions
+            .call(&serde_json::json!({"query": "brouillons Maxence"}), &ctx)
+            .await
+            .unwrap();
+        assert!(found.contains("Relance des leads Maxence"), "{found}");
+
+        let switched = SetProject
+            .call(&serde_json::json!({"project": "maxence"}), &ctx)
+            .await
+            .unwrap();
+        assert!(switched.contains("Maxence_Leads"), "{switched}");
+        assert!(switched.contains("Consignes Maxence"), "{switched}");
+        assert_eq!(history.project(&s2).unwrap().as_deref(), Some(proj.to_string_lossy().as_ref()));
+
         let _ = std::fs::remove_dir_all(&racine);
     }
 }

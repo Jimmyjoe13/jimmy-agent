@@ -106,17 +106,36 @@ impl Entry {
     }
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedTask {
+    pub id: String,
+    pub session_id: String,
+    pub title: String,
+    pub step: String,
+}
+
 /// Registre des tâches en cours.
 pub struct Tasks {
     entries: Mutex<Vec<Entry>>,
     /// Seuil de passage en fond (`DETACH_AFTER`) ; abaissé par les tests
     /// pour ne pas attendre 45 s.
     detach_after: Mutex<Duration>,
+    /// Nombre maximal de tâches de fond simultanées (1 par défaut, 1 max par session).
+    max_background: Mutex<usize>,
+    /// Fichier où les tâches de fond actives sont persistées pour signaler une
+    /// interruption au prochain lancement.
+    state_file: Mutex<Option< std::path::PathBuf>>,
 }
 
 impl Default for Tasks {
     fn default() -> Self {
-        Tasks { entries: Mutex::new(Vec::new()), detach_after: Mutex::new(DETACH_AFTER) }
+        Tasks {
+            entries: Mutex::new(Vec::new()),
+            detach_after: Mutex::new(DETACH_AFTER),
+            max_background: Mutex::new(1),
+            state_file: Mutex::new(None),
+        }
     }
 }
 
@@ -129,6 +148,61 @@ impl Tasks {
     /// Change le seuil (tests de passage en fond, qui n'attendent pas 45 s).
     pub fn set_detach_after(&self, threshold: Duration) {
         *self.detach_after.lock().unwrap_or_else(|e| e.into_inner()) = threshold;
+    }
+
+    /// Change le plafond de tâches de fond simultanées (au plus une par session).
+    pub fn set_max_background(&self, max: usize) {
+        *self.max_background.lock().unwrap_or_else(|e| e.into_inner()) = max.max(1);
+    }
+
+    /// Attache un fichier d'état sur disque (`data/tasks_state.json`).
+    pub fn set_state_file(&self, path: std::path::PathBuf) {
+        *self.state_file.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+    }
+
+    /// Au démarrage : si des tâches de fond tournaient lors de la fermeture
+    /// précédente, les note comme interrompues dans leur conversation et vide
+    /// le fichier. Renvoie le nombre de tâches rattrapées.
+    pub fn recover_interrupted(path: &std::path::Path, history: &crate::core::history::History) -> usize {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return 0;
+        };
+        let _ = std::fs::remove_file(path);
+        let Ok(persisted) = serde_json::from_str::<Vec<PersistedTask>>(&raw) else {
+            return 0;
+        };
+        let mut count = 0;
+        for task in persisted {
+            let note = format!(
+                "(Tâche de fond « {} » interrompue par la fermeture de Jimy.)",
+                task.title
+            );
+            if history.append(&task.session_id, &crate::core::types::Message::assistant(note)).is_ok() {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    fn persist_locked(&self, entries: &[Entry]) {
+        let Some(path) = self.state_file.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return;
+        };
+        let bg: Vec<PersistedTask> = entries
+            .iter()
+            .filter(|e| e.background)
+            .map(|e| PersistedTask {
+                id: e.id.clone(),
+                session_id: e.session_id.clone(),
+                title: e.title.clone(),
+                step: e.step.clone(),
+            })
+            .collect();
+        if bg.is_empty() {
+            let _ = std::fs::remove_file(&path);
+        } else if let Ok(json) = serde_json::to_string_pretty(&bg) {
+            let _ = std::fs::write(&path, json);
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
@@ -155,19 +229,30 @@ impl Tasks {
 
     /// Retire une tâche finie (ou arrêtée).
     pub fn end(&self, id: &str) {
-        self.lock().retain(|e| e.id != id);
+        let mut entries = self.lock();
+        entries.retain(|e| e.id != id);
+        self.persist_locked(&entries);
     }
 
-    /// Passe la tâche en arrière-plan, si aucune autre n'y est déjà (une
-    /// seule à la fois). `false` : elle reste au premier plan.
+    /// Passe la tâche en arrière-plan, si sa session n'en a pas déjà une et que
+    /// le plafond `max_background` n'est pas atteint. `false` : elle reste au
+    /// premier plan.
     pub fn try_detach(&self, id: &str) -> bool {
+        let max_bg = *self.max_background.lock().unwrap_or_else(|e| e.into_inner());
         let mut entries = self.lock();
-        if entries.iter().any(|e| e.background && e.id != id) {
+        let Some(target_session) = entries.iter().find(|e| e.id == id).map(|e| e.session_id.clone()) else {
+            return false;
+        };
+        if entries.iter().any(|e| e.background && e.id != id && e.session_id == target_session) {
+            return false;
+        }
+        if entries.iter().filter(|e| e.background && e.id != id).count() >= max_bg {
             return false;
         }
         match entries.iter_mut().find(|e| e.id == id) {
             Some(entry) => {
                 entry.background = true;
+                self.persist_locked(&entries);
                 true
             }
             None => false,
@@ -178,7 +263,7 @@ impl Tasks {
         self.lock().iter().any(|e| e.id == id && e.background)
     }
 
-    /// Nombre de tâches en arrière-plan (0 ou 1).
+    /// Nombre de tâches en arrière-plan.
     pub fn background_count(&self) -> usize {
         self.lock().iter().filter(|e| e.background).count()
     }
@@ -186,8 +271,12 @@ impl Tasks {
     /// Note la dernière étape (affichée dans le bandeau du Chat et donnée au
     /// modèle quand on lui demande où en est la tâche).
     pub fn set_step(&self, id: &str, step: &str) {
-        if let Some(entry) = self.lock().iter_mut().find(|e| e.id == id) {
+        let mut entries = self.lock();
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
             entry.step = step.chars().take(120).collect();
+            if entry.background {
+                self.persist_locked(&entries);
+            }
         }
     }
 
@@ -315,5 +404,43 @@ mod tests {
         assert!(*rx_b.borrow());
         tasks.end(&a);
         assert!(!tasks.cancel(&a), "tâche finie : plus rien à arrêter");
+    }
+
+    #[test]
+    fn parallelisme_une_tache_de_fond_par_session_jusqu_au_plafond() {
+        let tasks = Tasks::default();
+        tasks.set_max_background(3);
+        let (a1, _) = tasks.begin("s1", "tâche 1 de s1");
+        let (a2, _) = tasks.begin("s1", "tâche 2 de s1");
+        let (b1, _) = tasks.begin("s2", "tâche 1 de s2");
+        let (c1, _) = tasks.begin("s3", "tâche 1 de s3");
+        let (d1, _) = tasks.begin("s4", "tâche 1 de s4");
+        assert!(tasks.try_detach(&a1));
+        assert!(!tasks.try_detach(&a2), "une seule tâche de fond par session");
+        assert!(tasks.try_detach(&b1), "session s2 peut aussi passer en fond");
+        assert!(tasks.try_detach(&c1), "session s3 peut aussi passer en fond");
+        assert!(!tasks.try_detach(&d1), "plafond de 3 atteint");
+        assert_eq!(tasks.background_count(), 3);
+    }
+
+    #[test]
+    fn les_taches_interrompues_au_redemarrage_sont_notees_dans_leur_session() {
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().unwrap()));
+        let history = crate::core::history::History::new(db);
+        let session = history.create_session("Audit").unwrap();
+        let state_file = std::env::temp_dir().join(format!("tasks-state-{}.json", uuid::Uuid::new_v4()));
+
+        let tasks = Tasks::default();
+        tasks.set_state_file(state_file.clone());
+        let (id, _) = tasks.begin(&session, "Audit complet du serveur");
+        assert!(tasks.try_detach(&id));
+        assert!(state_file.is_file());
+
+        // Simule un redémarrage : `recover_interrupted` lit le fichier et note l'interruption.
+        let recovered = Tasks::recover_interrupted(&state_file, &history);
+        assert_eq!(recovered, 1);
+        assert!(!state_file.is_file());
+        let msgs = history.messages(&session, 10).unwrap();
+        assert!(msgs.iter().any(|m| m.content.contains("interrompue par la fermeture")), "{msgs:?}");
     }
 }

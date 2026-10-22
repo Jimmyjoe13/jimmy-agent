@@ -416,6 +416,12 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
         ));
     }
 
+    // Lot B : consignes propres au projet de la conversation (`AGENTS.md` à la
+    // racine du dossier de travail, bornées à 1 500 caractères).
+    if let Some(project_instructions) = read_project_instructions(&ctx.settings.workspace) {
+        parts.push(("projet", project_instructions));
+    }
+
     parts.push(("outils", tools_summary(&ctx.registry.names())));
 
     if let Some(block) = &ctx.chantiers {
@@ -463,6 +469,28 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
     }
 
     parts
+}
+
+/// Lit les consignes `AGENTS.md` du dossier de travail courant (si présent),
+/// bornées à 1 500 caractères pour que Jimy connaisse les conventions du projet
+/// rattaché à la conversation (lot B).
+pub fn read_project_instructions(workspace: &str) -> Option<String> {
+    let dir = std::path::Path::new(workspace.trim());
+    if !dir.is_dir() {
+        return None;
+    }
+    let candidate = dir.join("AGENTS.md");
+    let raw = std::fs::read_to_string(&candidate).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let clipped: String = if trimmed.chars().count() > 1500 {
+        format!("{}…", trimmed.chars().take(1500).collect::<String>())
+    } else {
+        trimmed.to_string()
+    };
+    Some(format!("## Consignes du projet ({})\n{clipped}", candidate.display()))
 }
 
 /// En dessous, une demande est trop pauvre pour guider seule le rappel

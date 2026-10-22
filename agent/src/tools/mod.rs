@@ -38,6 +38,9 @@ pub struct ToolContext {
     pub memory: Arc<MemoryStore>,
     pub skills: Arc<crate::skills::SkillStore>,
     pub vault: Option<Arc<crate::memory::vault::Vault>>,
+    /// Historique et session courante (pour `search_sessions` et `set_project`).
+    pub history: Option<Arc<crate::core::history::History>>,
+    pub session_id: Option<String>,
     /// Images capturées par `webcam_capture` pendant ce tour : la boucle de
     /// l'agent les joint au prochain appel au modèle (message utilisateur avec
     /// images) puis les oublie. Jamais sur disque, jamais dans l'historique —
@@ -60,8 +63,20 @@ impl ToolContext {
             memory,
             skills,
             vault,
+            history: None,
+            session_id: None,
             pending_images: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn with_session(
+        mut self,
+        history: Arc<crate::core::history::History>,
+        session_id: String,
+    ) -> Self {
+        self.history = Some(history);
+        self.session_id = Some(session_id);
+        self
     }
 }
 
@@ -194,6 +209,8 @@ impl ToolRegistry {
         self.register(Arc::new(knowledge::VaultSearch));
         self.register(Arc::new(knowledge::VaultRead));
         self.register(Arc::new(knowledge::VaultWrite));
+        self.register(Arc::new(knowledge::SearchSessions));
+        self.register(Arc::new(knowledge::SetProject));
         self.register(Arc::new(skills::ListSkills));
         self.register(Arc::new(skills::ReadSkill));
         self.register(Arc::new(skills::CreateSkill));
@@ -218,7 +235,7 @@ mod registry_tests {
         let deps = ToolDeps { http: reqwest::Client::new() };
         let registry = ToolRegistry::new();
         registry.register_defaults(&deps);
-        for name in ["system_info", "process_list", "open_path", "process_kill", "window_list", "window_focus", "app_open", "system_power", "webcam_capture", "webcam_list", "run_command", "read_file"] {
+        for name in ["system_info", "process_list", "open_path", "process_kill", "window_list", "window_focus", "app_open", "system_power", "webcam_capture", "webcam_list", "run_command", "read_file", "search_sessions", "set_project"] {
             assert!(registry.get(name).is_some(), "{name} doit être enregistré");
         }
     }

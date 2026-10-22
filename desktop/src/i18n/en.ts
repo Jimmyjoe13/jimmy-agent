@@ -854,4 +854,10 @@ export const en: Messages = {
   "settings.brain.roleVoiceHint": "Spoken replies (Voice tab)",
   "settings.brain.roleMemory": "Memory",
   "settings.brain.roleMemoryHint": "Summaries, titles, workstreams",
+  "home.resumeKicker": "Pick up where we left off",
+  "home.waiting": "waiting on you",
+  "home.open": "in progress",
+  "home.nextStep": "Next step: {next}",
+  "home.resumeBtn": "Resume",
+  "home.chantiersTitle": "Open workstreams",
 };

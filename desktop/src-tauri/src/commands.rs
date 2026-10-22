@@ -965,6 +965,33 @@ pub async fn tasks_list(state: State<'_, AppState>) -> std::result::Result<Vec<j
     Ok(state.app.tasks.list())
 }
 
+/// Chantiers ouverts (suivis d'une conversation à l'autre, filtrés par projet
+/// si demandé), pour le tableau de bord d'accueil du Chat.
+#[tauri::command]
+pub async fn chantiers_list(
+    state: State<'_, AppState>,
+    project: Option<String>,
+) -> std::result::Result<Vec<serde_json::Value>, String> {
+    let list = state
+        .app
+        .history
+        .chantiers_for(project.as_deref().filter(|p| !p.trim().is_empty()), 8)
+        .map_err(err)?;
+    Ok(list
+        .into_iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "title": c.title,
+                "status": c.status,
+                "nextStep": c.next_step,
+                "sessionId": c.session_id,
+                "updatedAt": c.updated_at,
+            })
+        })
+        .collect())
+}
+
 /// Arrête une tâche précise (bouton de la tâche de fond). `false` si elle
 /// est déjà finie.
 #[tauri::command]

@@ -314,6 +314,7 @@ pub fn run() {
                 commands::agent_stop,
                 commands::conversation_focus,
                 commands::tasks_list,
+                commands::chantiers_list,
                 commands::screen_capture,
                 commands::screen_discard,
                 commands::task_stop,

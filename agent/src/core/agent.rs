@@ -1346,7 +1346,7 @@ fn is_read_tool(name: &str) -> bool {
     matches!(
         name,
         "read_file" | "search_files" | "list_directory" | "vault_read" | "vault_search" | "search_memory"
-            | "list_skills" | "read_skill" | "mcp_list_tools" | "http_request"
+            | "search_sessions" | "list_skills" | "read_skill" | "mcp_list_tools" | "http_request"
             | "system_info" | "process_list" | "window_list" | "webcam_list"
     )
 }
