@@ -125,9 +125,12 @@ export interface Status {
   };
   tts: {
     enabled: boolean;
+    provider?: string;
+    base_url?: string;
     model: string;
     voice: string;
     has_key: boolean;
+    key_hint?: string | null;
     voices: { id: string; label: string; description: string }[];
   };
   stt: {
@@ -340,6 +343,8 @@ export interface TtsSettings {
   provider: string;
   model: string;
   voice: string;
+  base_url?: string;
+  api_key?: string;
   chars_per_minute: number;
   cues: boolean;
   max_spoken_chars: number;

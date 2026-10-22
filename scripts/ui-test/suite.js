@@ -739,6 +739,8 @@ let stepPage = null;
     const before = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).tts);
     await nav("Voix");
     await p.waitForSelector(".tts-model", { timeout: 10000 });
+    const engineCount = await p.locator(".tts-engine-tile").count();
+    expect(engineCount === 4, `${engineCount} moteur(s) de voix (attendu 4)`);
     const shown = await p.locator(".tts-model").inputValue();
     expect(shown === before.model, `modèle affiché « ${shown} », attendu « ${before.model} »`);
     const keyState = await p.locator(".tts-key-state").textContent();
@@ -779,6 +781,8 @@ let stepPage = null;
     await nav("Réglages");
     await p.locator(".subtab", { hasText: "LLM" }).click();
     await p.waitForSelector(".model-row", { timeout: 40000 });
+    expect((await p.locator(".brain-hero").count()) === 1, "carte « Jimy pense avec » absente");
+    expect((await p.locator(".brain-single-card").count()) === 1, "carte « Un seul cerveau pour tout » absente");
     const total = await p.locator(".model-row").count();
     // La borne dépend du fournisseur en place : OpenCode Go (~37) et
     // Anthropic en abonnement (~14) listent large, DeepSeek n'expose que

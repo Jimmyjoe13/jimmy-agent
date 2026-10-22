@@ -421,9 +421,8 @@ export function voiceView(ctx: AppContext): HTMLElement {
 
   void loadVoiceSettings();
 
-  // ── Synthèse vocale : clé OpenRouter et modèle TTS ───────────────────────
-  // La clé est celle du fournisseur OpenRouter (partagée avec Paramètres →
-  // LLM) : Rust la lit via `Settings::tts_key`, saisie d'abord, `.env` ensuite.
+  // ── Synthèse vocale : 4 moteurs (OpenRouter/Fish Audio, Windows, OpenAI, ElevenLabs)
+  let ttsProvider = ctx.status.tts.provider || "fish-audio";
   const openrouter = ctx.status.llm.providers.find((p) => p.id === "openrouter");
   const ttsKeyState = h(
     "p",
@@ -440,23 +439,107 @@ export function voiceView(ctx: AppContext): HTMLElement {
     autocomplete: "off",
     placeholder: openrouter?.key_from === "interface" ? t("voice.openrouter.unchanged") : "sk-or-…",
   }) as HTMLInputElement;
+  const ttsBaseUrlInput = h("input", {
+    class: "field tts-base-url",
+    type: "text",
+    value: ctx.status.tts.base_url ?? "",
+    placeholder: t("voice.engine.baseUrlPlaceholder"),
+  }) as HTMLInputElement;
+  const ttsEngineKeyInput = h("input", {
+    class: "field tts-engine-key",
+    type: "password",
+    autocomplete: "off",
+    placeholder: ctx.status.tts.key_hint ? `••••${ctx.status.tts.key_hint} (${t("voice.openrouter.unchanged")})` : "sk-…",
+  }) as HTMLInputElement;
   const ttsModelInput = h("input", { class: "field tts-model", type: "text", value: ctx.status.tts.model }) as HTMLInputElement;
   const spokenLengthSelect = h("select", { class: "field tts-length" }) as HTMLSelectElement;
 
+  const engineGrid = h("div", { class: "tts-engine-grid", role: "radiogroup", "aria-label": t("voice.engine.label") });
+  const openrouterFields = h(
+    "div",
+    { class: "tts-engine-fields" },
+    ttsKeyState,
+    field(t("voice.ttsCard.key"), ttsKeyInput),
+  );
+  const windowsFields = h("p", { class: "note" }, t("voice.engine.windowsNote"));
+  const openaiFields = h(
+    "div",
+    { class: "tts-engine-fields" },
+    field(t("voice.engine.baseUrl"), ttsBaseUrlInput),
+    field(t("voice.engine.apiKey"), ttsEngineKeyInput),
+  );
+  const elevenlabsFields = h(
+    "div",
+    { class: "tts-engine-fields" },
+    field(t("voice.engine.elevenKey"), ttsEngineKeyInput),
+  );
+  const modelRow = field(t("voice.ttsCard.model"), ttsModelInput, DEFAULT_TTS_MODEL);
+
+  function renderEngines() {
+    const engines = [
+      { id: "fish-audio", name: t("voice.engine.openrouter"), hint: t("voice.engine.openrouterHint"), badge: t("voice.engine.openrouterBadge"), good: true },
+      { id: "windows", name: t("voice.engine.windows"), hint: t("voice.engine.windowsHint"), badge: t("voice.engine.windowsBadge"), good: true },
+      { id: "openai", name: t("voice.engine.openai"), hint: t("voice.engine.openaiHint"), badge: t("voice.engine.openaiBadge"), good: false },
+      { id: "elevenlabs", name: t("voice.engine.elevenlabs"), hint: t("voice.engine.elevenlabsHint"), badge: t("voice.engine.elevenlabsBadge"), good: false },
+    ];
+    const currentId = ttsProvider === "openrouter" ? "fish-audio" : ttsProvider;
+    mount(
+      engineGrid,
+      ...engines.map((e) => {
+        const active = e.id === currentId;
+        return h(
+          "button",
+          {
+            type: "button",
+            role: "radio",
+            class: `tts-engine-tile${active ? " active" : ""}`,
+            "aria-checked": String(active),
+            onclick: () => {
+              ttsProvider = e.id;
+              renderEngines();
+            },
+          },
+          h("strong", {}, e.name),
+          h("span", { class: "note" }, e.hint),
+          h("span", { class: `badge${e.good ? " ok" : ""}` }, e.badge),
+        );
+      }),
+    );
+    const isFish = currentId === "fish-audio";
+    openrouterFields.hidden = !isFish;
+    windowsFields.hidden = currentId !== "windows";
+    openaiFields.hidden = currentId !== "openai";
+    elevenlabsFields.hidden = currentId !== "elevenlabs";
+    modelRow.hidden = currentId === "windows";
+  }
+  renderEngines();
+
   async function persistTts() {
-    // Clé d'abord : une erreur garde la saisie à l'écran.
+    const currentId = ttsProvider === "openrouter" ? "fish-audio" : ttsProvider;
+    // Clé OpenRouter d'abord si le moteur est Fish Audio / OpenRouter.
     const key = ttsKeyInput.value.trim();
-    if (key && !(await attempt(() => api.llmSetProviderKey("openrouter", key), t("guard.openrouterKey")))) return;
+    if (currentId === "fish-audio" && key && !(await attempt(() => api.llmSetProviderKey("openrouter", key), t("guard.openrouterKey")))) return;
     // Copie fraîche de Rust : la clé vient d'y être écrite, ne pas l'écraser.
     const fresh = await guard(() => api.getSettings(), t("guard.voiceSettings"));
     if (!fresh) return;
+    const providerChanged = fresh.tts.provider !== currentId;
+    fresh.tts.provider = currentId;
+    if (currentId === "openai") {
+      fresh.tts.base_url = ttsBaseUrlInput.value.trim();
+    }
+    const engineKey = ttsEngineKeyInput.value.trim();
+    if ((currentId === "openai" || currentId === "elevenlabs") && engineKey) {
+      fresh.tts.api_key = engineKey;
+    }
     fresh.tts.model = ttsModelInput.value.trim() || DEFAULT_TTS_MODEL;
     fresh.tts.max_spoken_chars = Math.min(20000, Math.max(100, Number(spokenLengthSelect.value) || 900));
     if (!(await attempt(() => api.saveSettings(fresh), t("guard.save")))) return;
     ttsKeyInput.value = "";
+    ttsEngineKeyInput.value = "";
     ttsModelInput.value = fresh.tts.model;
     syncSpokenLength(fresh.tts.max_spoken_chars);
     await ctx.refreshStatus();
+    if (providerChanged) window.dispatchEvent(new Event("jimmy-tts-provider-changed"));
     toast(t("voice.ttsSaved"));
   }
 
@@ -472,9 +555,14 @@ export function voiceView(ctx: AppContext): HTMLElement {
     spokenLengthSelect.value = String(value);
   }
 
-  // Longueur lue : valeur réglée côté Rust, 900 par défaut (config ancienne).
+  // Longueur lue et moteur : valeurs réglées côté Rust.
   void guard(() => api.getSettings(), t("guard.voiceSettings")).then((loaded) => {
-    if (loaded) syncSpokenLength(loaded.tts.max_spoken_chars ?? 900);
+    if (loaded) {
+      ttsProvider = loaded.tts.provider || "fish-audio";
+      ttsBaseUrlInput.value = loaded.tts.base_url ?? "";
+      renderEngines();
+      syncSpokenLength(loaded.tts.max_spoken_chars ?? 900);
+    }
   });
 
   // Installation neuve : whisper.cpp se télécharge au premier lancement.
@@ -604,9 +692,12 @@ export function voiceView(ctx: AppContext): HTMLElement {
         { class: "note" },
         t("voice.ttsCard.note"),
       ),
-      ttsKeyState,
-      field(t("voice.ttsCard.key"), ttsKeyInput),
-      field(t("voice.ttsCard.model"), ttsModelInput, DEFAULT_TTS_MODEL),
+      engineGrid,
+      openrouterFields,
+      windowsFields,
+      openaiFields,
+      elevenlabsFields,
+      modelRow,
       field(t("voice.ttsCard.length"), spokenLengthSelect),
       h(
         "p",

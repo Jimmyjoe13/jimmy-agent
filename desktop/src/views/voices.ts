@@ -161,6 +161,9 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
     h("div", { class: "voice-search" }, searchInput, searchButton),
     resultsBox,
   );
+  // Quand le moteur de synthèse change (onglet Voix), la liste des voix
+  // prédéfinies change aussi.
+  window.addEventListener("jimmy-tts-provider-changed", () => void load());
   void load();
   return panel;
 }

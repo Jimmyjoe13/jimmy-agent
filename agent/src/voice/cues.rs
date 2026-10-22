@@ -100,12 +100,11 @@ async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
 
     let speech = app
         .tts
-        .speak(
+        .speak_with(
+            &settings.tts,
             &settings.tts_key(&app.secrets),
-            &settings.tts.model,
-            &settings.tts.voice,
+            None,
             phrase,
-            settings.tts.chars_per_minute,
         )
         .await?;
     if speech.bytes.is_empty() {

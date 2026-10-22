@@ -280,8 +280,15 @@ pub struct TtsSettings {
     pub enabled: bool,
     pub provider: String,
     pub model: String,
-    /// Identifiant de voix Fish Audio.
+    /// Identifiant de voix (32 hex pour Fish Audio, nom de voix pour Windows/OpenAI/ElevenLabs).
     pub voice: String,
+    /// URL de base pour un moteur compatible OpenAI (ex. Kokoro local `http://127.0.0.1:8880/v1`).
+    #[serde(default)]
+    pub base_url: String,
+    /// Clé API propre au moteur TTS (ElevenLabs, OpenAI). Vide = utilise la clé
+    /// OpenRouter pour `fish-audio`/`openrouter`, ou sans clé pour `windows`/Kokoro.
+    #[serde(default)]
+    pub api_key: String,
     /// Vitesse de lecture simulée (utilisée pour l'estimation de durée).
     pub chars_per_minute: f32,
     /// Longueur maximale lue à voix haute, en caractères (900 par défaut :
@@ -323,6 +330,8 @@ impl Default for TtsSettings {
             // « Le narrateur » (Fish Audio), voix par défaut depuis le 4 octobre
             // 2026 : voir `TtsVoice::NARRATEUR`.
             voice: "4f2a0684dd0247dda68f339738c780e6".into(),
+            base_url: String::new(),
+            api_key: String::new(),
             chars_per_minute: 1000.0,
             max_spoken_chars: default_max_spoken_chars(),
             cues: true,
@@ -737,13 +746,35 @@ impl Settings {
         }
     }
 
-    /// Clé de la synthèse vocale (Fish Audio via OpenRouter) : la clé du
-    /// fournisseur OpenRouter, saisie dans l'interface, sinon `.env`.
-    /// Avant, seul `.env` comptait : une installation neuve restait muette.
+    /// Clé de la synthèse vocale :
+    /// - pour `openai` ou `elevenlabs` : `tts.api_key` saisie (sinon celle du
+    ///   fournisseur OpenRouter si l'utilisateur l'a réutilisée) ;
+    /// - pour `windows` : aucune clé requise ;
+    /// - pour `fish-audio` / `openrouter` (défaut) : la clé du fournisseur
+    ///   OpenRouter, saisie dans l'interface, sinon `.env`.
     pub fn tts_key(&self, secrets: &Secrets) -> String {
-        match self.llm.provider(PROVIDER_OPENROUTER) {
-            Some(openrouter) => self.llm.resolve_key(openrouter, secrets),
-            None => secrets.openrouter_api_key.clone(),
+        match self.tts.provider.as_str() {
+            "windows" => String::new(),
+            "openai" | "elevenlabs" => {
+                if !self.tts.api_key.trim().is_empty() {
+                    self.tts.api_key.trim().to_string()
+                } else {
+                    String::new()
+                }
+            }
+            _ => match self.llm.provider(PROVIDER_OPENROUTER) {
+                Some(openrouter) => self.llm.resolve_key(openrouter, secrets),
+                None => secrets.openrouter_api_key.clone(),
+            },
+        }
+    }
+
+    /// Le moteur de synthèse vocale a-t-il tout ce qu'il lui faut (clé ou hors ligne) ?
+    pub fn tts_ready(&self, secrets: &Secrets) -> bool {
+        match self.tts.provider.as_str() {
+            "windows" => true,
+            "openai" => !self.tts.base_url.trim().is_empty() || !self.tts_key(secrets).trim().is_empty(),
+            _ => !self.tts_key(secrets).trim().is_empty(),
         }
     }
 

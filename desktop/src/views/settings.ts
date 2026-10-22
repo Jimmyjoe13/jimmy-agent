@@ -143,7 +143,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
       settings.llm.voice_provider = fresh.llm.voice_provider;
       settings.stt = fresh.stt;
       settings.voice = fresh.voice;
-      settings.tts.cues = fresh.tts.cues;
+      settings.tts = fresh.tts;
     }
     settings.avatar.quality = qualitySelect.value;
     settings.avatar.skin = skinSelect.value;
@@ -308,8 +308,102 @@ export function settingsView(ctx: AppContext): HTMLElement {
         ),
       ),
     );
+    const brainTestStatus = h("span", { class: "brain-test-status" });
+    const brainTestButton = h(
+      "button",
+      {
+        class: "ghost brain-test-now",
+        onclick: async () => {
+          brainTestButton.setAttribute("disabled", "");
+          brainTestStatus.className = "brain-test-status";
+          brainTestStatus.textContent = t("settings.brain.testing");
+          try {
+            const res = await api.llmTestModel(ctx.status.llm.model, ctx.status.llm.provider);
+            const s = (res.latency_ms / 1000).toFixed(1).replace(".", ",");
+            if (res.ok && res.tools) {
+              brainTestStatus.className = "brain-test-status ok";
+              brainTestStatus.textContent = t("settings.brain.testOk", { s });
+            } else if (res.ok) {
+              brainTestStatus.className = "brain-test-status warn";
+              brainTestStatus.textContent = t("settings.brain.testWarn", { s });
+            } else {
+              brainTestStatus.className = "brain-test-status bad";
+              brainTestStatus.textContent = t("settings.brain.testFail", { error: res.error });
+            }
+          } catch (error) {
+            brainTestStatus.className = "brain-test-status bad";
+            brainTestStatus.textContent = t("settings.brain.testFail", { error: String(error) });
+          }
+          brainTestButton.removeAttribute("disabled");
+        },
+      },
+      t("settings.brain.testNow"),
+    );
+    const activeProviderLabel =
+      ctx.status.llm.providers?.find((p) => p.id === ctx.status.llm.provider)?.label ?? ctx.status.llm.provider;
+    const brainHero = h(
+      "section",
+      { class: "card brain-hero", "aria-label": t("settings.brain.kicker") },
+      h(
+        "div",
+        { class: "brain-hero-main" },
+        h("span", { class: "kicker" }, t("settings.brain.kicker")),
+        h("strong", { class: "brain-hero-model" }, ctx.status.llm.model),
+        h("span", { class: "note" }, t("settings.brain.atProvider"), h("strong", {}, activeProviderLabel)),
+      ),
+      h("div", { class: "brain-hero-actions" }, brainTestStatus, brainTestButton),
+    );
+
+    const singleBrainBox = h("input", { type: "checkbox", class: "brain-single-box" }) as HTMLInputElement;
+    const isSingleBrain = !(settings?.llm.voice_model || "").trim() && !(settings?.memory.model || "").trim();
+    singleBrainBox.checked = isSingleBrain;
+    const rolesSummary = h(
+      "div",
+      { class: "brain-roles-grid" },
+      h(
+        "div",
+        { class: "brain-role-tile" },
+        h("strong", {}, t("settings.brain.roleChat")),
+        h("span", { class: "note" }, t("settings.brain.roleChatHint")),
+        h("code", {}, ctx.status.llm.model),
+      ),
+      h(
+        "div",
+        { class: "brain-role-tile" },
+        h("strong", {}, t("settings.brain.roleVoice")),
+        h("span", { class: "note" }, t("settings.brain.roleVoiceHint")),
+        h("code", {}, ctx.status.llm.voice_model || ctx.status.llm.model),
+      ),
+      h(
+        "div",
+        { class: "brain-role-tile" },
+        h("strong", {}, t("settings.brain.roleMemory")),
+        h("span", { class: "note" }, t("settings.brain.roleMemoryHint")),
+        h("code", {}, settings?.memory.model || ctx.status.llm.model),
+      ),
+    );
+    rolesSummary.hidden = singleBrainBox.checked;
+    singleBrainBox.addEventListener("change", async () => {
+      rolesSummary.hidden = singleBrainBox.checked;
+      if (singleBrainBox.checked && settings) {
+        await attempt(() => api.setLlmModel("voice", ""), t("guard.voiceModel"));
+        memoryModelInput.value = "";
+        memoryProviderSelect.value = "";
+        await persist();
+      }
+    });
+    const singleBrainCard = h(
+      "section",
+      { class: "card brain-single-card" },
+      toggle(t("settings.brain.singleTitle"), singleBrainBox),
+      h("p", { class: "note" }, t("settings.brain.singleHint")),
+      rolesSummary,
+    );
+
     mount(
       llmPane,
+      brainHero,
+      singleBrainCard,
       providersCard,
       card(
         t("settings.llm.title"),

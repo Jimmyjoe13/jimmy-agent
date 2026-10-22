@@ -477,6 +477,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> std::result::Result<Set
     for provider in &mut settings.llm.providers {
         provider.api_key = String::new();
     }
+    settings.tts.api_key = String::new();
     Ok(settings)
 }
 
@@ -497,6 +498,9 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> st
                 provider.api_key = old.api_key.clone();
             }
         }
+    }
+    if settings.tts.api_key.trim().is_empty() {
+        settings.tts.api_key = before.tts.api_key.clone();
     }
     app.save_settings(settings.clone()).map_err(err)?;
     // Les réglages d'avatar s'appliquent à chaud : sans cela, changer la
@@ -862,19 +866,14 @@ pub async fn skills_list(state: State<'_, AppState>) -> std::result::Result<Vec<
 
 // ── Bibliothèque de voix ─────────────────────────────────────────────────────
 
-/// Un identifiant de voix Fish Audio : 32 caractères hexadécimaux. Rien
-/// d'autre n'est envoyé au service ni écrit dans la configuration.
-fn is_voice_id(id: &str) -> bool {
-    id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-/// Voix actuelle, voix prédéfinies et voix ajoutées par l'utilisateur.
+/// Voix actuelle, voix prédéfinies du moteur actif et voix ajoutées par l'utilisateur.
 #[tauri::command]
 pub async fn tts_voices(state: State<'_, AppState>) -> std::result::Result<serde_json::Value, String> {
     let settings = state.app.settings();
-    let presets: Vec<VoiceInfo> = TtsVoice::PRESETS.iter().map(|v| v.info()).collect();
+    let presets: Vec<VoiceInfo> = jimmy_agent::providers::tts::presets_for_provider(&settings.tts.provider);
     Ok(serde_json::json!({
         "current": settings.tts.voice,
+        "provider": settings.tts.provider,
         "presets": presets,
         "library": settings.tts.library,
     }))
@@ -895,12 +894,13 @@ pub async fn tts_search_voices(
 /// Choisit la voix de Jimmy ; une voix du catalogue rejoint la bibliothèque.
 #[tauri::command]
 pub async fn tts_set_voice(state: State<'_, AppState>, voice: VoiceInfo) -> std::result::Result<(), String> {
-    if !is_voice_id(&voice.id) {
-        return Err("identifiant de voix invalide".into());
-    }
     let app = state.app.clone();
     let mut settings = app.settings();
-    let known = TtsVoice::from_id(&voice.id).is_some() || settings.tts.library.iter().any(|v| v.id == voice.id);
+    if !jimmy_agent::providers::tts::is_valid_voice_id(&settings.tts.provider, &voice.id) {
+        return Err("identifiant de voix invalide".into());
+    }
+    let presets = jimmy_agent::providers::tts::presets_for_provider(&settings.tts.provider);
+    let known = presets.iter().any(|v| v.id == voice.id) || settings.tts.library.iter().any(|v| v.id == voice.id);
     if !known {
         settings.tts.library.push(voice.clone());
     }
@@ -1029,17 +1029,16 @@ pub async fn tts_preview(
         return Err("la synthèse vocale est désactivée".into());
     }
     let voice = voice.filter(|v| !v.trim().is_empty()).unwrap_or_else(|| settings.tts.voice.clone());
-    if !is_voice_id(&voice) {
+    if !jimmy_agent::providers::tts::is_valid_voice_id(&settings.tts.provider, &voice) {
         return Err("identifiant de voix invalide".into());
     }
     let speech = app
         .tts
-        .speak(
+        .speak_with(
+            &settings.tts,
             &settings.tts_key(&app.secrets),
-            &settings.tts.model,
-            &voice,
+            Some(&voice),
             &text,
-            settings.tts.chars_per_minute,
         )
         .await
         .map_err(err)?;

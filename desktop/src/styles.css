@@ -3475,3 +3475,103 @@ button.icon-only {
   font: 800 12.5px/1 var(--sans);
   cursor: pointer;
 }
+
+/* ── Étape 4 : Moteurs de voix & Cerveau simplifié ────────────────────────── */
+.tts-engine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.tts-engine-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  text-align: left;
+  min-height: 98px;
+}
+
+.tts-engine-tile.active {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  border-color: transparent;
+}
+
+.tts-engine-tile .badge {
+  margin-top: auto;
+}
+
+.tts-engine-fields[hidden],
+.brain-roles-grid[hidden] {
+  display: none;
+}
+
+.brain-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brain-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brain-hero-model {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.brain-hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.brain-test-status {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.brain-test-status.ok {
+  color: var(--ok);
+}
+
+.brain-test-status.warn {
+  color: var(--warn);
+}
+
+.brain-test-status.bad {
+  color: var(--danger);
+}
+
+.brain-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.brain-role-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}

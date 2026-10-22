@@ -76,6 +76,114 @@ impl TtsVoice {
     }
 }
 
+/// Voix prédéfinies selon le moteur TTS actif (`fish-audio`/`openrouter`,
+/// `windows`, `openai`, `elevenlabs`).
+pub fn presets_for_provider(provider: &str) -> Vec<VoiceInfo> {
+    match provider {
+        "windows" => windows_voices(),
+        "openai" => vec![
+            VoiceInfo { id: "alloy".into(), label: "Alloy".into(), description: "OpenAI — neutre et équilibrée".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "echo".into(), label: "Echo".into(), description: "OpenAI — masculine, posée".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "nova".into(), label: "Nova".into(), description: "OpenAI — féminine, chaleureuse".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "onyx".into(), label: "Onyx".into(), description: "OpenAI — masculine, grave".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "ff_siwis".into(), label: "Siwis (Kokoro FR)".into(), description: "Kokoro local — voix française".into(), languages: vec!["fr".into()], uses: 0 },
+            VoiceInfo { id: "af_heart".into(), label: "Heart (Kokoro EN)".into(), description: "Kokoro local — voix anglaise".into(), languages: vec!["en".into()], uses: 0 },
+        ],
+        "elevenlabs" => vec![
+            VoiceInfo { id: "21m00Tcm4TlvDq8ikWAM".into(), label: "Rachel".into(), description: "ElevenLabs — claire et posée".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "pNInz6obpgDQGcFmaJgB".into(), label: "Adam".into(), description: "ElevenLabs — grave, narration".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+            VoiceInfo { id: "EXAVITQu4vr4xnSDxMaL".into(), label: "Sarah".into(), description: "ElevenLabs — douce et naturelle".into(), languages: vec!["fr".into(), "en".into()], uses: 0 },
+        ],
+        _ => TtsVoice::PRESETS.iter().map(|v| v.info()).collect(),
+    }
+}
+
+/// Voix installées dans Windows (`System.Speech`), lues une seule fois et mises
+/// en cache, avec une voix `"default"` toujours présente.
+pub fn windows_voices() -> Vec<VoiceInfo> {
+    static CACHED: std::sync::OnceLock<Vec<VoiceInfo>> = std::sync::OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            let mut list = vec![VoiceInfo {
+                id: "default".into(),
+                label: "Voix Windows par défaut".into(),
+                description: "Intégrée au PC — gratuite et hors ligne".into(),
+                languages: vec!["fr".into(), "en".into()],
+                uses: 0,
+            }];
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                let script = "Add-Type -AssemblyName System.Speech; \
+                              (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | \
+                              ForEach-Object { $i = $_.VoiceInfo; Write-Output \"$($i.Name)|$($i.Culture)|$($i.Description)\" }";
+                if let Ok(out) = std::process::Command::new("powershell.exe")
+                    .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output()
+                {
+                    for line in String::from_utf8_lossy(&out.stdout).lines() {
+                        let mut parts = line.splitn(3, '|');
+                        let name = parts.next().unwrap_or("").trim();
+                        let culture = parts.next().unwrap_or("").trim();
+                        let desc = parts.next().unwrap_or("").trim();
+                        if !name.is_empty() {
+                            list.push(VoiceInfo {
+                                id: name.to_string(),
+                                label: name.replace("Microsoft ", "").replace(" Desktop", ""),
+                                description: if desc.is_empty() { culture.to_string() } else { format!("{culture} — {desc}") },
+                                languages: vec![culture.chars().take(2).collect()],
+                                uses: 0,
+                            });
+                        }
+                    }
+                }
+            }
+            list
+        })
+        .clone()
+}
+
+/// Vérifie qu'un identifiant de voix est sûr pour le moteur choisi :
+/// - Fish Audio (`fish-audio` / `openrouter`) : 32 caractères hexadécimaux ;
+/// - Windows, OpenAI, ElevenLabs : 1 à 80 caractères imprimables sans `/` ni `\`.
+pub fn is_valid_voice_id(provider: &str, id: &str) -> bool {
+    let id = id.trim();
+    if id.is_empty() || id.len() > 80 {
+        return false;
+    }
+    match provider {
+        "windows" | "openai" | "elevenlabs" => {
+            !id.contains('/')
+                && !id.contains('\\')
+                && !id.contains("..")
+                && id.chars().all(|c| !c.is_control() && c != '"' && c != '\'' && c != ';' && c != '`')
+        }
+        _ => id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit()),
+    }
+}
+
+/// Convertit un flux WAV (`RIFF...WAVE`) en PCM 16 bits mono petit-boutiste
+/// avec sa fréquence d'échantillonnage réelle.
+pub fn wav_to_pcm(bytes: &[u8]) -> Result<(Vec<u8>, u32)> {
+    let mut reader = hound::WavReader::new(std::io::Cursor::new(bytes))
+        .map_err(|e| Error::Tts(format!("WAV illisible : {e}")))?;
+    let spec = reader.spec();
+    let channels = spec.channels.max(1) as usize;
+    let samples: Vec<i16> = reader
+        .samples::<i16>()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| Error::Tts(format!("WAV illisible : {e}")))?;
+    let mut pcm = Vec::with_capacity((samples.len() / channels) * 2);
+    for frame in samples.chunks(channels) {
+        let sum: i32 = frame.iter().map(|&s| i32::from(s)).sum();
+        let mono = (sum / channels as i32) as i16;
+        pcm.extend_from_slice(&mono.to_le_bytes());
+    }
+    Ok((pcm, spec.sample_rate))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TtsProvider {
     FishAudio,
@@ -303,6 +411,230 @@ impl Tts {
             sample_rate,
         })
     }
+
+    /// Synthétise `text` selon le moteur configuré dans `tts` :
+    /// - `"windows"` : voix locale de Windows (`System.Speech`, hors ligne, sans clé) ;
+    /// - `"openai"` : API compatible OpenAI (`/v1/audio/speech`, OpenAI ou Kokoro local) ;
+    /// - `"elevenlabs"` : API ElevenLabs (`/v1/text-to-speech/{voice}?output_format=pcm_24000`) ;
+    /// - `"fish-audio"` / `"openrouter"` (défaut) : Fish Audio via OpenRouter.
+    pub async fn speak_with(
+        &self,
+        tts: &crate::config::TtsSettings,
+        api_key: &str,
+        voice_override: Option<&str>,
+        text: &str,
+    ) -> Result<Speech> {
+        let voice = voice_override
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or(tts.voice.as_str());
+        match tts.provider.as_str() {
+            "windows" => speak_windows(voice, text, tts.chars_per_minute).await,
+            "openai" => {
+                self.speak_chunks(text, tts.chars_per_minute, |chunk| {
+                    self.request_openai(&tts.base_url, api_key, &tts.model, voice, chunk)
+                })
+                .await
+            }
+            "elevenlabs" => {
+                if api_key.trim().is_empty() {
+                    return Err(Error::Tts("clé ElevenLabs absente : saisis-la dans l'onglet Voix".into()));
+                }
+                self.speak_chunks(text, tts.chars_per_minute, |chunk| {
+                    self.request_elevenlabs(api_key, &tts.model, voice, chunk)
+                })
+                .await
+            }
+            _ => self.speak(api_key, &tts.model, voice, text, tts.chars_per_minute).await,
+        }
+    }
+
+    async fn speak_chunks<'a, F, Fut>(&'a self, text: &str, chars_per_minute: f32, mut call: F) -> Result<Speech>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: std::future::Future<Output = Result<AudioPayload>>,
+    {
+        let prepared = prepare_for_speech(text);
+        if prepared.is_empty() {
+            return Ok(Speech { bytes: Vec::new(), sample_rate: 0, estimated_ms: 0 });
+        }
+        const MAX_CHARS: usize = 4000;
+        if prepared.chars().count() <= MAX_CHARS {
+            let audio = call(prepared.clone()).await?;
+            return Ok(Speech {
+                bytes: audio.bytes,
+                sample_rate: audio.sample_rate,
+                estimated_ms: estimate_ms(&prepared, chars_per_minute),
+            });
+        }
+        let mut all = Vec::new();
+        let mut sample_rate = 0;
+        for chunk in split_sentences(&prepared, MAX_CHARS) {
+            let audio = call(chunk).await?;
+            sample_rate = sample_rate.max(audio.sample_rate);
+            all.extend(audio.bytes);
+        }
+        Ok(Speech {
+            bytes: all,
+            sample_rate,
+            estimated_ms: estimate_ms(&prepared, chars_per_minute),
+        })
+    }
+
+    async fn request_openai(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        voice: &str,
+        text: String,
+    ) -> Result<AudioPayload> {
+        let base = if base_url.trim().is_empty() {
+            "https://api.openai.com/v1"
+        } else {
+            base_url.trim().trim_end_matches('/')
+        };
+        let url = format!("{base}/audio/speech");
+        let model = if model.trim().is_empty() || model.starts_with("fish-audio/") {
+            "tts-1"
+        } else {
+            model.trim()
+        };
+        // Si la voix gardée en config est encore le hex 32 de Fish Audio, repli sur `alloy`.
+        let voice = if voice.len() == 32 && voice.chars().all(|c| c.is_ascii_hexdigit()) {
+            "alloy"
+        } else {
+            voice
+        };
+        let body = serde_json::json!({
+            "model": model,
+            "input": text,
+            "voice": voice,
+            "response_format": "pcm",
+        });
+        let mut req = self.http.post(&url).header("Content-Type", "application/json").json(&body);
+        if !api_key.trim().is_empty() {
+            req = req.bearer_auth(api_key.trim());
+        }
+        let response = req.send().await.map_err(|e| Error::Tts(e.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let raw = response.text().await.unwrap_or_default();
+            return Err(Error::Tts(format!("HTTP {status} — {}", sanitize(&raw, 300))));
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let bytes = response.bytes().await.map_err(|e| Error::Tts(e.to_string()))?;
+        if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WAVE" {
+            let (pcm, rate) = wav_to_pcm(&bytes)?;
+            return Ok(AudioPayload { bytes: pcm, sample_rate: rate });
+        }
+        let rate = parse_rate(&content_type);
+        Ok(AudioPayload {
+            bytes: bytes.to_vec(),
+            // Standard PCM d'OpenAI (`/v1/audio/speech` avec `response_format: "pcm"`) et Kokoro : 24 kHz.
+            sample_rate: if rate > 0 { rate } else { 24_000 },
+        })
+    }
+
+    async fn request_elevenlabs(
+        &self,
+        api_key: &str,
+        model: &str,
+        voice: &str,
+        text: String,
+    ) -> Result<AudioPayload> {
+        let voice = if voice.trim().is_empty() || (voice.len() == 32 && voice.chars().all(|c| c.is_ascii_hexdigit())) {
+            "21m00Tcm4TlvDq8ikWAM"
+        } else {
+            voice.trim()
+        };
+        let model = if model.trim().is_empty() || model.starts_with("fish-audio/") {
+            "eleven_multilingual_v2"
+        } else {
+            model.trim()
+        };
+        let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=pcm_24000");
+        let body = serde_json::json!({
+            "text": text,
+            "model_id": model,
+        });
+        let response = self
+            .http
+            .post(&url)
+            .header("xi-api-key", api_key.trim())
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::Tts(e.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let raw = response.text().await.unwrap_or_default();
+            return Err(Error::Tts(format!("ElevenLabs HTTP {status} — {}", sanitize(&raw, 300))));
+        }
+        let bytes = response.bytes().await.map_err(|e| Error::Tts(e.to_string()))?;
+        Ok(AudioPayload {
+            bytes: bytes.to_vec(),
+            sample_rate: 24_000,
+        })
+    }
+}
+
+/// Synthèse vocale locale par Windows (`System.Speech`, hors ligne, sans clé).
+/// Le texte et le nom de voix passent par des variables d'environnement :
+/// jamais d'interpolation dans le code PowerShell.
+async fn speak_windows(voice: &str, text: &str, chars_per_minute: f32) -> Result<Speech> {
+    let prepared = prepare_for_speech(text);
+    if prepared.is_empty() {
+        return Ok(Speech { bytes: Vec::new(), sample_rate: 0, estimated_ms: 0 });
+    }
+    let script = "Add-Type -AssemblyName System.Speech; \
+                  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+                  $v = $env:JIMMY_TTS_VOICE; \
+                  if ($v -and $v -ne 'default') { try { $s.SelectVoice($v) } catch {} }; \
+                  $ms = New-Object System.IO.MemoryStream; \
+                  $s.SetOutputToWaveStream($ms); \
+                  $s.Speak($env:JIMMY_TTS_TEXT); \
+                  $b = $ms.ToArray(); \
+                  [Console]::OpenStandardOutput().Write($b, 0, $b.Length)";
+    let mut cmd = tokio::process::Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("JIMMY_TTS_TEXT", &prepared)
+        .env(
+            "JIMMY_TTS_VOICE",
+            if voice.len() == 32 && voice.chars().all(|c| c.is_ascii_hexdigit()) {
+                "default"
+            } else {
+                voice
+            },
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = tokio::time::timeout(Duration::from_secs(30), cmd.output())
+        .await
+        .map_err(|_| Error::Tts("synthèse Windows trop lente (> 30 s)".into()))?
+        .map_err(|e| Error::Tts(format!("synthèse Windows impossible : {e}")))?;
+    if !out.status.success() || out.stdout.is_empty() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(Error::Tts(format!("synthèse Windows en échec : {}", err.trim())));
+    }
+    let (pcm, sample_rate) = wav_to_pcm(&out.stdout)?;
+    Ok(Speech {
+        bytes: pcm,
+        sample_rate,
+        estimated_ms: estimate_ms(&prepared, chars_per_minute),
+    })
 }
 
 /// Rend un texte écrit pour l'écran lisible à voix haute.
@@ -966,5 +1298,41 @@ Voir [la doc](https://exemple.fr) ou https://x.fr/a";
     fn secrets_absentes_des_erreurs() {
         let message = sanitize("échec avec sk-or-v1-abcdefghijklmnop dans le texte", 200);
         assert!(!message.contains("abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn les_quatre_moteurs_tts_ont_leurs_voix_et_validation() {
+        for p in ["fish-audio", "windows", "openai", "elevenlabs"] {
+            let voices = presets_for_provider(p);
+            assert!(!voices.is_empty(), "moteur {p} sans voix");
+            for v in &voices {
+                assert!(is_valid_voice_id(p, &v.id), "voix {} refusée pour {p}", v.id);
+            }
+        }
+        assert!(!is_valid_voice_id("fish-audio", "alloy"));
+        assert!(is_valid_voice_id("openai", "alloy"));
+        assert!(!is_valid_voice_id("openai", "../etc/passwd"));
+        assert!(!is_valid_voice_id("windows", "voix; echo secret"));
+    }
+
+    #[test]
+    fn wav_converti_en_pcm_mono_garde_sa_frequence() {
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 22_050,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        {
+            let mut writer = hound::WavWriter::new(&mut cursor, spec).unwrap();
+            writer.write_sample(1000i16).unwrap();
+            writer.write_sample(3000i16).unwrap();
+            writer.finalize().unwrap();
+        }
+        let (pcm, rate) = wav_to_pcm(&cursor.into_inner()).unwrap();
+        assert_eq!(rate, 22_050);
+        assert_eq!(pcm.len(), 2);
+        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 2000);
     }
 }

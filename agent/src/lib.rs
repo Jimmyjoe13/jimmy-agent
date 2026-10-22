@@ -41,7 +41,7 @@ use db::Db;
 use memory::MemoryStore;
 use paths::Paths;
 use permissions::Permissions;
-use providers::{AvatarClient, LlmClient, Stt, Tts, TtsVoice};
+use providers::{AvatarClient, LlmClient, Stt, Tts};
 use skills::SkillStore;
 use tools::{ToolDeps, ToolRegistry};
 
@@ -317,7 +317,11 @@ fn collect_known_secrets(
     secrets: &Secrets,
     extra_env: Vec<String>,
 ) -> Vec<String> {
-    let mut values = vec![secrets.opencode_api_key.clone(), secrets.openrouter_api_key.clone()];
+    let mut values = vec![
+        secrets.opencode_api_key.clone(),
+        secrets.openrouter_api_key.clone(),
+        settings.tts.api_key.clone(),
+    ];
     values.extend(settings.llm.providers.iter().map(|p| p.api_key.clone()));
     if let Some(dir) = config::secrets_dir() {
         values.extend(config::vault_secret_values(&dir));
@@ -1377,17 +1381,15 @@ impl App {
         if !settings.voice.enabled || !settings.tts.enabled {
             return;
         }
-        let key = settings.tts_key(&self.secrets);
-        if key.trim().is_empty() {
+        if !settings.tts_ready(&self.secrets) {
             return;
         }
+        let key = settings.tts_key(&self.secrets);
         let tts = self.tts.clone();
-        let model = settings.tts.model.clone();
-        let voice_id = settings.tts.voice.clone();
-        let cpm = settings.tts.chars_per_minute;
+        let tts_cfg = settings.tts.clone();
         let part = sentence.clone();
         log::info!("[tts] pré-synthèse en streaming : « {} » ({} caractères)", sentence.chars().take(60).collect::<String>(), sentence.chars().count());
-        let handle = tokio::spawn(async move { tts.speak(&key, &model, &voice_id, &part, cpm).await });
+        let handle = tokio::spawn(async move { tts.speak_with(&tts_cfg, &key, None, &part).await });
         if let Ok(mut slot) = self.prefetched_tts.lock() {
             if let Some((_, old)) = slot.take() {
                 old.abort();
@@ -1439,10 +1441,8 @@ impl App {
         let synth = |part: String| {
             let tts = self.tts.clone();
             let key = settings.tts_key(&self.secrets);
-            let model = settings.tts.model.clone();
-            let voice_id = settings.tts.voice.clone();
-            let cpm = settings.tts.chars_per_minute;
-            tokio::spawn(async move { tts.speak(&key, &model, &voice_id, &part, cpm).await })
+            let tts_cfg = settings.tts.clone();
+            tokio::spawn(async move { tts.speak_with(&tts_cfg, &key, None, &part).await })
         };
 
         self.speaking.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1672,6 +1672,16 @@ impl App {
                 })
             })
             .collect();
+        let tts_key_hint = {
+            let k = settings.tts_key(&self.secrets);
+            let last4 = k.chars().rev().take(4).collect::<String>();
+            (!last4.is_empty()).then(|| last4.chars().rev().collect::<String>())
+        };
+        let tts_voices = providers::tts::presets_for_provider(&settings.tts.provider)
+            .into_iter()
+            .chain(settings.tts.library.iter().cloned())
+            .map(|v| serde_json::json!({ "id": v.id, "label": v.label, "description": v.description }))
+            .collect::<Vec<_>>();
         serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
             "dev": self.paths.dev,
@@ -1691,14 +1701,13 @@ impl App {
             },
             "tts": {
                 "enabled": settings.tts.enabled,
+                "provider": settings.tts.provider,
+                "base_url": settings.tts.base_url,
                 "model": settings.tts.model,
                 "voice": settings.tts.voice,
-                "has_key": !settings.tts_key(&self.secrets).is_empty(),
-                // Voix prédéfinies puis celles de la bibliothèque.
-                "voices": TtsVoice::PRESETS.iter().map(|v| v.info())
-                    .chain(settings.tts.library.iter().cloned())
-                    .map(|v| serde_json::json!({ "id": v.id, "label": v.label, "description": v.description }))
-                    .collect::<Vec<_>>(),
+                "has_key": settings.tts_ready(&self.secrets),
+                "key_hint": tts_key_hint,
+                "voices": tts_voices,
             },
             "stt": {
                 "enabled": settings.stt.enabled,
