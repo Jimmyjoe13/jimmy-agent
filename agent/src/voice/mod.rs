@@ -480,7 +480,7 @@ pub fn find_wake_prefix(transcript: &str, wake_word: &str) -> Option<usize> {
 
 /// Interjections qui peuvent précéder le nom (« hé Jimmy »).
 // « et » : Whisper écrit souvent « Hé Jimmy » comme « Et Jimmy » (même son).
-const CALL_WORDS: &[&str] = &["he", "hey", "et", "ok", "okay", "eh", "dis", "allo", "bonjour", "salut"];
+const CALL_WORDS: &[&str] = &["he", "hey", "et", "ok", "okay", "eh", "dis", "allo", "bonjour", "salut", "hi", "hello"];
 
 /// Clé phonétique (français) d'un mot normalisé : ce qui s'entend, pas ce qui
 /// s'écrit. `gu`+voyelle → `g`, `g`+e/i/y → `j`, `dj` → `j`, `y` → `i`,
@@ -629,11 +629,11 @@ pub fn interrupt_playback() {
 
 /// Mots qui composent un ordre d'arrêt.
 const STOP_WORDS: &[&str] = &["stop", "stoppe", "stopper", "arrête", "arrete", "arrêtez", "arretez", "arrêter"];
-/// Mots tolérés autour (« arrête-toi », « arrête tout », « stop stop »).
-const STOP_FILLERS: &[&str] = &["toi", "tout", "ça", "ca", "maintenant", "stp"];
-/// Mots de « arrête toutes les tâches » : un arrêt qui vise aussi la tâche
-/// de fond (voir `is_stop_all_command`).
-const STOP_ALL_FILLERS: &[&str] = &["toutes", "les", "tâches", "taches", "tache", "tâche"];
+/// Mots tolérés autour (« arrête-toi », « arrête tout », « stop stop », « stop now »).
+const STOP_FILLERS: &[&str] = &["toi", "tout", "ça", "ca", "maintenant", "stp", "it", "now", "please"];
+/// Mots de « arrête toutes les tâches » / « stop all tasks » : un arrêt qui
+/// vise aussi la tâche de fond (voir `is_stop_all_command`).
+const STOP_ALL_FILLERS: &[&str] = &["toutes", "les", "tâches", "taches", "tache", "tâche", "all", "everything", "the", "tasks"];
 
 /// La transcription est-elle un ordre d'arrêt d'urgence ?
 ///
@@ -658,27 +658,27 @@ pub fn is_stop_command(text: &str) -> bool {
         })
 }
 
-/// « Arrête tout » / « arrête toutes les tâches » : un ordre d'arrêt qui
-/// vise aussi la tâche de fond. « STOP » seul n'arrête que le premier plan
-/// (décision du 7 octobre).
+/// « Arrête tout » / « arrête toutes les tâches » / « stop all » : un ordre
+/// d'arrêt qui vise aussi la tâche de fond. « STOP » seul n'arrête que le
+/// premier plan (décision du 7 octobre).
 pub fn is_stop_all_command(text: &str) -> bool {
     is_stop_command(text)
         && text
             .to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
-            .any(|w| w == "tout" || w == "toutes")
+            .any(|w| matches!(w, "tout" | "toutes" | "all" | "everything"))
 }
 
-/// Accord vocal d'une carte en attente : « Confirmé » dit à voix haute
-/// (13 octobre, choix de l'utilisateur : la carte « Autoriser / Refuser »
-/// peut aussi se valider à la voix).
+/// Accord vocal d'une carte en attente : « Confirmé » / « Confirmed » dit à
+/// voix haute (13 octobre, choix de l'utilisateur : la carte « Autoriser /
+/// Refuser » peut aussi se valider à la voix).
 ///
 /// Seule une phrase **réduite** au mot compte, comme pour « STOP » : « Je
 /// confirme que le rapport est prêt » reste une commande. Un faux positif
 /// autoriserait une écriture sensible ou une action du navigateur.
 pub fn is_confirm_command(text: &str) -> bool {
-    const CONFIRM_WORDS: &[&str] = &["confirmé", "confirme", "confirmer"];
-    const CONFIRM_FILLERS: &[&str] = &["je", "c", "est"];
+    const CONFIRM_WORDS: &[&str] = &["confirmé", "confirme", "confirmer", "confirm", "confirmed"];
+    const CONFIRM_FILLERS: &[&str] = &["je", "c", "est", "i", "it", "is"];
     let words: Vec<String> = text
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())

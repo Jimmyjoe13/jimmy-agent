@@ -79,7 +79,7 @@ pub async fn capture(
         format!("Skills existants :\n{}", existing.join("\n"))
     };
     let messages = vec![
-        Message::system(CAPTURE),
+        Message::system(crate::i18n::with_background_lang(CAPTURE, settings.lang())),
         Message::user(format!(
             "Demande de l'utilisateur :\n{request}\n\nOutils utilisés :\n{}\n\nRéponse donnée :\n{answer}\n\n{catalogue}",
             tools_used.iter().map(|t| format!("- {t}")).collect::<Vec<_>>().join("\n")

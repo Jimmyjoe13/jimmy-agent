@@ -369,7 +369,7 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
     let fold = transcript(&conversation[plan.fold.clone()]);
     let recent = transcript(&conversation[plan.recent.clone()]);
     let messages = vec![
-        Message::system(RECAPPER),
+        Message::system(crate::i18n::with_background_lang(RECAPPER, settings.lang())),
         Message::user(format!(
             "Résumé actuel :\n{}\n\nMessages anciens à fondre :\n{}\n\nDerniers échanges :\n{}\n\nChantiers suivis :\n{}",
             if recap.summary.is_empty() { "(vide)" } else { &recap.summary },

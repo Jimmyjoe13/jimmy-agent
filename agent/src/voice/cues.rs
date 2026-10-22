@@ -43,14 +43,24 @@ impl Cue {
         }
     }
 
-    /// Texte dit. Volontairement très court : un son d'état ne doit pas
-    /// couvrir ce que l'utilisateur s'apprête à dire.
+    /// Texte dit (français, référence). Volontairement très court : un son
+    /// d'état ne doit pas couvrir ce que l'utilisateur s'apprête à dire.
     pub fn phrase(self) -> &'static str {
-        match self {
-            Cue::Listening => "Oui ?",
-            Cue::Answer => "C'est prêt.",
-            Cue::Thinking => "Un instant.",
-            Cue::Error => "Oups, ça n'a pas marché.",
+        self.phrase_for(crate::i18n::Lang::Fr)
+    }
+
+    /// Texte dit dans la langue choisie. L'empreinte du fichier de cache
+    /// dépend de cette phrase : chaque langue a ses propres fichiers en cache.
+    pub fn phrase_for(self, lang: crate::i18n::Lang) -> &'static str {
+        match (self, lang) {
+            (Cue::Listening, crate::i18n::Lang::Fr) => "Oui ?",
+            (Cue::Answer, crate::i18n::Lang::Fr) => "C'est prêt.",
+            (Cue::Thinking, crate::i18n::Lang::Fr) => "Un instant.",
+            (Cue::Error, crate::i18n::Lang::Fr) => "Oups, ça n'a pas marché.",
+            (Cue::Listening, crate::i18n::Lang::En) => "Yes?",
+            (Cue::Answer, crate::i18n::Lang::En) => "It's ready.",
+            (Cue::Thinking, crate::i18n::Lang::En) => "One moment.",
+            (Cue::Error, crate::i18n::Lang::En) => "Oops, that didn't work.",
         }
     }
 }
@@ -66,11 +76,11 @@ fn fingerprint(text: &str) -> u32 {
     hash
 }
 
-fn cache_file(app: &App, voice: &str, cue: Cue) -> PathBuf {
+fn cache_file(app: &App, voice: &str, cue: Cue, phrase: &str) -> PathBuf {
     app.paths.audio_dir().join("cues").join(format!(
         "{voice}-{}-{:08x}.pcm",
         cue.id(),
-        fingerprint(cue.phrase())
+        fingerprint(phrase)
     ))
 }
 
@@ -78,7 +88,8 @@ fn cache_file(app: &App, voice: &str, cue: Cue) -> PathBuf {
 /// Renvoie `(fréquence, pcm)`.
 async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
     let settings = app.settings();
-    let path = cache_file(app, &settings.tts.voice, cue);
+    let phrase = cue.phrase_for(settings.lang());
+    let path = cache_file(app, &settings.tts.voice, cue, phrase);
 
     if let Ok(raw) = std::fs::read(&path) {
         if raw.len() > 4 {
@@ -93,7 +104,7 @@ async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
             &settings.tts_key(&app.secrets),
             &settings.tts.model,
             &settings.tts.voice,
-            cue.phrase(),
+            phrase,
             settings.tts.chars_per_minute,
         )
         .await?;
@@ -108,7 +119,7 @@ async fn load(app: &App, cue: Cue) -> Result<(u32, Vec<u8>)> {
     raw.extend_from_slice(&speech.sample_rate.to_le_bytes());
     raw.extend_from_slice(&speech.bytes);
     std::fs::write(&path, &raw)?;
-    log::info!("[cues] « {} » mis en cache ({} octets)", cue.phrase(), speech.bytes.len());
+    log::info!("[cues] « {phrase} » mis en cache ({} octets)", speech.bytes.len());
 
     Ok((speech.sample_rate, speech.bytes))
 }

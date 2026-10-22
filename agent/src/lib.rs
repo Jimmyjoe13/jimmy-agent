@@ -12,6 +12,7 @@ pub mod core;
 pub mod db;
 pub mod error;
 pub mod growth;
+pub mod i18n;
 pub mod licence;
 pub mod memory;
 pub mod mcp;
@@ -557,6 +558,11 @@ impl App {
             || self.speaking.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Langue effective de l'application (`"auto"` → langue du système).
+    pub fn lang(&self) -> i18n::Lang {
+        self.settings().lang()
+    }
+
     /// Nombre d'arrêts demandés depuis le lancement (sert à savoir si un arrêt
     /// a eu lieu pendant une opération).
     pub fn stop_generation(&self) -> u64 {
@@ -673,7 +679,7 @@ impl App {
                 // La réponse est déjà partie (`Final` enveloppé) ; on l'annonce
                 // sans couper la parole : on attend que Jimmy soit libre.
                 self.wait_until_free(tasks::ANNOUNCE_WAIT_MAX).await;
-                self.speak(&format!("Tâche de fond terminée. {}", answer.text)).await;
+                self.speak(&i18n::bg_done_speech(self.lang(), &answer.text)).await;
             }
             // « Arrête tout » ou bouton de la tâche : le modèle doit savoir au
             // tour suivant que ce travail n'est pas fini.
@@ -689,7 +695,7 @@ impl App {
                 log::error!("[agent] tâche de fond « {title} » en échec : {error}");
                 let _ = events.send(wrap(AgentEvent::Failed { message: error.to_string() })).await;
                 self.wait_until_free(tasks::ANNOUNCE_WAIT_MAX).await;
-                self.speak("La tâche de fond a échoué. Le détail est dans le Chat.").await;
+                self.speak(i18n::bg_failed_speech(self.lang())).await;
             }
         }
     }

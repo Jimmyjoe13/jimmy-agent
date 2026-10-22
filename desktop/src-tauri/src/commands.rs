@@ -126,7 +126,9 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
         emit_event(
             window,
             Some(&session_id),
-            &AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) },
+            &AgentEvent::Notice {
+                message: jimmy_agent::i18n::window_attached_notice(settings.lang(), &image.label),
+            },
         );
     }
     let avatar = app.avatar.clone();
@@ -212,7 +214,9 @@ pub async fn chat(state: State<'_, AppState>, request: ChatRequest) -> std::resu
                 emit_event(
                     window,
                     Some(&stop_session),
-                    &AgentEvent::Final { text: "Arrêté à ta demande. Dis-moi quoi faire.".into() },
+                    &AgentEvent::Final {
+                        text: jimmy_agent::i18n::chat_stopped_reply(cue_app.lang()).into(),
+                    },
                 );
             }
             let _ = avatar.set_state(AvatarState::Idle, "").await;
@@ -308,7 +312,9 @@ async fn update_chat(
                 emit_event(
                     window,
                     Some(&stop_session),
-                    &AgentEvent::Final { text: "Arrêté à ta demande. Le Jimy actuel tourne toujours.".into() },
+                    &AgentEvent::Final {
+                        text: jimmy_agent::i18n::update_stopped_reply(cue_app.lang()).into(),
+                    },
                 );
             }
             let _ = avatar.set_state(AvatarState::Idle, "").await;
@@ -1126,6 +1132,7 @@ pub async fn start_listening(
                     if tools_seen
                         && !failed
                         && text != jimmy_agent::voice::listener::STOPPED_REPLY
+                        && text != jimmy_agent::i18n::stopped_reply(jimmy_agent::i18n::Lang::En)
                     {
                         let _ = avatar.set_state(AvatarState::Success, "").await;
                     }
@@ -1361,57 +1368,67 @@ pub fn wake_word_strip(transcript: String, wake_word: String) -> std::result::Re
 pub async fn doctor(state: State<'_, AppState>) -> std::result::Result<serde_json::Value, String> {
     let app = state.app.clone();
     let settings = app.settings();
+    let en = settings.lang().is_en();
+    let tr = |fr: &'static str, eng: &'static str| if en { eng } else { fr };
     let whisper_dir = app.paths.whisper_dir();
     let model = whisper_dir.join("models").join(&settings.stt.model);
     let server = whisper_dir.join("Release").join(&settings.stt.server_exe);
 
     let mut checks: Vec<serde_json::Value> = Vec::new();
     checks.push(check(
-        "Clé OpenCode Go",
+        tr("Clé OpenCode Go", "OpenCode Go key"),
         !app.secrets.opencode_api_key.is_empty(),
-        "OPENCODE_API_KEY absent de .env",
+        tr("OPENCODE_API_KEY absent de .env", "OPENCODE_API_KEY missing from .env"),
     ));
     checks.push(check(
-        "Clé OpenRouter (voix)",
+        tr("Clé OpenRouter (voix)", "OpenRouter key (voice)"),
         !settings.tts_key(&app.secrets).is_empty(),
-        "aucune clé OpenRouter (onglet Voix ou .env)",
+        tr("aucune clé OpenRouter (onglet Voix ou .env)", "no OpenRouter key (Voice tab or .env)"),
     ));
     checks.push(check(
         "whisper.cpp",
         server.is_file(),
-        &format!("{} introuvable", server.display()),
+        &if en { format!("{} not found", server.display()) } else { format!("{} introuvable", server.display()) },
     ));
     checks.push(check(
-        "Modèle de reconnaissance vocale",
+        tr("Modèle de reconnaissance vocale", "Speech recognition model"),
         model.is_file(),
-        &format!("{} introuvable", model.display()),
+        &if en { format!("{} not found", model.display()) } else { format!("{} introuvable", model.display()) },
     ));
     if !settings.stt.command_model.trim().is_empty() {
         let command_model = whisper_dir.join("models").join(&settings.stt.command_model);
         checks.push(check(
-            "Modèle de commande (précis)",
+            tr("Modèle de commande (précis)", "Command model (accurate)"),
             command_model.is_file(),
-            &format!("{} introuvable — la commande utilisera le modèle du wake word", command_model.display()),
+            &if en {
+                format!("{} not found — commands will use the wake word model", command_model.display())
+            } else {
+                format!("{} introuvable — la commande utilisera le modèle du wake word", command_model.display())
+            },
         ));
     }
     let godot = jimmy_agent::paths::find_godot_exe(&settings.avatar.godot_exe);
     checks.push(check(
         "Godot",
         godot.is_ok(),
-        "exécutable Godot introuvable (JIMMY_GODOT_EXE)",
+        tr("exécutable Godot introuvable (JIMMY_GODOT_EXE)", "Godot executable not found (JIMMY_GODOT_EXE)"),
     ));
     checks.push(check(
-        "Avatar en cours d'exécution",
+        tr("Avatar en cours d'exécution", "Avatar running"),
         app.avatar.is_up().await,
-        "l'avatar ne répond pas",
+        tr("l'avatar ne répond pas", "avatar is not responding"),
     ));
     match &app.vault {
         Some(vault) => {
             let existant = vault.root().is_dir();
             let hint = if existant {
-                format!("vault ouvert : {}", vault.folder_display())
+                if en {
+                    format!("vault open: {}", vault.folder_display())
+                } else {
+                    format!("vault ouvert : {}", vault.folder_display())
+                }
             } else {
-                "dossier du vault introuvable".to_string()
+                tr("dossier du vault introuvable", "vault folder not found").to_string()
             };
             checks.push(check(
                 "Vault Obsidian",
@@ -1422,7 +1439,7 @@ pub async fn doctor(state: State<'_, AppState>) -> std::result::Result<serde_jso
         None => checks.push(check(
             "Vault Obsidian",
             false,
-            "chemin du vault absent des réglages mémoire",
+            tr("chemin du vault absent des réglages mémoire", "vault path missing from memory settings"),
         )),
     }
 

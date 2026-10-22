@@ -145,7 +145,7 @@ pub async fn update(llm: &LlmClient, settings: &Settings, history: &History, ses
     let _guard = RUNNING.lock().await;
     let current = history.work_notes(session_id).ok().flatten().unwrap_or_default();
     let messages = vec![
-        Message::system(NOTE_TAKER),
+        Message::system(crate::i18n::with_background_lang(NOTE_TAKER, settings.lang())),
         Message::user(format!(
             "Carnet actuel :\n{}\n\nDernier tour de travail :\n{}",
             if current.trim().is_empty() { "(vide)" } else { current.as_str() },

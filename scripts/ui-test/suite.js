@@ -1252,6 +1252,9 @@ let stepPage = null;
       await p.waitForSelector(".card h3", { timeout: 5000 });
       const settingsH3 = await p.$$eval(".card h3", (els) => els.map((e) => e.textContent?.trim()));
       expect(settingsH3.includes("Workspace"), `titres Settings : ${settingsH3.join(", ")}`);
+      const doc = await invoke("doctor");
+      const names = doc.checks.map((c) => c.name);
+      expect(names.includes("OpenCode Go key") && names.includes("Speech recognition model"), `doctor EN : ${names.join(", ")}`);
     } finally {
       await setLang(before);
     }

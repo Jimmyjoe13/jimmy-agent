@@ -84,7 +84,7 @@ pub async fn learn(
         format!("\n\nOutils en échec :\n{digest}")
     };
     let messages = vec![
-        Message::system(EXTRACTOR),
+        Message::system(crate::i18n::with_background_lang(EXTRACTOR, settings.lang())),
         Message::user(format!(
             "Demande de l'utilisateur :\n{request}\n\nRéponse de Jimy :\n{answer}{incidents}"
         )),

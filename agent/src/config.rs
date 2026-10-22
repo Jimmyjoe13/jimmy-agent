@@ -747,6 +747,11 @@ impl Settings {
         }
     }
 
+    /// Langue effective de l'application (`"auto"` → langue du système).
+    pub fn lang(&self) -> crate::i18n::Lang {
+        crate::i18n::resolve(&self.ui.language)
+    }
+
     pub fn load(paths: &Paths) -> Self {
         let path = paths.config_file();
         let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());

@@ -104,7 +104,7 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
     }
 
     let messages = vec![
-        Message::system(REVIEW),
+        Message::system(crate::i18n::with_background_lang(REVIEW, settings.lang())),
         Message::user(context),
     ];
     let proposals = app

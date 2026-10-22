@@ -249,7 +249,7 @@ impl App {
                     let all = is_stop_all_command(&utterance) || is_stop_all_command(&early);
                     let stopped = if all { self.request_stop_all() } else { self.request_stop() };
                     if stopped {
-                        self.speak(STOPPED_REPLY).await;
+                        self.speak(crate::i18n::stopped_reply(self.lang())).await;
                     }
                     runtime.drain();
                     restore(&events, follow_until).await;
@@ -262,7 +262,7 @@ impl App {
                     if self.approvals.has_pending() {
                         log::info!("[voice] accord vocal entendu : « {utterance} »");
                         self.approvals.confirm_latest();
-                        self.speak(CONFIRMED_REPLY).await;
+                        self.speak(crate::i18n::confirmed_reply(self.lang())).await;
                         runtime.drain();
                         restore(&events, follow_until).await;
                         continue;
@@ -360,7 +360,8 @@ impl App {
                     };
                     if command.trim().is_empty() {
                         log::info!("[voice] rien entendu après le nom");
-                        emit(&events, AgentEvent::Notice { message: "Je n'ai rien entendu après « Jimy ».".into() }).await;
+                        let msg = crate::i18n::nothing_after_wake(self.lang(), &self.wake_word());
+                        emit(&events, AgentEvent::Notice { message: msg }).await;
                         emit(&events, AgentEvent::State { state: AvatarState::Idle, detail: String::new() }).await;
                         phase(&events, "idle", Duration::ZERO).await;
                         // Sinon le même « Jimmy » serait redétecté au tour suivant.
@@ -449,8 +450,9 @@ async fn answer_command(
                 Ok(None) => break,
                 Err(_) => {
                     if !detached && last_said.elapsed() >= STILL_WORKING_AFTER {
-                        log::info!("[voice] progression : « Je travaille toujours dessus. »");
-                        narrator.speak("Je travaille toujours dessus.").await;
+                        let phrase = crate::i18n::still_working(narrator.lang());
+                        log::info!("[voice] progression : « {phrase} »");
+                        narrator.speak(phrase).await;
                         last_said = Instant::now();
                     }
                     continue;
@@ -475,7 +477,13 @@ async fn answer_command(
     // phrase explicite, `screen::wants_screen`).
     let (images, note) = app.images_for(command, None, true).await;
     if let Some(image) = images.first() {
-        emit(events, AgentEvent::Notice { message: format!("Fenêtre « {} » jointe à la demande.", image.label) }).await;
+        emit(
+            events,
+            AgentEvent::Notice {
+                message: crate::i18n::window_attached_notice(app.lang(), &image.label),
+            },
+        )
+        .await;
     }
     let request = match note {
         Some(note) => format!("{command}\n\n{note}"),
@@ -506,7 +514,7 @@ async fn answer_command(
         crate::TaskOutcome::Detached => {
             log::info!("[voice] tâche passée en arrière-plan : retour à l'écoute");
             phase(events, "speaking", Duration::ZERO).await;
-            app.speak(DETACHED_REPLY).await;
+            app.speak(crate::i18n::detached_reply(app.lang())).await;
             if let Ok(mut guard) = app.voice_session.lock() {
                 *guard = Some((session, Instant::now()));
             }
@@ -524,7 +532,7 @@ async fn answer_command(
             app.speak(&answer.text).await;
             // « STOP » pendant la réponse : Jimmy s'est tu, il le confirme.
             if app.stop_generation() != stop_generation {
-                app.speak("D'accord, je t'écoute.").await;
+                app.speak(crate::i18n::listening_ack(app.lang())).await;
             }
             // Le fil est relancé pour 10 min après la réponse.
             if let Ok(mut guard) = app.voice_session.lock() {
@@ -540,8 +548,9 @@ async fn answer_command(
                 &session,
                 &crate::core::types::Message::assistant("(Tâche arrêtée à la demande de l'utilisateur, avant la fin.)"),
             );
-            emit(events, AgentEvent::Final { text: STOPPED_REPLY.into() }).await;
-            app.speak(STOPPED_REPLY).await;
+            let reply = crate::i18n::stopped_reply(app.lang());
+            emit(events, AgentEvent::Final { text: reply.into() }).await;
+            app.speak(reply).await;
             if let Ok(mut guard) = app.voice_session.lock() {
                 *guard = Some((session, Instant::now()));
             }
@@ -551,7 +560,7 @@ async fn answer_command(
             emit(events, AgentEvent::Failed { message: error.to_string() }).await;
             // Dit à voix haute : court et compréhensible. Le JSON du fournisseur
             // était lu en entier (« HTTP 400 Bad Request — {"error"… »).
-            app.speak(&spoken_error(&error)).await;
+            app.speak(&spoken_error_for(&error, app.lang())).await;
             false
         }
     };
@@ -608,7 +617,7 @@ async fn watch_for_stop(app: Arc<App>, runtime: Arc<VoiceRuntime>, rate: u32, th
                 if is_confirm_command(&text) && app.approvals.has_pending() {
                     log::info!("[voice] accord vocal entendu pendant la tâche : « {text} »");
                     app.approvals.confirm_latest();
-                    app.speak(CONFIRMED_REPLY).await;
+                    app.speak(crate::i18n::confirmed_reply(app.lang())).await;
                 }
             }
             buffer.clear();
@@ -793,26 +802,47 @@ fn learn_from_false_alarm(learned: f32, level: f32) -> f32 {
 /// Message d'erreur dit à voix haute. Le détail technique (codes HTTP, JSON du
 /// fournisseur) reste dans le chat et dans le journal.
 pub fn spoken_error(error: &crate::Error) -> String {
-    use crate::Error;
-    let raison = match error {
-        Error::Provider { .. } => "le service du modèle n'a pas répondu correctement",
-        Error::Timeout => "la demande a pris trop de temps",
-        Error::PermissionDenied(_) => "je n'ai pas la permission de faire ça",
-        Error::Http(_) => "la connexion a échoué",
-        _ => "une erreur est survenue",
-    };
-    format!("Désolé, {raison}. Les détails sont dans le chat.")
+    spoken_error_for(error, crate::i18n::Lang::Fr)
 }
 
-/// Retire le « Oui ? » de Jimmy capté par le micro en tête de commande.
+pub fn spoken_error_for(error: &crate::Error, lang: crate::i18n::Lang) -> String {
+    use crate::Error;
+    match lang {
+        crate::i18n::Lang::Fr => {
+            let raison = match error {
+                Error::Provider { .. } => "le service du modèle n'a pas répondu correctement",
+                Error::Timeout => "la demande a pris trop de temps",
+                Error::PermissionDenied(_) => "je n'ai pas la permission de faire ça",
+                Error::Http(_) => "la connexion a échoué",
+                _ => "une erreur est survenue",
+            };
+            format!("Désolé, {raison}. Les détails sont dans le chat.")
+        }
+        crate::i18n::Lang::En => {
+            let reason = match error {
+                Error::Provider { .. } => "the model provider did not respond properly",
+                Error::Timeout => "the request took too long",
+                Error::PermissionDenied(_) => "I don't have permission to do that",
+                Error::Http(_) => "the connection failed",
+                _ => "an error occurred",
+            };
+            format!("Sorry, {reason}. Details are in the chat.")
+        }
+    }
+}
+
+/// Retire le « Oui ? » / « Yes? » de Jimmy capté par le micro en tête de commande.
 pub fn strip_cue_echo(text: &str) -> String {
     let trimmed = text.trim();
     let lower = trimmed.to_lowercase();
-    for echo in ["oui ?", "oui?", "oui.", "oui,", "oui !", "oui"] {
+    for echo in [
+        "oui ?", "oui?", "oui.", "oui,", "oui !", "oui",
+        "yes ?", "yes?", "yes.", "yes,", "yes !", "yes",
+    ] {
         if lower.starts_with(echo) {
             let rest = &trimmed[echo.len()..];
-            // « ouïe », « ouistiti »… : seul un mot entier est un écho.
-            if echo == "oui" && rest.chars().next().is_some_and(|c| c.is_alphanumeric()) {
+            // « ouïe », « yesterday »… : seul un mot entier est un écho.
+            if matches!(echo, "oui" | "yes") && rest.chars().next().is_some_and(|c| c.is_alphanumeric()) {
                 return trimmed.to_string();
             }
             return rest.trim_start_matches(|c: char| !c.is_alphanumeric()).to_string();

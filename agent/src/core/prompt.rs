@@ -228,6 +228,9 @@ pub fn is_conversational_fast_path(request: &str, has_images: bool, prev_used_to
 /// les chantiers et les carnets de tâches.
 pub fn system_parts_fast(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
     let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY_FAST.to_string())];
+    if let Some(dir) = crate::i18n::system_output_directive(ctx.settings.lang()) {
+        parts.push(("langue", dir.to_string()));
+    }
     if ctx.voice {
         parts.push(("voix", VOICE_MODE.to_string()));
     }
@@ -376,6 +379,9 @@ pub fn sizes(parts: &[(&'static str, String)]) -> String {
 /// Les blocs du prompt système, étiquetés (voir [`sizes`]).
 pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
     let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY.to_string())];
+    if let Some(dir) = crate::i18n::system_output_directive(ctx.settings.lang()) {
+        parts.push(("langue", dir.to_string()));
+    }
     if ctx.voice {
         parts.push(("voix", VOICE_MODE.to_string()));
     }
