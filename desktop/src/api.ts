@@ -412,6 +412,8 @@ export interface UiSettings {
   first_run_done: boolean;
   user_name: string;
   window: { x: number | null; y: number | null; width: number; height: number };
+  /** Langue de l'interface : « auto » (celle de Windows), « fr » ou « en ». */
+  language: string;
 }
 
 export type StartupMode = "manual" | "with_windows" | "with_windows_hidden";

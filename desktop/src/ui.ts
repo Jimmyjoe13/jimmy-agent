@@ -6,6 +6,8 @@
  * chargement de la fenêtre. On garde trois choses simples : un constructeur
  * d'éléments, un magasin réactif minimal, et un rendu par fonction.
  */
+import { fr } from "./i18n/fr";
+import { locale, t, type Key } from "./i18n";
 
 type Attrs = Record<string, string | number | boolean | EventListener | undefined | null>;
 type Child = Node | string | number | null | undefined | false;
@@ -170,26 +172,18 @@ export const MEMORY_KIND_LABEL: Record<string, string> = {
   procedural: "règle",
   episodic: "épisode",
 };
-export const STATE_LABEL: Record<string, string> = {
-  idle: "prêt",
-  listening: "j'écoute",
-  thinking: "je réfléchis",
-  speaking: "je parle",
-  executing: "j'agis",
-  success: "c'est fait",
-  error: "il y a un souci",
-  waiting: "j'attends",
-};
+/** État de l'avatar, en une expression courte (barre du haut), dans la langue
+ *  de l'interface. Un état inconnu s'affiche tel quel. */
+export function stateLabel(state: string): string {
+  const key = `state.${state}` as Key;
+  return key in fr ? t(key) : state;
+}
 
 /** Étapes de l'écoute, en une expression courte (pastille de la barre du haut). */
-export const PHASE_LABEL: Record<string, string> = {
-  idle: "prêt",
-  capturing: "je t'entends",
-  transcribing: "je transcris",
-  your_turn: "à toi",
-  thinking: "je réfléchis",
-  speaking: "je parle",
-};
+export function phaseLabel(phase: string): string {
+  const key = `phase.${phase}` as Key;
+  return key in fr ? t(key) : phase;
+}
 
 /** « jimmy » → « Jimy » (affichage du mot d'activation). */
 export function capitalize(word: string): string {
@@ -199,7 +193,7 @@ export function capitalize(word: string): string {
 export function formatTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("fr-FR", {
+  return date.toLocaleString(locale(), {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",

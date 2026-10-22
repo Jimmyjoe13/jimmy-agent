@@ -8,7 +8,9 @@
  * - une seule vue montée à la fois : `mount` remplace, il n'empile pas ;
  * - un seul écouteur d'événements agent, redistribué aux vues ; les
  *   abonnements d'une vue sont libérés quand on la quitte ;
- * - l'état de Jimy est visible sur toutes les pages, dans la barre du haut.
+ * - l'état de Jimy est visible sur toutes les pages, dans la barre du haut
+ *   (la « Visière », direction du 21 octobre) ;
+ * - tous les textes passent par `t()` (français et anglais, `i18n/`).
  */
 import { api, onAgentEvent, type AgentEvent } from "./api";
 import type { AppContext, Route } from "./context";
@@ -18,19 +20,23 @@ import { diagnosticView, memoryView, skillsView, skinView } from "./views/panels
 import { onboardingView, voiceView } from "./views/voice";
 import { settingsView } from "./views/settings";
 import { mountTitlebar } from "./titlebar";
-import { PHASE_LABEL, STATE_LABEL, attempt, capitalize, guard, h, icon, mount, toast, type IconName } from "./ui";
+import { attempt, capitalize, guard, h, icon, mount, phaseLabel, stateLabel, toast, type IconName } from "./ui";
+import { setLanguage, t, type Key } from "./i18n";
 import "./styles.css";
 
-const ROUTES: { id: Route; label: string; icon: IconName; subtitle: string }[] = [
-  { id: "chat", label: "Chat", icon: "chat", subtitle: "Parle à Jimy, ou écris-lui." },
-  { id: "voice", label: "Voix", icon: "voice", subtitle: "Écoute permanente, reconnaissance et synthèse vocale." },
-  { id: "history", label: "Historique", icon: "history", subtitle: "Les sessions enregistrées sur cette machine." },
-  { id: "memory", label: "Mémoire", icon: "memory", subtitle: "Ce que Jimy a retenu de toi." },
-  { id: "skills", label: "Skills", icon: "skills", subtitle: "Les procédures réutilisables de Jimy." },
-  { id: "skin", label: "Skin", icon: "skin", subtitle: "Apparence et qualité de l'avatar." },
-  { id: "settings", label: "Paramètres", icon: "settings", subtitle: "Modèle, voix, écoute, avatar, permissions." },
-  { id: "diagnostic", label: "Diagnostic", icon: "diagnostic", subtitle: "Vérifier que tout est en place." },
+// Onglets : libellé et sous-titre traduits (`nav.<id>`, `nav.<id>.subtitle`).
+const ROUTES: { id: Route; icon: IconName }[] = [
+  { id: "chat", icon: "chat" },
+  { id: "voice", icon: "voice" },
+  { id: "memory", icon: "memory" },
+  { id: "skills", icon: "skills" },
+  { id: "skin", icon: "skin" },
+  { id: "history", icon: "history" },
+  { id: "settings", icon: "settings" },
+  { id: "diagnostic", icon: "diagnostic" },
 ];
+const routeLabel = (id: Route) => t(`nav.${id}` as Key);
+const routeSubtitle = (id: Route) => t(`nav.${id}.subtitle` as Key);
 
 async function main() {
   const root = document.getElementById("app");
@@ -39,9 +45,13 @@ async function main() {
   // exister même si le démarrage échoue.
   mountTitlebar();
 
-  const bootstrap = await guard(() => api.bootstrap(), "démarrage");
+  // Langue de l'interface avant tout rendu (réglage `ui.language`).
+  const settings = await api.getSettings().catch(() => null);
+  setLanguage(settings?.ui.language);
+
+  const bootstrap = await guard(() => api.bootstrap(), t("guard.start"));
   if (!bootstrap) {
-    mount(root, h("div", { class: "fatal" }, "Impossible de démarrer Jimy. Voir data/logs/jimmy.log."));
+    mount(root, h("div", { class: "fatal" }, t("fatal.start")));
     return;
   }
 
@@ -67,7 +77,6 @@ async function main() {
     }
   });
 
-
   const ctx: AppContext = {
     status: bootstrap.status,
     voice: null,
@@ -81,12 +90,13 @@ async function main() {
     },
     refreshStatus: async () => {
       const [fresh, voice] = await Promise.all([
-        guard(() => api.status(), "état"),
+        guard(() => api.status(), t("guard.status")),
         api.voiceStatus().catch(() => null),
       ]);
       if (fresh) ctx.status = fresh;
       ctx.voice = voice;
       renderSidebar();
+      renderVisorControls();
     },
     onEvent: (handler) => {
       handlers.add(handler);
@@ -102,7 +112,19 @@ async function main() {
   const sidebar = h("aside", { class: "sidebar" });
   const header = h("header", { class: "topbar" });
   const content = h("main", { class: "content" });
-  const stateChip = h("span", { class: "chip state-idle", title: "État de Jimy" }, STATE_LABEL.idle);
+
+  // Visière : l'état de Jimy en direct, en haut de chaque page. Le trait
+  // lumineux s'anime quand il travaille (classe d'état, voir styles.css).
+  const visorText = h("span", { class: "visor-text" }, stateLabel("idle"));
+  const stateChip = h(
+    "span",
+    { class: "visor state-idle", role: "status", "aria-label": t("visor.label") },
+    h("span", { class: "visor-glasses", "aria-hidden": "true" }),
+    visorText,
+    h("span", { class: "visor-line", "aria-hidden": "true" }),
+  );
+  // Cerveau, voix de Jimy et micro : réglables depuis n'importe quelle page.
+  const visorControls = h("div", { class: "visor-controls" });
 
   // Arrêt d'urgence visible depuis toutes les vues, dès que Jimy travaille ou
   // parle (Chat comme voix). Même effet que « STOP », Échap ou Ctrl+Maj+Espace.
@@ -111,11 +133,11 @@ async function main() {
     {
       class: "danger global-stop",
       hidden: true,
-      title: "Arrêter ce que fait Jimy (Échap, ou Ctrl+Maj+Espace partout dans Windows)",
+      title: t("visor.stopHint"),
       onclick: () => void stopNow(),
     },
     icon("stop", 15, 2),
-    "Arrêter",
+    t("visor.stop"),
   );
   // États où Jimy est occupé au premier plan.
   const BUSY = new Set(["thinking", "executing", "speaking", "waiting", "transcribing"]);
@@ -123,7 +145,7 @@ async function main() {
     globalStop.hidden = !BUSY.has(state);
   }
   async function stopNow() {
-    if (await attempt(() => api.agentStop(), "arrêt")) toast("Arrêt demandé.", "info");
+    if (await attempt(() => api.agentStop(), t("guard.stop"))) toast(t("toast.stopAsked"), "info");
     globalStop.hidden = true;
   }
 
@@ -132,8 +154,8 @@ async function main() {
 
   function setState(state: string) {
     window.clearInterval(countdown);
-    stateChip.textContent = STATE_LABEL[state] ?? state;
-    stateChip.className = `chip state-${state}`;
+    visorText.textContent = stateLabel(state);
+    stateChip.className = `visor state-${state}`;
     showStop(state);
   }
 
@@ -141,19 +163,19 @@ async function main() {
   function setPhase(phase: string, remaining: number) {
     window.clearInterval(countdown);
     window.clearTimeout(idleTimer);
-    stateChip.className = `chip phase-${phase}`;
+    stateChip.className = `visor phase-${phase}`;
     showStop(phase);
     if (phase === "your_turn" && remaining > 0) {
       const end = Date.now() + remaining;
       const tick = () => {
         const seconds = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-        stateChip.textContent = `à toi · ${seconds} s`;
+        visorText.textContent = t("phase.yourTurnCountdown", { seconds });
       };
       tick();
       countdown = window.setInterval(tick, 250);
       return;
     }
-    stateChip.textContent = PHASE_LABEL[phase] ?? phase;
+    visorText.textContent = phaseLabel(phase);
   }
 
   // Retour à « prêt » après une réponse : le chat n'émet pas d'état final,
@@ -173,7 +195,7 @@ async function main() {
     }
     if (event.type === "failed") {
       setState("error");
-      toast(event.message ?? "Échec", "error");
+      toast(event.message ?? t("toast.failed"), "error");
     }
     if (event.type === "notice" && event.message) toast(event.message, "info");
     // Conversation vocale : le Chat l'adopte, même si l'utilisateur est sur
@@ -185,7 +207,7 @@ async function main() {
     if (event.type === "approval" && event.id) {
       ctx.approvals.set(event.id, event);
       if (route !== "chat") {
-        toast("Jimy attend ton autorisation dans le Chat (fichier sensible).", "info");
+        toast(t("toast.approvalInChat"), "info");
         void api.showMain().catch(() => undefined);
       }
     }
@@ -205,7 +227,7 @@ async function main() {
       if (inner.type === "approval" && inner.id) {
         ctx.approvals.set(inner.id, { ...inner, taskId: event.taskId });
         if (route !== "chat") {
-          toast("La tâche de fond attend ton autorisation dans le Chat (fichier sensible).", "info");
+          toast(t("toast.bgApprovalInChat"), "info");
           void api.showMain().catch(() => undefined);
         }
       }
@@ -214,8 +236,8 @@ async function main() {
         for (const [id, pending] of ctx.approvals) if (pending.taskId === event.taskId) ctx.approvals.delete(id);
         // Dans le Chat, la vue s'en charge (bulle ou toast selon la session).
         if (route !== "chat") {
-          if (inner.type === "final") toast(`Tâche de fond terminée : ${ctx.taskTitles.get(event.taskId ?? "") ?? ""}`, "info");
-          else toast(`Tâche de fond en échec : ${inner.message ?? ""}`, "error");
+          if (inner.type === "final") toast(t("toast.bgDone", { title: ctx.taskTitles.get(event.taskId ?? "") ?? "" }), "info");
+          else toast(t("toast.bgFailed", { message: inner.message ?? "" }), "error");
         }
       }
     }
@@ -225,7 +247,7 @@ async function main() {
   function renderSidebar() {
     const info = ctx.status;
     const voice = ctx.voice;
-    const voiceLabel = info.tts.voices.find((v) => v.id === info.tts.voice)?.label ?? "aucune";
+    const voiceLabel = info.tts.voices.find((v) => v.id === info.tts.voice)?.label ?? t("system.voiceNone");
     mount(
       sidebar,
       h(
@@ -238,7 +260,7 @@ async function main() {
           "div",
           { class: "brand-text" },
           h("strong", {}, "Jimy"),
-          h("span", { class: "brand-sub" }, `v${info.version} · ${info.dev ? "dépôt local" : "local"}`),
+          h("span", { class: "brand-sub" }, `v${info.version} · ${info.dev ? t("brand.devRepo") : t("brand.local")}`),
         ),
       ),
       h(
@@ -252,7 +274,7 @@ async function main() {
               onclick: () => ctx.navigate(entry.id),
             },
             h("span", { class: "nav-icon" }, icon(entry.icon, 20, 1.6)),
-            entry.label,
+            routeLabel(entry.id),
           ),
         ),
       ),
@@ -260,42 +282,86 @@ async function main() {
         "div",
         { class: "sidebar-status" },
         // En-tête de la carte « Système » : la pastille de mise à jour y vit
-        // (cliquable vers l'Historique), sinon un simple « à jour ».
+        // (cliquable vers les Archives), sinon un simple « à jour ».
         h(
           "div",
           { class: "sidebar-status-head" },
-          h("span", { class: "kicker" }, "Système"),
+          h("span", { class: "kicker" }, t("system.title")),
           info.update.pending
             ? h(
                 "button",
                 {
                   class: "update-badge",
-                  title: "Mise à jour disponible : tape /update dans le Chat",
+                  title: t("system.updateHint"),
                   onclick: () => ctx.navigate("history"),
                 },
-                "mise à jour",
+                t("system.update"),
               )
-            : h("span", { class: "uptodate-badge" }, "à jour"),
+            : h("span", { class: "uptodate-badge" }, t("system.upToDate")),
         ),
-        statusLine("Modèle", info.llm.model, info.llm.has_key),
-        statusLine("Voix", voiceLabel, info.tts.has_key),
+        statusLine(t("system.model"), info.llm.model, info.llm.has_key),
+        statusLine(t("system.voice"), voiceLabel, info.tts.has_key),
         statusLine(
-          "Écoute",
-          voice?.running ? `active · « ${capitalize(voice.wakeWord)} »` : "arrêtée",
+          t("system.listen"),
+          voice?.running ? t("system.listenOn", { word: capitalize(voice.wakeWord) }) : t("system.listenOff"),
           Boolean(voice?.running),
         ),
-        statusLine("Avatar", info.avatar.running ? "actif" : "arrêté", info.avatar.running),
+        statusLine(t("system.avatar"), info.avatar.running ? t("system.on") : t("system.off"), info.avatar.running),
+        statusLine(t("system.memory"), t("system.memories", { count: info.memory.count }), info.memory.enabled),
         statusLine(
-          "Mémoire",
-          `${info.memory.count} souvenir${info.memory.count > 1 ? "s" : ""}`,
-          info.memory.enabled,
-        ),
-        statusLine(
-          "Vault Obsidian",
-          info.vault.enabled ? `${info.vault.notes} notes` : "inactif",
+          t("system.vault"),
+          info.vault.enabled ? t("system.vaultNotes", { count: info.vault.notes }) : t("system.inactive"),
           info.vault.enabled,
         ),
-        statusLine("Outils", String(info.tools.length), true),
+        statusLine(t("system.tools"), String(info.tools.length), true),
+      ),
+    );
+  }
+
+  /** Cerveau, « Jimy parle », « Micro » : l'état réel, relu après chaque clic. */
+  function renderVisorControls() {
+    const info = ctx.status;
+    const speaking = info.tts.enabled;
+    const listening = Boolean(ctx.voice?.running);
+    mount(
+      visorControls,
+      h(
+        "button",
+        { class: "visor-pill brain", title: t("visor.brainHint"), onclick: () => ctx.navigate("settings") },
+        h("span", { class: "visor-pill-kicker" }, t("visor.brain")),
+        info.llm.model,
+      ),
+      h(
+        "button",
+        {
+          class: `visor-pill toggle-pill ${speaking ? "on" : ""}`,
+          "aria-pressed": String(speaking),
+          title: t("visor.speakHint"),
+          onclick: async () => {
+            if (await attempt(() => api.voiceSetEnabled("speech", !speaking), t("guard.voice"))) await ctx.refreshStatus();
+          },
+        },
+        icon("voice", 14, 2),
+        speaking ? t("visor.speakOn") : t("visor.speakOff"),
+      ),
+      h(
+        "button",
+        {
+          class: `visor-pill toggle-pill ${listening ? "on" : ""}`,
+          "aria-pressed": String(listening),
+          title: t("visor.micHint"),
+          onclick: async () => {
+            // Couper : l'écoute s'arrête et le réglage le retient. Rallumer :
+            // le réglage d'abord, puis le démarrage de l'écoute.
+            const ok = listening
+              ? await attempt(() => api.voiceSetEnabled("listen", false), t("guard.listen"))
+              : (await attempt(() => api.voiceSetEnabled("listen", true), t("guard.listen"))) &&
+                (await attempt(() => api.voiceStart(), t("guard.listen")));
+            if (ok) await ctx.refreshStatus();
+          },
+        },
+        icon("voice", 14, 2),
+        listening ? t("visor.micOn") : t("visor.micOff"),
       ),
     );
   }
@@ -329,7 +395,7 @@ async function main() {
       case "diagnostic":
         return diagnosticView(ctx);
       default:
-        return h("div", { class: "empty" }, "Vue inconnue.");
+        return h("div", { class: "empty" }, t("nav.unknown"));
     }
   }
 
@@ -340,26 +406,28 @@ async function main() {
 
     const entry = ROUTES.find((r) => r.id === route);
     renderSidebar();
+    renderVisorControls();
     mount(
       header,
-      h("div", {}, h("h1", {}, entry?.label ?? "Jimy"), h("p", { class: "subtitle" }, entry?.subtitle ?? "")),
+      h("div", {}, h("h1", {}, entry ? routeLabel(entry.id) : "Jimy"), h("p", { class: "subtitle" }, entry ? routeSubtitle(entry.id) : "")),
       h(
         "div",
         { class: "topbar-actions" },
         globalStop,
         stateChip,
+        visorControls,
         h(
           "button",
           {
-            class: "ghost",
-            title: "Relire l'état et recharger cette page",
+            class: "ghost icon-only",
+            title: t("visor.refreshHint"),
+            "aria-label": t("visor.refresh"),
             onclick: async () => {
               await ctx.refreshStatus();
               render();
             },
           },
           icon("refresh", 16, 1.8),
-          "Actualiser",
         ),
       ),
     );
@@ -381,12 +449,12 @@ async function main() {
         "div",
         { class: "onboarding-shell" },
         onboardingView(ctx, async () => {
-          toast("Onboarding terminé. Bonne conversation.");
+          toast(t("toast.onboardingDone"));
           mount(root, sidebar, h("section", { class: "main" }, header, content));
           // L'onboarding est le moment du consentement : on enchaîne sur
           // l'écoute, sinon Jimy reste muet jusqu'au passage par la vue Voix.
-          if (await attempt(() => api.voiceStart(), "écoute")) {
-            toast(`Écoute active — dis « ${capitalize(ctx.status.stt.wake_word)} ».`, "info");
+          if (await attempt(() => api.voiceStart(), t("guard.listen"))) {
+            toast(t("toast.listening", { word: capitalize(ctx.status.stt.wake_word) }), "info");
           }
           await ctx.refreshStatus();
           render();

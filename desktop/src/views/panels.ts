@@ -1,6 +1,6 @@
 /** Vues Mémoire, Skills, Skin et Diagnostic. */
 import { api, type DoctorReport, type McpServerStatus, type Memory, type Skill } from "../api";
-import { MEMORY_KIND_LABEL, QUALITY_LABEL, STATE_LABEL, attempt, formatTime, guard, h, mount, toast } from "../ui";
+import { MEMORY_KIND_LABEL, QUALITY_LABEL, attempt, formatTime, guard, h, mount, stateLabel, toast } from "../ui";
 import type { AppContext } from "../context";
 import { card, toggle } from "./settings";
 
@@ -423,7 +423,7 @@ export function skinView(ctx: AppContext): HTMLElement {
                   await attempt(() => api.avatarState(state as never, ""), "état");
                 },
               },
-              STATE_LABEL[state] ?? state,
+              stateLabel(state),
             ),
         ),
       ),

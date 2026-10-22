@@ -15,6 +15,20 @@
 }
 
 @font-face {
+  font-family: "Manrope";
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("./assets/fonts/manrope.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-weight: 600 800;
+  font-display: swap;
+  src: url("./assets/fonts/montserrat.woff2") format("woff2");
+}
+
+@font-face {
   font-family: "Geist Mono";
   font-weight: 400 500;
   font-display: swap;
@@ -39,34 +53,45 @@
 :root {
   /* Contrôles natifs (listes déroulantes, barres de défilement) en sombre. */
   color-scheme: dark;
-  /* Fonds : du plus profond (page) au plus clair (cartes, menus). */
-  --bg: #0b0c0e;
-  --bg-soft: #14161a;
-  --bg-card: #121418;
-  --bg-input: #0f1114;
-  /* Traits et voiles neutres, dérivés de l'argent de la maquette (#C7CCD3). */
-  --border: rgba(199, 204, 211, 0.12);
-  --border-strong: rgba(199, 204, 211, 0.2);
-  --veil: rgba(199, 204, 211, 0.04);
+  /* Direction « Visière » (21 octobre) : palette du logo Agent Jimmy.
+     Fonds bleu nuit, du plus profond (page) au plus clair (cartes, menus). */
+  --bg: #0e111b;
+  --bg-soft: #161a28;
+  --bg-card: #141826;
+  --bg-raised: #1f2435;
+  --bg-input: #0b0d16;
+  /* Traits et voiles : bleutés, presque invisibles. */
+  --border: rgba(165, 175, 230, 0.1);
+  --border-strong: rgba(165, 175, 230, 0.18);
+  --veil: rgba(165, 175, 230, 0.04);
   /* Textes : titre, courant, atténué, discret. */
-  --title: #f1f3f5;
-  --text: #e8eaed;
-  --text-dim: #a0a6ae;
-  --text-faint: #8b919a;
-  /* Accent cuivre : base, version claire (textes, dégradés), voile. */
-  --accent: #d9692c;
-  --accent-hi: color-mix(in srgb, var(--accent) 62%, #fff);
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --on-accent: #1a0c05;
+  --title: #ffffff;
+  --text: #eef0f7;
+  --text-dim: #b3b9cc;
+  --text-faint: #8f96ab;
+  /* Corail du mot « JIMMY » : TOI (actions, non-lus, ce qui attend ta réponse). */
+  --accent: #ff6a45;
+  --accent-hi: #ff9b80;
+  --accent-soft: rgba(255, 106, 69, 0.14);
+  --on-accent: #1d0c06;
+  /* Dégradé du « AJ » : JIMY (sa présence, son état, ses tâches). */
+  --jimy-violet: #8b5cf6;
+  --jimy-indigo: #5b5bf0;
+  --jimy-cyan: #22d3ee;
+  --jimy: linear-gradient(90deg, var(--jimy-violet), var(--jimy-indigo) 55%, var(--jimy-cyan));
+  --jimy-soft: rgba(139, 92, 246, 0.16);
+  --jimy-text: #c4b5fd;
   --ok: #34d399;
   --warn: #fbbf24;
   --ko: #f87171;
   --radius: 14px;
-  --shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
-  /* Familles : texte, chiffres/étiquettes, titres. */
-  --sans: "Geist", "Segoe UI", system-ui, sans-serif;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 18px 40px rgba(3, 5, 12, 0.55);
+  /* Familles : texte, titres, code. */
+  --sans: "Manrope", "Segoe UI", system-ui, sans-serif;
+  --display: "Montserrat", "Segoe UI", system-ui, sans-serif;
   --mono: "Geist Mono", "Cascadia Mono", Consolas, monospace;
-  --serif: "Instrument Serif", Georgia, serif;
+  /* Ancien titre à empattements : remplacé par Montserrat (compatibilité). */
+  --serif: var(--display);
 }
 
 * {
@@ -98,7 +123,7 @@ body {
 /* Étiquette en capitales espacées (« PROJET », « SYSTÈME ») : le motif
    récurrent de la maquette, réutilisable par toutes les vues. */
 .kicker {
-  font: 500 10.5px/1 var(--mono);
+  font: 700 11px/1 var(--sans);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -151,12 +176,12 @@ body {
 }
 
 .win-btn:hover {
-  background: rgba(199, 204, 211, 0.08);
+  background: rgba(165, 175, 230, 0.08);
   color: var(--title);
 }
 
 .win-btn:active {
-  background: rgba(199, 204, 211, 0.14);
+  background: rgba(165, 175, 230, 0.14);
 }
 
 .win-close:hover {
@@ -172,8 +197,8 @@ body {
 /* ── Barre latérale ───────────────────────────────────────────────────────── */
 
 .sidebar {
-  background: linear-gradient(180deg, #14161a 0%, #0e0f12 100%);
-  border-right: 1px solid rgba(199, 204, 211, 0.09);
+  background: var(--bg);
+  border-right: 1px solid rgba(165, 175, 230, 0.09);
   display: flex;
   flex-direction: column;
   /* Bande de titre (36 px) au-dessus, la marque juste dessous ; écarts
@@ -183,7 +208,7 @@ body {
   overflow: hidden auto;
   /* Ascenseur discret quand la fenêtre est basse. */
   scrollbar-width: thin;
-  scrollbar-color: rgba(199, 204, 211, 0.12) transparent;
+  scrollbar-color: rgba(165, 175, 230, 0.12) transparent;
 }
 
 .brand {
@@ -212,14 +237,14 @@ body {
 
 .brand strong {
   display: block;
-  font: 400 26px/1 var(--serif);
-  letter-spacing: 0.01em;
+  font: 800 26px/1 var(--display);
+  letter-spacing: -0.02em;
   /* Corail du mot « JIMMY » dans le logo officiel. */
-  color: #fe6f51;
+  color: var(--accent);
 }
 
 .brand-sub {
-  font: 500 10.5px/1 var(--mono);
+  font: 700 11px/1 var(--sans);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -271,8 +296,8 @@ body {
   border-radius: 10px;
   background: transparent;
   color: var(--text-dim);
-  font: 400 14px var(--sans);
-  letter-spacing: 0.005em;
+  font: 600 14px var(--sans);
+  letter-spacing: 0;
   text-align: left;
   justify-content: flex-start;
   cursor: pointer;
@@ -280,28 +305,25 @@ body {
 }
 
 .nav-item:hover {
-  background: rgba(199, 204, 211, 0.06);
+  background: rgba(165, 175, 230, 0.06);
   color: var(--text);
 }
 
 /* Onglet courant : dégradé cuivre qui s'éteint vers la droite + liseré. */
 .nav-item.active {
-  color: #f6e9df;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent) 20%, transparent),
-    color-mix(in srgb, var(--accent) 4%, transparent)
-  );
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  /* Visière : l'onglet courant se relève d'un ton, sans dégradé ni liseré. */
+  color: var(--title);
+  font-weight: 700;
+  background: var(--bg-raised);
 }
 
 .nav-icon {
   display: inline-flex;
-  color: #7e858f;
+  color: var(--text-faint);
 }
 
 .nav-item.active .nav-icon {
-  color: var(--accent-hi);
+  color: var(--accent);
 }
 
 .icon {
@@ -317,11 +339,11 @@ body {
   border: 1px solid transparent;
   border-radius: 16px;
   background:
-    linear-gradient(#0f1114, #0f1114) padding-box,
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
     linear-gradient(
         160deg,
-        rgba(199, 204, 211, 0.28),
-        rgba(199, 204, 211, 0.04) 40%,
+        rgba(165, 175, 230, 0.28),
+        rgba(165, 175, 230, 0.04) 40%,
         color-mix(in srgb, var(--accent) 30%, transparent)
       )
       border-box;
@@ -350,7 +372,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #dde1e6;
+  background: var(--text);
   box-shadow: 0 0 0 3px rgba(221, 225, 230, 0.1);
 }
 
@@ -363,7 +385,7 @@ body {
   justify-self: end;
   max-width: 100%;
   min-width: 0;
-  color: #e1e4e8;
+  color: var(--text);
   font: 400 12px var(--mono);
   text-align: right;
   overflow: hidden;
@@ -381,7 +403,7 @@ body {
   overflow: hidden;
   background:
     radial-gradient(900px 520px at 88% -8%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%),
-    radial-gradient(760px 520px at 0% 105%, rgba(199, 204, 211, 0.06), transparent 62%),
+    radial-gradient(760px 520px at 0% 105%, rgba(165, 175, 230, 0.06), transparent 62%),
     var(--bg);
 }
 
@@ -394,13 +416,13 @@ body {
   /* Haut à 44 px : les boutons de la fenêtre (36 px) ne chevauchent pas
      la pastille d'état ni « Actualiser ». */
   padding: 44px 36px 20px;
-  border-bottom: 1px solid rgba(199, 204, 211, 0.09);
+  border-bottom: 1px solid rgba(165, 175, 230, 0.09);
 }
 
 .topbar h1 {
   margin: 0;
-  font: 400 34px/1 var(--serif);
-  letter-spacing: 0.005em;
+  font: 800 28px/1.1 var(--display);
+  letter-spacing: -0.02em;
   color: var(--title);
 }
 
@@ -461,7 +483,7 @@ body {
 /* Titres de section : étiquette mono en capitales (motif « kicker »). */
 .view-header h2 {
   margin: 0;
-  font: 500 11px/1.2 var(--mono);
+  font: 700 11px/1.2 var(--sans);
   letter-spacing: 0.16em;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -469,7 +491,7 @@ body {
 
 /* Carte : voile argent très léger, coins larges, comme les cartes Voix. */
 .card {
-  background: linear-gradient(180deg, rgba(199, 204, 211, 0.035), rgba(199, 204, 211, 0.02)), var(--bg-card);
+  background: linear-gradient(180deg, rgba(165, 175, 230, 0.035), rgba(165, 175, 230, 0.02)), var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 20px 22px;
@@ -499,7 +521,7 @@ body {
 }
 
 code {
-  background: rgba(199, 204, 211, 0.07);
+  background: rgba(165, 175, 230, 0.07);
   border-radius: 5px;
   padding: 1px 6px;
   font-size: 12px;
@@ -507,11 +529,11 @@ code {
 }
 
 kbd {
-  font: 500 11px var(--mono);
-  color: #b9bfc7;
+  font: 700 11px var(--sans);
+  color: var(--text-dim);
   padding: 2px 6px;
   border-radius: 5px;
-  border: 1px solid rgba(199, 204, 211, 0.2);
+  border: 1px solid rgba(165, 175, 230, 0.2);
   background: var(--veil);
 }
 
@@ -525,9 +547,9 @@ button {
   justify-content: center;
   gap: 8px;
   font: 500 13.5px var(--sans);
-  color: #dde1e6;
+  color: var(--text);
   background: var(--veil);
-  border: 1px solid rgba(199, 204, 211, 0.16);
+  border: 1px solid rgba(165, 175, 230, 0.16);
   border-radius: 10px;
   padding: 8px 15px;
   white-space: nowrap;
@@ -536,8 +558,8 @@ button {
 }
 
 button:where(:hover:not(:disabled)) {
-  background: rgba(199, 204, 211, 0.09);
-  border-color: rgba(199, 204, 211, 0.32);
+  background: rgba(165, 175, 230, 0.09);
+  border-color: rgba(165, 175, 230, 0.32);
 }
 
 button:disabled {
@@ -572,14 +594,14 @@ button.primary:hover:not(:disabled) {
 
 button.ghost {
   background: transparent;
-  border-color: rgba(199, 204, 211, 0.16);
-  color: #dde1e6;
+  border-color: rgba(165, 175, 230, 0.16);
+  color: var(--text);
 }
 
 button.ghost:hover:not(:disabled) {
-  background: rgba(199, 204, 211, 0.06);
+  background: rgba(165, 175, 230, 0.06);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: #f6e9df;
+  color: var(--title);
 }
 
 button.danger {
@@ -599,7 +621,7 @@ textarea {
   font: inherit;
   background: var(--bg-input);
   color: var(--text);
-  border: 1px solid rgba(199, 204, 211, 0.16);
+  border: 1px solid rgba(165, 175, 230, 0.16);
   border-radius: 10px;
   padding: 8px 11px;
   min-width: 0;
@@ -608,7 +630,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: #7c838d;
+  color: var(--text-faint);
 }
 
 input:focus,
@@ -638,8 +660,8 @@ input[type="range"] {
   margin: 0;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid rgba(199, 204, 211, 0.2);
-  background: rgba(199, 204, 211, 0.06);
+  border: 1px solid rgba(165, 175, 230, 0.2);
+  background: rgba(165, 175, 230, 0.06);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -652,7 +674,7 @@ input[type="range"] {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  background: linear-gradient(160deg, #ffffff, #c7ccd3);
+  background: #ffffff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
   transition: transform 0.15s ease;
 }
@@ -723,7 +745,7 @@ input[type="range"] {
   padding: 12px 16px;
   border-radius: 18px;
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(199, 204, 211, 0.04), rgba(199, 204, 211, 0.02)), var(--bg-card);
+  background: linear-gradient(180deg, rgba(165, 175, 230, 0.04), rgba(165, 175, 230, 0.02)), var(--bg-card);
   font-size: 14.5px;
   line-height: 1.6;
 }
@@ -745,7 +767,7 @@ input[type="range"] {
 
 .bubble.error::before {
   display: block;
-  font: 500 10.5px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   content: "erreur";
@@ -897,7 +919,7 @@ input[type="range"] {
 .bubble.user::before,
 .bubble.assistant::before {
   display: block;
-  font: 500 10.5px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -929,8 +951,8 @@ input[type="range"] {
   padding: 0 14px;
   border-radius: 999px;
   font: 500 12.5px var(--sans);
-  border: 1px solid rgba(199, 204, 211, 0.18);
-  color: #dde1e6;
+  border: 1px solid rgba(165, 175, 230, 0.18);
+  color: var(--text);
 }
 
 /* Le point est un pseudo-élément : le texte de la pastille reste exactement
@@ -964,9 +986,9 @@ input[type="range"] {
 
 .chip.state-listening,
 .chip.state-speaking {
-  --dot: #93c5fd;
+  --dot: var(--jimy-text);
   border-color: rgba(96, 165, 250, 0.5);
-  color: #93c5fd;
+  color: var(--jimy-text);
 }
 
 .chip.state-error {
@@ -1046,7 +1068,7 @@ input[type="range"] {
   gap: 4px;
   padding: 12px 12px 10px 18px;
   border-radius: 20px;
-  border: 1px solid rgba(199, 204, 211, 0.18);
+  border: 1px solid rgba(165, 175, 230, 0.18);
   background: linear-gradient(180deg, rgba(24, 26, 31, 0.92), rgba(15, 17, 20, 0.92));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -1091,11 +1113,11 @@ input[type="range"] {
   border: 0;
   border-radius: 12px;
   background: transparent;
-  color: #8f959e;
+  color: var(--text-faint);
 }
 
 .composer-icon:hover:not(:disabled) {
-  background: rgba(199, 204, 211, 0.08);
+  background: rgba(165, 175, 230, 0.08);
   color: var(--text);
 }
 
@@ -1452,7 +1474,7 @@ input[type="range"] {
 
 .history-group {
   margin-top: 18px;
-  font: 500 10.5px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -1477,7 +1499,7 @@ input[type="range"] {
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
-  background: linear-gradient(180deg, rgba(199, 204, 211, 0.035), rgba(199, 204, 211, 0.02)), var(--bg-card);
+  background: linear-gradient(180deg, rgba(165, 175, 230, 0.035), rgba(165, 175, 230, 0.02)), var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 13px 16px;
@@ -1554,12 +1576,13 @@ input[type="range"] {
 }
 
 .stat strong {
-  font: 400 30px/1 var(--serif);
+  font: 800 30px/1 var(--display);
+  letter-spacing: -0.02em;
   color: var(--title);
 }
 
 .stat span {
-  font: 500 10.5px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -1567,7 +1590,7 @@ input[type="range"] {
 
 .tag {
   display: inline-block;
-  font: 500 10px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   padding: 2px 7px;
@@ -1617,7 +1640,7 @@ input[type="range"] {
 
 .card h4 {
   margin: 6px 0 0;
-  font: 500 10.5px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -1697,7 +1720,7 @@ input[type="range"] {
 }
 
 .phase-banner.speaking .phase-dot {
-  background: #93c5fd;
+  background: var(--jimy-text);
 }
 
 @keyframes pulse {
@@ -1721,9 +1744,9 @@ input[type="range"] {
 /* Pastille d'état de la barre du haut : étapes de l'écoute. */
 .chip.phase-capturing,
 .chip.phase-speaking {
-  --dot: #93c5fd;
+  --dot: var(--jimy-text);
   border-color: rgba(96, 165, 250, 0.5);
-  color: #93c5fd;
+  color: var(--jimy-text);
 }
 
 .chip.phase-transcribing,
@@ -1940,7 +1963,7 @@ button.small {
 
 .badge.voice {
   border-color: #60a5fa;
-  color: #93c5fd;
+  color: var(--jimy-text);
 }
 
 .badge.warn {
@@ -1981,7 +2004,7 @@ button.small {
 
 .heard-tag {
   flex: none;
-  font: 500 10px/1.4 var(--mono);
+  font: 700 11px/1.4 var(--sans);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--text-dim);
@@ -1996,7 +2019,7 @@ button.small {
 .meter {
   height: 6px;
   border-radius: 999px;
-  background: rgba(199, 204, 211, 0.06);
+  background: rgba(165, 175, 230, 0.06);
   overflow: hidden;
 }
 
@@ -2004,7 +2027,7 @@ button.small {
   height: 100%;
   width: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, #c7ccd3), var(--accent-hi));
+  background: linear-gradient(90deg, var(--jimy-violet), var(--accent-hi));
   transition: width 0.06s linear;
 }
 
@@ -2202,14 +2225,14 @@ button.small {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(199, 204, 211, 0.14);
+  background: rgba(165, 175, 230, 0.14);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(199, 204, 211, 0.24);
+  background: rgba(165, 175, 230, 0.24);
   background-clip: padding-box;
 }
 
@@ -2240,7 +2263,7 @@ button.small {
 }
 
 .subtab.active {
-  color: #f6e9df;
+  color: var(--title);
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--accent) 22%, transparent),
@@ -2348,7 +2371,7 @@ button.small {
 }
 
 .project-kicker {
-  font: 500 10.5px/1 var(--mono);
+  font: 700 11px/1 var(--sans);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -2739,14 +2762,14 @@ button.small {
   width: 252px;
   height: 252px;
   border-radius: 50%;
-  border: 1px solid rgba(199, 204, 211, 0.1);
+  border: 1px solid rgba(165, 175, 230, 0.1);
   animation: breathe 7s ease-in-out infinite;
 }
 
 .chat-orb-ring.inner {
   width: 188px;
   height: 188px;
-  border-color: rgba(199, 204, 211, 0.15);
+  border-color: rgba(165, 175, 230, 0.15);
   animation-delay: -2.4s;
 }
 
@@ -2768,8 +2791,8 @@ button.small {
   height: 132px;
   padding: 2px;
   border-radius: 50%;
-  background: conic-gradient(from 200deg, #edeff2, #5a5f67, #c7ccd3, #43474e, #edeff2);
-  box-shadow: 0 0 80px color-mix(in srgb, var(--accent) 38%, transparent), 0 30px 60px rgba(0, 0, 0, 0.6);
+  background: conic-gradient(from 200deg, var(--jimy-violet), var(--jimy-indigo), var(--jimy-cyan), var(--jimy-indigo), var(--jimy-violet));
+  box-shadow: 0 0 80px rgba(91, 91, 240, 0.4), 0 30px 60px rgba(0, 0, 0, 0.6);
 }
 
 .chat-orb-core {
@@ -2781,19 +2804,19 @@ button.small {
     radial-gradient(circle at 70% 85%, rgba(0, 0, 0, 0.4), transparent 55%),
     radial-gradient(
       circle at 34% 28%,
-      #fff0e2 0%,
-      var(--accent-hi) 16%,
-      var(--accent) 44%,
-      color-mix(in srgb, var(--accent) 32%, #000) 76%,
-      #120805 100%
+      #e9e3ff 0%,
+      var(--jimy-violet) 22%,
+      var(--jimy-indigo) 52%,
+      #1a1b5c 80%,
+      #070816 100%
     );
 }
 
 .chat-empty-title {
   max-width: 620px;
   margin: 0;
-  font: 400 40px/1.1 var(--serif);
-  letter-spacing: 0.005em;
+  font: 800 40px/1.1 var(--display);
+  letter-spacing: -0.02em;
   color: var(--title);
 }
 
@@ -2820,14 +2843,14 @@ button.small {
   min-height: 40px;
   padding: 0 16px;
   border-radius: 999px;
-  border: 1px solid rgba(199, 204, 211, 0.14);
-  background: rgba(199, 204, 211, 0.03);
-  color: #b9bfc7;
+  border: 1px solid rgba(165, 175, 230, 0.14);
+  background: rgba(165, 175, 230, 0.03);
+  color: var(--text-dim);
   font: 400 14px var(--sans);
 }
 
 .chat-suggestion:hover:not(:disabled) {
-  color: #f6e9df;
+  color: var(--title);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
@@ -2850,12 +2873,12 @@ button.small {
   border: 1px solid transparent;
   border-radius: 24px;
   background:
-    radial-gradient(600px 260px at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%) padding-box,
-    linear-gradient(#101216, #101216) padding-box,
+    radial-gradient(600px 260px at 50% 0%, rgba(91, 91, 240, 0.14), transparent 70%) padding-box,
+    linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
     linear-gradient(
         160deg,
-        rgba(199, 204, 211, 0.3),
-        rgba(199, 204, 211, 0.05) 45%,
+        rgba(165, 175, 230, 0.3),
+        rgba(165, 175, 230, 0.05) 45%,
         color-mix(in srgb, var(--accent) 38%, transparent)
       )
       border-box;
@@ -2870,14 +2893,15 @@ button.small {
 }
 
 .voice-hero h3.kicker {
-  font: 500 10.5px/1 var(--mono);
+  font: 700 11px/1 var(--sans);
   letter-spacing: 0.18em;
   color: var(--text-faint);
 }
 
 .voice-hero-word {
   margin: 0;
-  font: 400 52px/1 var(--serif);
+  font: 800 52px/1 var(--display);
+  letter-spacing: -0.02em;
   color: var(--title);
 }
 
@@ -2906,7 +2930,7 @@ button.small {
   max-width: 8px;
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(180deg, #e9ecef, #7e858f);
+  background: linear-gradient(180deg, var(--jimy-cyan), var(--jimy-violet));
   transition: height 0.3s ease;
 }
 
@@ -2916,7 +2940,7 @@ button.small {
 
 /* Écoute coupée : onde éteinte. */
 .voice-wave.off .wave-bar {
-  background: rgba(199, 204, 211, 0.25);
+  background: rgba(165, 175, 230, 0.25);
 }
 
 .voice-hero-actions {
@@ -2947,3 +2971,153 @@ button.voice-listen {
   }
 }
 
+
+/* ── Visière (direction du 21 octobre) ──────────────────────────────────────
+   L'état de Jimy en direct, en haut de chaque page. Règle de couleur : le
+   dégradé violet → cyan du logo, c'est Jimy (présence, état) ; le corail,
+   c'est l'utilisateur (actions, ce qui l'attend). */
+
+.visor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 18px;
+  background: var(--bg-card);
+  color: var(--title);
+  font: 700 13px/1 var(--sans);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Les lunettes du logo, peintes du dégradé de Jimy. */
+.visor-glasses {
+  width: 24px;
+  height: 13px;
+  flex: none;
+  background: var(--jimy);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M2 3.5C2 2.7 2.7 2 3.5 2h23c.8 0 1.5.7 1.5 1.5v4.2c0 2.6-2.1 4.8-4.8 4.8h-2.7c-1.6 0-3-.9-3.7-2.3l-.8-1.6h-2l-.8 1.6c-.7 1.4-2.1 2.3-3.7 2.3H6.8C4.1 12.5 2 10.3 2 7.7z' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M2 3.5C2 2.7 2.7 2 3.5 2h23c.8 0 1.5.7 1.5 1.5v4.2c0 2.6-2.1 4.8-4.8 4.8h-2.7c-1.6 0-3-.9-3.7-2.3l-.8-1.6h-2l-.8 1.6c-.7 1.4-2.1 2.3-3.7 2.3H6.8C4.1 12.5 2 10.3 2 7.7z' fill='none' stroke='black' stroke-width='2.4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* Trait lumineux sous la Visière : éteint au repos, il balaie quand Jimy
+   travaille, écoute ou parle. */
+.visor-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.visor-line::after {
+  content: "";
+  display: block;
+  width: 45%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--jimy-violet), var(--jimy-cyan), transparent);
+  animation: visor-sweep 2.4s cubic-bezier(0.77, 0, 0.175, 1) infinite;
+}
+
+.visor.state-thinking .visor-line,
+.visor.state-executing .visor-line,
+.visor.state-listening .visor-line,
+.visor.state-speaking .visor-line,
+.visor.state-waiting .visor-line,
+.visor.phase-capturing .visor-line,
+.visor.phase-transcribing .visor-line,
+.visor.phase-thinking .visor-line,
+.visor.phase-speaking .visor-line,
+.visor.phase-your_turn .visor-line {
+  opacity: 1;
+}
+
+/* « À toi » : c'est à l'utilisateur de parler, donc le corail. */
+.visor.phase-your_turn {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.visor.state-error {
+  box-shadow: inset 0 0 0 1px var(--ko);
+}
+
+@keyframes visor-sweep {
+  from {
+    transform: translateX(-60%);
+  }
+  to {
+    transform: translateX(230%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visor-line::after {
+    animation: none;
+    width: 100%;
+  }
+}
+
+.visor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.visor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--bg-card);
+  color: var(--text);
+  font: 700 13px/1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.12s ease;
+}
+
+.visor-pill:hover {
+  background: var(--bg-raised);
+}
+
+.visor-pill:active {
+  transform: scale(0.97);
+}
+
+.visor-pill-kicker {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+/* Interrupteur coupé : en creux, texte discret. */
+.toggle-pill:not(.on) {
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.toggle-pill.on {
+  background: var(--bg-raised);
+  color: var(--title);
+}
+
+button.icon-only {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+
+.topbar.compact .visor,
+.topbar.compact .visor-pill {
+  height: 30px;
+}

@@ -596,6 +596,13 @@ pub struct UiSettings {
     pub user_name: String,
     /// Position de la fenêtre principale, mémorisée pour ne pas la perdre.
     pub window: WindowState,
+    /// Langue de l'interface : « auto » (celle de Windows), « fr » ou « en ».
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+fn default_language() -> String {
+    "auto".into()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -618,6 +625,7 @@ impl Default for UiSettings {
                 width: 1040,
                 height: 720,
             },
+            language: default_language(),
         }
     }
 }
@@ -1207,5 +1215,14 @@ mod env_tests {
         assert_eq!(s.llm.memory_active_provider().unwrap().id, PROVIDER_OPENCODE);
         s.llm.memory_provider = "n-existe-pas".into();
         assert_eq!(s.llm.memory_active_provider().unwrap().id, PROVIDER_ANTHROPIC);
+    }
+    /// Version anglaise (21 octobre) : une config d'avant, sans `language`,
+    /// reste lisible et suit la langue du système (« auto »).
+    #[test]
+    fn la_langue_par_defaut_suit_le_systeme() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["ui"].as_object_mut().unwrap().remove("language");
+        let settings: Settings = serde_json::from_value(value).expect("config d'avant lisible");
+        assert_eq!(settings.ui.language, "auto");
     }
 }

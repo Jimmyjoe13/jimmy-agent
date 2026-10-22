@@ -82,7 +82,7 @@ let stepPage = null;
   });
 
   await step("Navigation : une seule vue montée par page", async () => {
-    for (const label of ["Chat", "Voix", "Historique", "Mémoire", "Skills", "Skin", "Paramètres", "Diagnostic"]) {
+    for (const label of ["Discuter", "Voix", "Mémoire", "Outils", "Apparence", "Archives", "Réglages", "Diagnostic"]) {
       await nav(label);
       const n = await p.$$eval("main.content > *", (els) => els.length);
       expect(n === 1, `${label} : ${n} vues`);
@@ -111,7 +111,7 @@ let stepPage = null;
   });
 
   await step("Chat : envoi, attente visible, réponse", async () => {
-    await nav("Chat");
+    await nav("Discuter");
     await p.locator("button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
     await guetterFlux();
@@ -135,14 +135,14 @@ let stepPage = null;
   });
 
   await step("Chat : la pastille revient à « prêt » après la réponse", async () => {
-    await p.waitForFunction(() => document.querySelector(".topbar .chip")?.textContent === "prêt", null, { timeout: 15000 });
+    await p.waitForFunction(() => document.querySelector(".topbar .visor-text")?.textContent === "prêt", null, { timeout: 15000 });
     return "prêt";
   });
 
   await step("Chat : la session est reprise après navigation", async () => {
     const before = await p.locator(".stream .bubble").count();
     await nav("Mémoire");
-    await nav("Chat");
+    await nav("Discuter");
     await p.waitForTimeout(800);
     const after = await p.locator(".stream .bubble").count();
     expect(after === before, `${before} bulles avant, ${after} après`);
@@ -185,7 +185,7 @@ let stepPage = null;
     // par la commande qu'il appelle, puis on vérifie tout le reste à l'écran.
     await invoke("session_set_project", { sessionId: session.id, project: repo });
     await nav("Mémoire");
-    await nav("Chat");
+    await nav("Discuter");
     await p.waitForFunction((name) => document.querySelector(".project-name")?.textContent === name, repoName, { timeout: 5000 });
     // Le menu des projets propose d'ouvrir un dossier, puis se ferme.
     await p.locator(".project-button").click();
@@ -333,7 +333,7 @@ let stepPage = null;
     const contenu = await invoke("fs_preview", { path: fichier }).then((r) => JSON.stringify(r), () => "");
     expect(contenu.includes("TEST=2"), `seconde écriture absente : ${contenu.slice(0, 120)}`);
     // Retrait depuis Paramètres → Ajuster les permissions.
-    await nav("Paramètres");
+    await nav("Réglages");
     await p.locator("button", { hasText: "Ajuster les permissions" }).click();
     const ligne = p.locator(".always-row", { hasText: portee });
     await ligne.locator("button", { hasText: "Retirer" }).click();
@@ -341,7 +341,7 @@ let stepPage = null;
       timeout: 5000,
     });
     expect(!(await invoke("approvals_always")).includes(portee), "accord toujours présent après retrait");
-    await nav("Chat");
+    await nav("Discuter");
     return `« ${portee.split("\\").pop()} » : accordé, réécrit sans carte, retiré`;
   });
 
@@ -364,7 +364,7 @@ let stepPage = null;
     await p.locator(".project-menu .project-item", { hasText: repoName }).first().click();
     await nameIs(repoName);
     await nav("Mémoire");
-    await nav("Chat");
+    await nav("Discuter");
     await nameIs(repoName);
     return `« ${repoName} » gardé après navigation`;
   });
@@ -514,7 +514,7 @@ let stepPage = null;
     await p.waitForFunction(() => document.querySelector(".listen-state")?.textContent === "active", null, { timeout: 90000 });
     const servers = await p.locator(".card", { hasText: "Écoute permanente" }).locator(".note").nth(1).textContent();
     expect(servers.includes("prêt"), `serveurs : ${servers}`);
-    await nav("Chat");
+    await nav("Discuter");
     const side = await p.locator(".status-line", { hasText: "Écoute" }).textContent();
     expect(side.includes("active"), `barre latérale : ${side}`);
     await nav("Voix");
@@ -538,7 +538,7 @@ let stepPage = null;
     await p.waitForSelector(".phase-banner", { state: "visible", timeout: 5000 });
     const text = (await p.locator(".phase-banner .phase-text").textContent()) ?? "";
     expect(/veille|t'entends|transcris|À toi|réfléchis|réponds/.test(text), `bandeau : « ${text} »`);
-    const chip = (await p.locator(".topbar .chip").textContent()) ?? "";
+    const chip = (await p.locator(".topbar .visor-text").textContent()) ?? "";
     await p.locator("button", { hasText: "Couper l'écoute" }).click();
     await p.waitForFunction(() => document.querySelector(".listen-state")?.textContent === "arrêtée", null, { timeout: 15000 });
     const hidden = await p.locator(".phase-banner").isHidden();
@@ -559,7 +559,7 @@ let stepPage = null;
   // Skin (INSTRUCTIONS §6 : un test rend le réglage qu'il a trouvé).
   let initialSkin = "";
   await step("Skin : changement appliqué et bouton actif mis à jour", async () => {
-    await nav("Skin");
+    await nav("Apparence");
     initialSkin = await p.$$eval(".card button.primary", (els) => {
       const skin = els.find((b) => b.closest(".card")?.textContent.includes("Skin"));
       return skin ? skin.textContent.trim() : "";
@@ -590,7 +590,7 @@ let stepPage = null;
   });
 
   await step("Skin : skins premium (licence refusée, débloqué = applicable)", async () => {
-    await nav("Skin");
+    await nav("Apparence");
     const premium = p.locator(".card", { hasText: "Skins premium" });
     expect((await premium.count()) === 1, "carte « Skins premium » absente");
     const neon = premium.locator("button", { hasText: "Renard Néon" });
@@ -632,7 +632,7 @@ let stepPage = null;
   // ARK : modèle 3D à squelette natif (.glb). Godot refuse un skin dont le
   // modèle manque : un bouton « primary » prouve que le .glb est chargé.
   await step("Skin : ARK (modèle 3D) appliqué puis renard", async () => {
-    await nav("Skin");
+    await nav("Apparence");
     const ark = p.locator(".card", { hasText: "Skins premium" }).locator("button", { hasText: "ARK" });
     expect((await ark.count()) === 1, "bouton ARK absent");
     if (await ark.isDisabled()) return "verrouillé (machine sans licence)";
@@ -655,7 +655,7 @@ let stepPage = null;
   });
 
   await step("Skin : skin de l'utilisateur restauré", async () => {
-    await nav("Skin");
+    await nav("Apparence");
     if (!initialSkin || initialSkin === "Renard roux") return "renard (rien à restaurer)";
     await p.locator(".card button", { hasText: initialSkin }).first().click();
     await p
@@ -671,7 +671,7 @@ let stepPage = null;
   });
 
   await step("Paramètres : enregistrement confirmé", async () => {
-    await nav("Paramètres");
+    await nav("Réglages");
     await p.waitForTimeout(800);
     // La langue et l'écoute ont déménagé dans l'onglet Voix : on vérifie un
     // champ resté ici avant d'enregistrer.
@@ -766,7 +766,7 @@ let stepPage = null;
     // Le modèle vocal se choisit désormais dans l'onglet Voix (parcours
     // dédié plus bas) : ici, seuls la liste, le test et le refus.
     const saved = await p.evaluate(async () => (await window.__TAURI_INTERNALS__.invoke("status")).llm);
-    await nav("Paramètres");
+    await nav("Réglages");
     await p.locator(".subtab", { hasText: "LLM" }).click();
     await p.waitForSelector(".model-row", { timeout: 40000 });
     const total = await p.locator(".model-row").count();
@@ -815,8 +815,8 @@ let stepPage = null;
           tests["opencode:grok-4.6"] = { model: "grok-4.6", ok: false, tools: false, latency_ms: 0, tools_latency_ms: 0, reply: "", error: "HTTP 400 — échec simulé", tested_at: new Date().toISOString(), at: Date.now() };
           localStorage.setItem(key, JSON.stringify(tests));
         }, KEY);
-        await nav("Historique");
-        await nav("Paramètres");
+        await nav("Archives");
+        await nav("Réglages");
         await p.locator(".subtab", { hasText: "LLM" }).click();
         await p.waitForSelector(".model-row", { timeout: 40000 });
         const grok = p.locator(".model-row", { hasText: "grok-4.6" });
@@ -890,7 +890,7 @@ let stepPage = null;
   });
 
   await step("Paramètres : fournisseurs (liste, clé masquée, ajout et retrait d'un personnalisé)", async () => {
-    await nav("Paramètres");
+    await nav("Réglages");
     await p.locator(".subtab", { hasText: "LLM" }).click();
     await p.waitForSelector(".provider-row", { timeout: 20000 });
     const rows = p.locator(".card", { hasText: "Fournisseurs" }).locator(".provider-row:not(.provider-add)");
@@ -968,20 +968,20 @@ let stepPage = null;
   });
 
   await step("Historique : ouvrir une session", async () => {
-    await nav("Historique");
+    await nav("Archives");
     await p.waitForSelector(".list-row", { timeout: 5000 });
     await p.locator(".list-row").first().locator("button", { hasText: "Ouvrir" }).click();
     await p.waitForTimeout(1000);
     const title = await p.locator(".topbar h1").textContent();
     const bubbles = await p.locator(".stream .bubble").count();
-    expect(title === "Chat" && bubbles > 0, `${title}, ${bubbles} bulles`);
+    expect(title === "Discuter" && bubbles > 0, `${title}, ${bubbles} bulles`);
     return `${bubbles} bulles`;
   });
 
   // Historique groupé par projet + recherche instantanée + Ctrl+K.
   await step("Historique : projets groupés, recherche, Ctrl+K", async () => {
     const repoName = "jimmy-agent-personnel";
-    await nav("Historique");
+    await nav("Archives");
     // Groupes : un par projet, le dépôt de travail du test est groupé.
     const groups = await p.$$eval(".history-group", (els) => els.map((e) => e.textContent));
     expect(groups.includes(repoName), `groupes : ${groups.join(" | ")}`);
@@ -1005,7 +1005,7 @@ let stepPage = null;
   // route ne s'affiche jamais dans la nouvelle ; elle reste dans la sienne.
   await step("Sessions : une réponse reste dans sa conversation", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
-    await nav("Chat");
+    await nav("Discuter");
     await p.locator("button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
     await p.keyboard.press("Enter");
@@ -1032,7 +1032,7 @@ let stepPage = null;
     const origin = newest(await invoke("sessions"));
     expect(origin && origin.title.includes("banane"), `session de test introuvable : ${origin?.title}`);
     const row = () => p.locator(`.list-row[data-session="${origin.id}"]`);
-    await nav("Historique");
+    await nav("Archives");
     try {
       await row().waitFor({ timeout: 5000 });
       // Épingler : la session passe dans le groupe « Épinglées ».
@@ -1073,7 +1073,7 @@ let stepPage = null;
   });
 
   await step("Skills : sous-onglet des serveurs MCP", async () => {
-    await nav("Skills");
+    await nav("Outils");
     await p.waitForSelector(".subtab.active", { timeout: 5000 });
     await p.locator(".subtab", { hasText: "Serveurs MCP" }).click();
     // La liste affichée doit correspondre à ce que l'application rapporte.
@@ -1105,7 +1105,7 @@ let stepPage = null;
     expect(Boolean(cle), "canari absent (lancer par test-ui.ps1)");
     const fichier = path.join(OUT, "notes-reunion.txt");
     require("fs").writeFileSync(fichier, `Compte rendu\nréférence du dossier : ${cle}\nfin\n`);
-    await nav("Chat");
+    await nav("Discuter");
     await p.locator("button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill(`Lis le fichier ${fichier} avec read_file, puis réponds uniquement : lu.`);
     await p.keyboard.press("Enter");
@@ -1142,7 +1142,7 @@ let stepPage = null;
 
   await nav("Voix");
   await p.screenshot({ path: path.join(OUT, "suite-voix.png") });
-  await nav("Chat");
+  await nav("Discuter");
   await p.screenshot({ path: path.join(OUT, "suite-chat.png") });
 
   await step("Mise à jour : pastille quand une mise à jour attend", async () => {
@@ -1184,8 +1184,8 @@ let stepPage = null;
       await p.waitForSelector(".update-badge", { timeout: 10000 });
       await p.locator(".update-badge").click({ timeout: 8000 });
     }
-    await p.waitForFunction(() => document.querySelector(".topbar h1")?.textContent === "Historique", null, { timeout: 5000 });
-    await nav("Chat");
+    await p.waitForFunction(() => document.querySelector(".topbar h1")?.textContent === "Archives", null, { timeout: 5000 });
+    await nav("Discuter");
     return already ? "vraie alerte : pastille et clic vérifiés" : "pastille simulée, clic vers Historique, disparue après restauration";
   });
 

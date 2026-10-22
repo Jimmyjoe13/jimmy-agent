@@ -13,6 +13,7 @@
 import { api, type Session } from "../api";
 import { attempt, formatTime, h, mount, guard } from "../ui";
 import type { AppContext } from "../context";
+import { t } from "../i18n";
 
 /** Nom projeté d'un chemin : le dernier composant (dossier ou fichier). */
 function nameOf(path: string): string {
@@ -30,8 +31,8 @@ export function historyView(ctx: AppContext): HTMLElement {
 
   const search = h("input", {
     class: "field history-search",
-    placeholder: "Rechercher une session (titre, projet ou contenu)…",
-    "aria-label": "Recherche de session",
+    placeholder: t("history.search"),
+    "aria-label": t("history.searchLabel"),
   }) as HTMLInputElement;
 
   const list = h("div", { class: "list" });
@@ -40,20 +41,20 @@ export function historyView(ctx: AppContext): HTMLElement {
     "button",
     {
       class: "ghost history-archived-toggle",
-      title: "Basculer entre les sessions actives et les archivées",
+      title: t("history.toggleHint"),
       onclick: () => {
         showArchived = !showArchived;
-        archivedToggle.textContent = showArchived ? "Voir les actives" : "Voir les archivées";
+        archivedToggle.textContent = showArchived ? t("history.showActive") : t("history.showArchived");
         void reload();
       },
     },
-    "Voir les archivées",
+    t("history.showArchived"),
   );
 
   /** Recherche côté base (toutes les sessions, contenu compris). */
   async function reload() {
     const query = search.value.trim();
-    const data = await guard(() => api.sessions(query || null, showArchived), "historique");
+    const data = await guard(() => api.sessions(query || null, showArchived), t("guard.history"));
     if (!data) return;
     sessions = data;
     render();
@@ -65,16 +66,16 @@ export function historyView(ctx: AppContext): HTMLElement {
     mount(list);
     if (sessions.length === 0) {
       const empty = search.value.trim()
-        ? "Aucune session ne correspond."
+        ? t("history.noMatch")
         : showArchived
-          ? "Aucune session archivée."
-          : "Aucune session enregistrée.";
+          ? t("history.noArchived")
+          : t("history.none");
       mount(list, h("div", { class: "empty" }, h("p", {}, empty)));
       return;
     }
     const pinned = sessions.filter((s) => s.pinned);
     if (pinned.length > 0) {
-      list.append(h("div", { class: "history-group history-pinned" }, "Épinglées"));
+      list.append(h("div", { class: "history-group history-pinned" }, t("history.pinned")));
       for (const session of pinned) list.append(row(session));
     }
     const groups = new Map<string, Session[]>();
@@ -85,7 +86,7 @@ export function historyView(ctx: AppContext): HTMLElement {
       groups.set(key, bucket);
     }
     for (const [project, bucket] of groups) {
-      list.append(h("div", { class: "history-group", title: project || undefined }, project ? nameOf(project) : "Divers (sans projet)"));
+      list.append(h("div", { class: "history-group", title: project || undefined }, project ? nameOf(project) : t("history.misc")));
       for (const session of bucket) list.append(row(session));
     }
   }
@@ -96,7 +97,7 @@ export function historyView(ctx: AppContext): HTMLElement {
   }
 
   function row(session: Session): HTMLElement {
-    const title = session.title || "Sans titre";
+    const title = session.title || t("history.untitled");
     return h(
       "div",
       { class: `list-row${session.pinned ? " pinned" : ""}`, "data-session": session.id },
@@ -107,7 +108,7 @@ export function historyView(ctx: AppContext): HTMLElement {
         h(
           "div",
           { class: "row-meta" },
-          `${formatTime(session.updatedAt)} · ${session.messageCount} message(s)${session.project && session.pinned ? ` · ${nameOf(session.project)}` : ""}`,
+          `${formatTime(session.updatedAt)} · ${t("history.messages", { count: session.messageCount })}${session.project && session.pinned ? ` · ${nameOf(session.project)}` : ""}`,
         ),
       ),
       h(
@@ -122,45 +123,45 @@ export function historyView(ctx: AppContext): HTMLElement {
               ctx.navigate("chat");
             },
           },
-          "Ouvrir",
+          t("history.open"),
         ),
         h(
           "button",
           {
             class: "ghost history-pin",
-            title: session.pinned ? "Retirer des épinglées" : "Garder en tête de liste",
-            onclick: () => void act(() => api.sessionPin(session.id, !session.pinned), "épinglage"),
+            title: session.pinned ? t("history.unpinHint") : t("history.pinHint"),
+            onclick: () => void act(() => api.sessionPin(session.id, !session.pinned), t("guard.pin")),
           },
-          session.pinned ? "Désépingler" : "Épingler",
+          session.pinned ? t("history.unpin") : t("history.pin"),
         ),
         h(
           "button",
           {
             class: "ghost history-rename",
-            title: "Renommer (le titre ne changera plus tout seul)",
+            title: t("history.renameHint"),
             onclick: () => {
-              const next = window.prompt("Nouveau titre de la session :", title);
+              const next = window.prompt(t("history.renamePrompt"), title);
               if (next === null || !next.trim() || next.trim() === title) return;
-              void act(() => api.sessionRename(session.id, next.trim()), "renommage");
+              void act(() => api.sessionRename(session.id, next.trim()), t("guard.rename"));
             },
           },
-          "Renommer",
+          t("history.rename"),
         ),
         h(
           "button",
           {
             class: "ghost history-archive",
-            onclick: () => void act(() => api.sessionArchive(session.id, !session.archived), "archivage"),
+            onclick: () => void act(() => api.sessionArchive(session.id, !session.archived), t("guard.archive")),
           },
-          session.archived ? "Désarchiver" : "Archiver",
+          session.archived ? t("history.unarchive") : t("history.archive"),
         ),
         h(
           "button",
           {
             class: "danger",
             onclick: async () => {
-              if (!window.confirm(`Supprimer la session « ${title} » ?`)) return;
-              if (!(await attempt(() => api.deleteSession(session.id), "suppression"))) return;
+              if (!window.confirm(t("history.deleteConfirm", { title }))) return;
+              if (!(await attempt(() => api.deleteSession(session.id), t("guard.delete")))) return;
               if (ctx.lastSessionId === session.id) {
                 ctx.lastSessionId = null;
                 ctx.pendingProject = session.project ?? null;
@@ -168,7 +169,7 @@ export function historyView(ctx: AppContext): HTMLElement {
               await reload();
             },
           },
-          "Supprimer",
+          t("history.delete"),
         ),
       ),
     );
@@ -190,10 +191,10 @@ export function historyView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("p", { class: "note" }, "Tout est stocké sur cette machine, dans la base locale de Jimy. Ctrl+K pour revenir ici à tout moment."),
+      h("p", { class: "note" }, t("history.note")),
       search,
       archivedToggle,
-      h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
+      h("button", { class: "ghost", onclick: () => void reload() }, t("history.refresh")),
     ),
     list,
   );

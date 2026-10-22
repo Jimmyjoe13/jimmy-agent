@@ -3,6 +3,7 @@
 import { api, type Settings, type StartupMode } from "../api";
 import { QUALITY_LABEL, attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
+import { setLanguage, t } from "../i18n";
 import { modelsPanel } from "./models";
 import { providersPanel } from "./providers";
 
@@ -195,6 +196,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
           h("button", { class: "primary", onclick: () => void persist() }, "Enregistrer"),
         ),
       ),
+      languageCard(),
       h("div", { class: "subtabs", role: "tablist" }, tabButtons.general, tabButtons.llm),
       generalPane,
       llmPane,
@@ -603,4 +605,27 @@ export function field(label: string, input: HTMLElement, placeholder = ""): HTML
 
 export function toggle(label: string, input: HTMLElement): HTMLElement {
   return h("label", { class: "toggle" }, input, h("span", {}, label));
+}
+
+/**
+ * Langue de l'interface (version anglaise, 21 octobre). Enregistrée à part,
+ * sur une copie fraîche des réglages, puis la fenêtre se recharge : aucun
+ * formulaire resté ouvert ne peut l'écraser avec une copie ancienne.
+ */
+function languageCard(): HTMLElement {
+  const select = h("select", { class: "field", "aria-label": t("lang.title") }) as HTMLSelectElement;
+  for (const value of ["auto", "fr", "en"] as const) {
+    select.append(h("option", { value }, t(`lang.${value}`)));
+  }
+  void api.getSettings().then((current) => (select.value = current.ui.language || "auto")).catch(() => undefined);
+  select.addEventListener("change", async () => {
+    const fresh = await guard(() => api.getSettings(), t("lang.title"));
+    if (!fresh) return;
+    fresh.ui.language = select.value;
+    if (!(await attempt(() => api.saveSettings(fresh), t("lang.title")))) return;
+    setLanguage(select.value);
+    toast(t("lang.saved"));
+    window.location.reload();
+  });
+  return card(t("lang.title"), h("p", { class: "note" }, t("lang.hint")), select);
 }
