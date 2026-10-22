@@ -80,6 +80,16 @@ let stepPage = null;
     if (status.running) await window.__TAURI_INTERNALS__.invoke("voice_stop");
     return status.running;
   });
+  // Interrupteurs de la Visière (« Micro », « Jimy parle ») : l'utilisateur
+  // peut avoir coupé l'écoute ou la synthèse. La suite a besoin des deux ;
+  // ils sont relevés ici et rendus tels quels à la fin (piège 61).
+  const interrupteurs = await p.evaluate(async () => {
+    const s = await window.__TAURI_INTERNALS__.invoke("get_settings");
+    const avant = { listen: s.stt.enabled, speech: s.tts.enabled };
+    if (!avant.listen) await window.__TAURI_INTERNALS__.invoke("voice_set_enabled", { scope: "listen", enabled: true });
+    if (!avant.speech) await window.__TAURI_INTERNALS__.invoke("voice_set_enabled", { scope: "speech", enabled: true });
+    return avant;
+  });
 
   await step("Navigation : une seule vue montée par page", async () => {
     for (const label of ["Discuter", "Voix", "Mémoire", "Outils", "Apparence", "Archives", "Réglages", "Diagnostic"]) {
@@ -1140,10 +1150,16 @@ let stepPage = null;
     return await p.locator(".ok-note, .warn-note").first().textContent();
   });
 
-  await nav("Voix");
-  await p.screenshot({ path: path.join(OUT, "suite-voix.png") });
-  await nav("Discuter");
-  await p.screenshot({ path: path.join(OUT, "suite-chat.png") });
+  // Captures de fin : une étape comme les autres. Si la page a disparu (veille
+  // du PC, 22 octobre), l'échec est noté mais la suite va jusqu'au bout :
+  // résultats affichés et réglages de l'utilisateur restaurés.
+  await step("Captures de fin (Voix, Discuter)", async () => {
+    await nav("Voix");
+    await p.screenshot({ path: path.join(OUT, "suite-voix.png") });
+    await nav("Discuter");
+    await p.screenshot({ path: path.join(OUT, "suite-chat.png") });
+    return "2 captures";
+  });
 
   await step("Mise à jour : pastille quand une mise à jour attend", async () => {
     const fs = require("fs");
@@ -1199,6 +1215,15 @@ let stepPage = null;
     if (on && !status.running) await window.__TAURI_INTERNALS__.invoke("voice_start");
     if (!on && status.running) await window.__TAURI_INTERNALS__.invoke("voice_stop");
   }, ecouteInitiale).catch((e) => results.push(`ÉCHEC  Écoute non restaurée — ${e.message.split("\n")[0]}`));
+
+  // Interrupteurs « Micro » et « Jimy parle » rendus comme avant la suite.
+  await p
+    .evaluate(async (avant) => {
+      for (const scope of ["listen", "speech"]) {
+        await window.__TAURI_INTERNALS__.invoke("voice_set_enabled", { scope, enabled: avant[scope] });
+      }
+    }, interrupteurs)
+    .catch((e) => results.push(`ÉCHEC  Interrupteurs non restaurés — ${e.message.split("\n")[0]}`));
 
   console.log(results.join("\n"));
   await browser.close();

@@ -31,6 +31,12 @@ if (-not (Test-Path (Join-Path $suite 'node_modules'))) {
 }
 
 Stop-Jimmy
+# Interrupteurs « Micro » (stt) et « Jimy parle » (tts) relevés avant la
+# suite, rendus dans la config à la fin même si la suite plante (veille du
+# PC, 22 octobre). Jimmy est arrêté pendant l'écriture (piège 91, sans BOM).
+$config = Join-Path $root 'data\config.json'
+$lireInterrupteurs = "import json,sys;c=json.load(open(sys.argv[1],encoding='utf-8-sig'));print(int(c['stt']['enabled']),int(c['tts']['enabled']))"
+$interrupteurs = (python -I -c $lireInterrupteurs $config).Trim()
 # Canari du parcours « Sécurité » : fausse clé déposée dans le coffre avant le
 # lancement (Jimmy retient les clés du coffre au démarrage), retirée à la fin.
 $canariFile = Join-Path $env:USERPROFILE '.secrets\jimmy-ui-test-canari.json'
@@ -53,5 +59,7 @@ Remove-Item Env:JIMMY_UI_CANARI -ErrorAction SilentlyContinue
 
 # Relance normale, sans port de débogage.
 Stop-Jimmy
+$rendreInterrupteurs = "import json,sys;p=sys.argv[1];stt,tts=(bool(int(x)) for x in sys.argv[2:4]);c=json.load(open(p,encoding='utf-8-sig'));ok=(c['stt']['enabled'],c['tts']['enabled'])==(stt,tts);c['stt']['enabled'],c['tts']['enabled']=stt,tts;ok or open(p,'w',encoding='utf-8',newline='\n').write(json.dumps(c,ensure_ascii=False,indent=2));print('interrupteurs', 'inchanges' if ok else 'restaures')"
+if ($interrupteurs -match '^[01] [01]$') { python -I -c $rendreInterrupteurs $config ($interrupteurs -split ' ') }
 & (Join-Path $PSScriptRoot 'launcher.ps1')
 exit $code
