@@ -141,6 +141,14 @@ om.json`, champ `api_key`) et `${VAR}` dans
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 22 octobre 2026 : release **v0.2.2** (tag `v0.2.2`, CI
+  installeur) — interface « Visière » aux couleurs du logo et version
+  anglaise (`desktop/src/i18n`, réglage `ui.language`), sessions (titres,
+  recherche dans tout l'historique, épingler/renommer/archiver, chantiers par
+  projet, événements marqués de leur conversation), Fast-Path conversationnel,
+  première phrase lue plus tôt, compteur d'usage des souvenirs ; pièges
+  135-138. Site : article de version, `.vercelignore` (jamais d'identifiants
+  ni de fichiers de travail en ligne).
 - État au 17 octobre 2026 (soir) : release **v0.2.1** (tag `v0.2.1`, CI
   installeur) — fluidité vocale (hangover 1200 ms + hystérésis VAD,
   select Rapide/Naturel/Patient) et lecture vocale intégrale du naturel
