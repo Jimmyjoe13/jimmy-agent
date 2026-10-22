@@ -1,0 +1,7 @@
+# Jamais en ligne : identifiants, exports et notes de travail.
+analytics-credentials/
+*.csv
+*.bak
+conversation-*.txt
+JOURNAL_SEO.md
+README.txt

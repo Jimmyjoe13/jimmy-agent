@@ -1,24 +1,112 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jimy — l'agent IA qui vit sur ton bureau</title>
-<meta name="description" content="Jimy est un agent IA incarné par un personnage 3D qui vit sur ton bureau Windows. Tu lui parles, il agit sur ton PC et te répond à voix haute. Gratuit et open source.">
+<title>Jimy — Agent IA Autonome sur Bureau Windows | Vocal & Open Source</title>
+<meta name="description" content="L'agent IA 3D qui vit sur ton bureau Windows. Parle-lui, il agit sur tes fichiers et ton PC à voix haute. 100% gratuit, privé et open source. Télécharge-le !">
 <meta name="theme-color" content="#0a0e1c">
 <link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
 <link rel="preload" href="/assets/fonts/bricolage.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="canonical" href="https://jimy-agent.me/">
+<link rel="alternate" hreflang="fr" href="https://jimy-agent.me/">
+<link rel="alternate" hreflang="en" href="https://jimy-agent.me/en/">
+<link rel="alternate" hreflang="x-default" href="https://jimy-agent.me/">
 <script>window.JIMY_GA4_ID = "G-FK2NSSHQWM"; /* ID GA4 de la propriété jimy-agent.me */</script>
 <link rel="stylesheet" href="/assets/site.css">
 <!-- Partage (Open Graph / X) -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://jimy-agent.me/">
-<meta property="og:title" content="Jimy — l'agent IA qui vit sur ton bureau">
-<meta property="og:description" content="Un personnage 3D sur ton bureau Windows : tu lui parles, il agit, il te répond. Gratuit et open source.">
+<meta property="og:title" content="Jimy — Agent IA Autonome sur Bureau Windows | Vocal & Open Source">
+<meta property="og:description" content="L'agent IA 3D qui vit sur ton bureau Windows. Parle-lui, il agit sur tes fichiers et ton PC à voix haute. 100% gratuit, privé et open source. Télécharge-le !">
 <meta property="og:image" content="https://jimy-agent.me/assets/og.png">
 <meta name="twitter:card" content="summary_large_image">
+<!-- Données structurées Schema.org : Logiciel Windows -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Jimy",
+  "alternateName": "Jimy Agent",
+  "operatingSystem": "Windows 10, Windows 11 (64-bit)",
+  "applicationCategory": "UtilitiesApplication",
+  "softwareVersion": "0.2.0",
+  "description": "Agent IA autonome incarné par un personnage 3D sur le bureau Windows. Reconnaissance vocale Whisper 100% locale, manipulation de fichiers et automatisation par protocoles MCP.",
+  "url": "https://jimy-agent.me/",
+  "downloadUrl": "https://github.com/Jimmyjoe13/jimmy-agent/releases/latest",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "EUR",
+    "availability": "https://schema.org/InStock"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Jimmyjoe13",
+    "url": "https://github.com/Jimmyjoe13"
+  },
+  "license": "https://opensource.org/licenses/MIT"
+}
+</script>
+<!-- Données structurées Schema.org : FAQ (Rich Snippets Google) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "C'est vraiment gratuit ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "L'appli et les cinq skins de base, oui, et le code est open source. Il te faut une clé chez un fournisseur de modèle de langage (OpenCode Go, OpenRouter…) : c'est lui qui facture l'usage, selon le modèle choisi. Les skins premium seront payants."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Il m'écoute en permanence ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Le micro est ouvert pour entendre « Jimy », mais tout se passe sur ta machine : l'audio ne part jamais sur Internet. Après une réponse, il garde l'oreille ouverte quelques secondes pour enchaîner sans redire son nom. Tout se règle ou se coupe dans Paramètres → Écoute."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Quelle machine faut-il ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Windows 10 ou 11, 64 bits. Jimy est développé sur un portable Ryzen 7 avec 16 Go de RAM, sans carte graphique dédiée. L'avatar a trois profils graphiques pour les machines plus modestes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Pourquoi Windows affiche un avertissement ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "L'installeur n'est pas encore signé. Une signature gratuite est demandée à SignPath Foundation (Code signing policy). En attendant, l'installeur est construit par GitHub Actions à partir du code public, que tu peux vérifier."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Et sur Mac ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "C'est la prochaine étape. Pour l'instant, Jimy n'existe que sur Windows."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment j'active un skin premium ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "La boutique n'est pas encore ouverte. À l'ouverture, tu recevras une clé de licence après l'achat : dans l'appli, onglet Skin → « Skins premium », colle-la et clique sur Activer. Le skin se télécharge tout seul."
+      }
+    }
+  ]
+}
+</script>
 </head>
 <body>
 
@@ -32,6 +120,7 @@
       <a href="#skins">Skins</a>
       <a href="#faq">FAQ</a>
       <a class="btn btn-main btn-sm" href="#telecharger">Télécharger</a>
+      <a href="/en/" class="lang-switch" title="Switch to English" style="font-family:var(--mono);font-size:12px;color:var(--ink-mute);text-decoration:none;border:1px solid var(--line-2);padding:4px 8px;border-radius:6px;margin-left:6px">🌐 EN</a>
     </nav>
   </div>
 </header>
@@ -52,7 +141,11 @@
         </a>
         <a class="btn btn-ghost" href="#skins">Voir les skins</a>
       </div>
-      <p class="meta mono reveal" style="--d:4">Windows 10 / 11 · 64 bits · macOS bientôt · <a href="#defender">Windows bloque l'installeur ?</a></p>
+      <p class="meta mono reveal" style="--d:4">Windows 10 / 11 · 64 bits · 100% open source · <a href="#defender">SmartScreen bloque ? Commande PowerShell rapide</a></p>
+      <div class="hero-defender-hint reveal" style="--d:4;margin-top:14px;background:rgba(255,106,77,.08);border:1px solid rgba(255,106,77,.25);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--ink-dim);display:flex;align-items:center;gap:10px">
+        <span style="color:var(--coral);font-weight:700">🛡️ Note antivirus :</span>
+        <span>Installeur en cours de certification <a href="/code-signing.html" style="color:var(--coral)">SignPath Foundation</a>. En cas d'alerte Windows : <a href="#defender" style="color:var(--coral);font-weight:600">déblocage immédiat via PowerShell ci-dessous</a>.</span>
+      </div>
     </div>
 
     <div class="reveal" style="--d:2">
@@ -84,7 +177,7 @@
 <section id="comment" aria-labelledby="t-comment">
   <div class="wrap">
     <p class="kicker reveal">Comment ça marche</p>
-    <h2 id="t-comment" class="section-title reveal">Pas un chatbot dans une fenêtre. Un coloc.</h2>
+    <h2 id="t-comment" class="section-title reveal">Pas un simple chatbot : ton agent IA autonome sur le bureau.</h2>
     <p class="section-lead reveal">Jimy reste sur ton bureau, au-dessus de tes fenêtres. Tu peux le déplacer, il esquive ta souris, et il réagit à tout ce qu'il fait.</p>
     <ol class="flow">
       <li class="reveal"><span class="n">01</span><h3>Tu l'appelles</h3><p><q>« Jimy… »</q> — il répond « Oui ? ». Le mot d'éveil est détecté sur ta machine : l'audio de ton micro n'en sort pas.</p></li>
@@ -99,7 +192,7 @@
 <section id="fonctions" aria-labelledby="t-fonctions">
   <div class="wrap">
     <p class="kicker reveal">Ce qu'il sait faire</p>
-    <h2 id="t-fonctions" class="section-title reveal">Un vrai agent, avec des mains.</h2>
+    <h2 id="t-fonctions" class="section-title reveal">Un vrai agent avec des mains : automatisation PC, navigateur et serveurs MCP.</h2>
 
     <div class="bento">
       <article class="tile wide reveal">
@@ -150,7 +243,7 @@
       <article class="tile half reveal">
         <span class="tag mono">mcp · skills</span>
         <h3>Il apprend de nouveaux tours</h3>
-        <p>Branche des serveurs MCP pour lui donner tes outils. Quand une démarche marche, il en fait un skill et l'affine à l'usage.</p>
+        <p>Branche des serveurs MCP pour lui donner tes outils (<a href="/guides/serveurs-mcp-windows-local.html" style="color:var(--coral)">guide de création MCP Windows</a>). Quand une démarche marche, il en fait un skill et l'affine à l'usage.</p>
       </article>
 
       <article class="tile half reveal">
@@ -204,7 +297,7 @@
   <div class="wrap">
     <div>
       <p class="kicker reveal">Vie privée</p>
-      <h2 id="t-trust" class="section-title reveal">Il vit chez toi. Pas chez nous.</h2>
+      <h2 id="t-trust" class="section-title reveal">Il vit chez toi : reconnaissance vocale Whisper locale et zéro télémétrie.</h2>
       <p class="section-lead reveal">Jimy tourne sur ta machine. Seuls partent sur le réseau les échanges nécessaires : ton fournisseur de modèle, la synthèse vocale, et ce que tu lui demandes de faire en ligne. <a href="/confidentialite.html">Tout le détail</a>.</p>
     </div>
     <ul class="checks">
@@ -220,32 +313,42 @@
 <section id="telecharger" aria-labelledby="t-install">
   <div class="wrap">
     <p class="kicker reveal">Installer</p>
-    <h2 id="t-install" class="section-title reveal">Trois minutes, et il est là.</h2>
+    <h2 id="t-install" class="section-title reveal">Installer Jimy sur Windows : trois minutes, et il est là.</h2>
     <ol class="install">
       <li class="reveal"><h3>Lance l'installeur</h3><p><b>Jimy-setup.exe</b>. Windows peut afficher « Windows a protégé votre ordinateur » (installeur pas encore signé) : <b>Informations complémentaires</b>, puis <b>Exécuter quand même</b>.</p></li>
       <li class="reveal"><h3>Laisse-le s'équiper</h3><p>Au premier lancement, il télécharge sa reconnaissance vocale (environ 65 Mo, puis 180 Mo en option). L'écoute s'active à la fin.</p></li>
       <li class="reveal"><h3>Donne-lui un cerveau</h3><p>L'accueil te demande une clé de modèle de langage (<b>OpenCode Go</b> ou <b>OpenRouter</b>). Elle reste sur ta machine.</p></li>
     </ol>
 
-    <!-- Note Defender : à retirer quand l'installeur sera signé (SignPath). -->
+    <!-- Note Defender : certification SignPath en cours. -->
     <aside class="defender reveal" id="defender" aria-labelledby="t-defender">
-      <h3 id="t-defender">Windows bloque l'installeur ? C'est normal, pour l'instant.</h3>
-      <p>Jimy n'a pas encore de <b>certificat de signature</b> (demande en cours auprès de SignPath Foundation). Sans lui, Microsoft Defender se méfie de tout nouveau programme. L'installeur est construit par GitHub Actions à partir du <a href="https://github.com/Jimmyjoe13/jimmy-agent">code public</a> : télécharge-le uniquement depuis ce site ou depuis les <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases">Releases GitHub</a>.</p>
+      <h3 id="t-defender">Windows Defender bloque l'installeur ? C'est temporaire : signature SignPath en cours.</h3>
+      <p>Jimy est un projet <b>100% gratuit et open source</b> (code auditable sur <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>). Notre demande de certificat officiel gratuit est en cours auprès de <a href="https://signpath.org">SignPath Foundation</a> (détails sur notre <a href="/code-signing.html">politique de signature</a>). En attendant l'attribution de la clé, Windows SmartScreen affiche un écran bleu de prévention car le binaire est récent.</p>
+      
+      <!-- Boîte PowerShell Express -->
+      <div class="ps-quickbox" style="background:#05070f;border:1px solid rgba(255,106,77,.45);border-radius:14px;padding:16px 20px;margin:20px 0;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:12.5px;font-family:var(--mono);color:var(--coral);font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px">⚡ Déblocage express PowerShell (Sans toucher à l'antivirus) :</div>
+          <code style="font-family:var(--mono);font-size:14px;color:#9bff7a;background:transparent;padding:0">Unblock-File "$HOME\Downloads\Jimy-setup.exe"</code>
+        </div>
+        <button type="button" class="btn btn-sm" style="background:var(--night-3);border:1px solid var(--line-2);color:var(--ink);cursor:pointer;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600" onclick="navigator.clipboard.writeText('Unblock-File \\x22$HOME\\Downloads\\Jimy-setup.exe\\x22');this.textContent='✓ Commande Copiée !';setTimeout(()=>this.textContent='Copier la commande',2200)">Copier la commande</button>
+      </div>
+
       <div class="defender-cases">
         <div>
-          <h4>1. Au téléchargement (Edge)</h4>
-          <p>« Jimy-setup.exe n'est pas fréquemment téléchargé » : survole le fichier dans les téléchargements, clique sur <b>…</b> → <b>Conserver</b>, puis <b>Afficher plus</b> → <b>Conserver quand même</b>.</p>
+          <h4>1. Au téléchargement (Edge / Chrome)</h4>
+          <p>« Jimy-setup.exe n'est pas fréquemment téléchargé » : survole le fichier dans la liste des téléchargements, clique sur <b>…</b> → <b>Conserver</b>, puis <b>Afficher plus</b> → <b>Conserver quand même</b>.</p>
         </div>
         <div>
           <h4>2. Au lancement (SmartScreen)</h4>
-          <p>« Windows a protégé votre ordinateur » : clique sur <b>Informations complémentaires</b>, vérifie que le fichier s'appelle bien <b>Jimy-setup.exe</b>, puis <b>Exécuter quand même</b>.</p>
+          <p>« Windows a protégé votre ordinateur » : clique sur le lien <b>Informations complémentaires</b>, vérifie l'éditeur ou le nom <b>Jimy-setup.exe</b>, puis clique sur <b>Exécuter quand même</b>.</p>
         </div>
         <div>
-          <h4>3. Si le fichier disparaît</h4>
-          <p>Defender l'a mis en quarantaine. Ouvre <b>Sécurité Windows</b> → <b>Protection contre les virus et menaces</b> → <b>Historique de protection</b>, choisis l'élément Jimy, puis <b>Actions</b> → <b>Autoriser sur l'appareil</b>. Relance l'installeur.</p>
+          <h4>3. Via PowerShell (Le plus rapide)</h4>
+          <p>Ouvre PowerShell dans ton dossier Téléchargements et colle la commande ci-dessus : le flag de blocage Web est immédiatement retiré sans modifier les protections de l'antivirus.</p>
         </div>
       </div>
-      <p class="defender-foot">Sous Windows 11, si c'est le <b>Contrôle intelligent des applications</b> qui bloque, il n'y a pas de bouton « Exécuter quand même » : attends la version signée plutôt que de désactiver cette protection. Ne désactive jamais l'antivirus pour installer Jimy.</p>
+      <p class="defender-foot">Sous Windows 11, si c'est le <b>Contrôle intelligent des applications</b> qui bloque, il n'y a pas de bouton « Exécuter quand même » : attends la version signée plutôt que de désactiver cette protection. Ne désactive jamais ton antivirus pour installer Jimy.</p>
     </aside>
     <div class="cta reveal">
       <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
@@ -258,7 +361,7 @@
     <div class="faq" id="faq">
       <div>
         <p class="kicker reveal">FAQ</p>
-        <h2 class="section-title reveal">Les questions qu'on nous pose.</h2>
+        <h2 class="section-title reveal">FAQ : tout savoir sur l'agent IA personnel Jimy.</h2>
       </div>
       <div class="reveal">
         <details><summary>C'est vraiment gratuit ?</summary><p>L'appli et les cinq skins de base, oui, et le code est open source. Il te faut une clé chez un fournisseur de modèle de langage (OpenCode Go, OpenRouter…) : c'est lui qui facture l'usage, selon le modèle choisi. Les skins premium seront payants.</p></details>
@@ -301,6 +404,8 @@
       <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
       <a href="/confidentialite.html">Confidentialité</a>
       <a href="/code-signing.html">Code signing policy</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Comparatif Copilot</a>
+      <a href="/guides/serveurs-mcp-windows-local.html">Guide Serveurs MCP</a>
     </nav>
   </div>
 </footer>

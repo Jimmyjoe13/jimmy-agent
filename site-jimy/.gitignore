@@ -1,1 +1,7 @@
 .vercel
+
+# Jamais dans le dépôt (public) : identifiants et fichiers de travail.
+analytics-credentials/
+*.csv
+*.bak
+conversation-*.txt

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy — Autonomous Desktop AI Agent for Windows | Voice & Open Source</title>
+<meta name="description" content="The 3D AI agent that lives on your Windows desktop. Speak to it, automate PC tasks and files locally. 100% free, private & open source. Download now!">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<link rel="preload" href="/assets/fonts/bricolage.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="canonical" href="https://jimy-agent.me/en/">
+<link rel="alternate" hreflang="fr" href="https://jimy-agent.me/">
+<link rel="alternate" hreflang="en" href="https://jimy-agent.me/en/">
+<link rel="alternate" hreflang="x-default" href="https://jimy-agent.me/">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM";</script>
+<link rel="stylesheet" href="/assets/site.css">
+
+<!-- Social Share (Open Graph / X) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jimy-agent.me/en/">
+<meta property="og:title" content="Jimy — Autonomous Desktop AI Agent for Windows | Voice & Open Source">
+<meta property="og:description" content="The 3D AI agent that lives on your Windows desktop. Speak to it, automate PC tasks and files locally. 100% free, private & open source. Download now!">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<!-- Schema.org SoftwareApplication JSON-LD -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Jimy",
+  "alternateName": "Jimy Agent",
+  "operatingSystem": "Windows 10, Windows 11 (64-bit)",
+  "applicationCategory": "UtilitiesApplication",
+  "softwareVersion": "0.2.0",
+  "description": "Autonomous AI agent embodied by a 3D companion on your Windows desktop. 100% local Whisper voice recognition, file automation, and Model Context Protocol (MCP) integrations.",
+  "url": "https://jimy-agent.me/en/",
+  "downloadUrl": "https://github.com/Jimmyjoe13/jimmy-agent/releases/latest",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD",
+    "availability": "https://schema.org/InStock"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Jimmyjoe13",
+    "url": "https://github.com/Jimmyjoe13"
+  },
+  "license": "https://opensource.org/licenses/MIT"
+}
+</script>
+
+<!-- Schema.org FAQPage JSON-LD -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is Jimy really free and open source?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, the core desktop application and the 5 default 3D skins are completely free under the MIT open source license. You only need your own API key for language models (OpenCode Go, OpenRouter, Claude, or local Ollama), billed directly at cost by the model provider."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it listen to my microphone constantly?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The microphone is active to detect the wake word 'Jimy', but audio processing happens 100% locally on your machine via Whisper. No raw audio data is ever transmitted over the Internet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What hardware is required?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Windows 10 or 11, 64-bit. Jimy is tested and runs smoothly on standard laptops with 16 GB of RAM without requiring a dedicated discrete GPU."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does Windows SmartScreen display a warning?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The installer is currently waiting for an official open source certificate from SignPath Foundation. In the meantime, Windows displays a cautionary blue screen simply because the binary is freshly compiled. A quick PowerShell unblock command removes this flag immediately."
+      }
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/en/" aria-label="Jimy, Home"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></a>
+    <nav aria-label="Main Navigation">
+      <a href="#how-it-works">How It Works</a>
+      <a href="#features">Features</a>
+      <a href="#skins">Skins</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn btn-main btn-sm" href="#download">Download</a>
+      <a href="/" class="lang-switch" title="Passer en Français" style="font-family:var(--mono);font-size:12px;color:var(--ink-mute);text-decoration:none;border:1px solid var(--line-2);padding:4px 8px;border-radius:6px;margin-left:6px">🇫🇷 FR</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- Hero Section -->
+<section class="hero" aria-labelledby="titre-en">
+  <div class="wrap">
+    <div>
+      <a class="pill reveal" style="--d:0" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest"><b>BETA</b> v0.2.0 · free & open source</a>
+      <h1 id="titre-en" class="reveal" style="--d:1">The AI agent that <span class="grad">lives</span> on your desktop.</h1>
+      <p class="lead reveal" style="--d:2">Jimy is a 3D companion that lives on Windows. <strong>Talk to him, he automates your PC</strong> — files, commands, browser — and speaks back out loud.</p>
+      <div class="cta reveal" style="--d:3">
+        <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+          Download for Windows
+        </a>
+        <a class="btn btn-ghost" href="#skins">Explore Skins</a>
+      </div>
+      <p class="meta mono reveal" style="--d:4">Windows 10 / 11 · 64-bit · 100% open source · <a href="#defender">SmartScreen prompt? Fast PowerShell command</a></p>
+      <div class="hero-defender-hint reveal" style="--d:4;margin-top:14px;background:rgba(255,106,77,.08);border:1px solid rgba(255,106,77,.25);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--ink-dim);display:flex;align-items:center;gap:10px">
+        <span style="color:var(--coral);font-weight:700">🛡️ Antivirus Notice :</span>
+        <span>Installer verification in progress with <a href="/code-signing.html" style="color:var(--coral)">SignPath Foundation</a>. If Windows alerts: <a href="#defender" style="color:var(--coral);font-weight:600">instant unblock via PowerShell below</a>.</span>
+      </div>
+    </div>
+
+    <div class="reveal" style="--d:2">
+      <!-- Animated Demo Desktop -->
+      <div class="desk" role="img" aria-label="Demo: On a Windows desktop, asking Jimy to organize downloads, and he responds when finished.">
+        <div class="desk-icons" aria-hidden="true">
+          <div class="desk-icon"><i class="folder"></i>Projects</div>
+          <div class="desk-icon"><i class="folder"></i>Downloads</div>
+          <div class="desk-icon"><i class="file md"></i>notes.md</div>
+        </div>
+        <div class="desk-task" id="task" aria-hidden="true"></div>
+        <div class="said off" id="said" aria-hidden="true"><span class="wave"><i></i><i></i><i></i><i></i></span><span id="said-text"></span></div>
+        <div class="bubble off" id="bubble" aria-hidden="true"></div>
+        <img class="avatar" id="avatar" src="/assets/skins/renard.webp" alt="Jimy Avatar" width="770" height="960">
+        <div class="taskbar" aria-hidden="true"><span></span><span></span><span class="jimy"></span><span></span><time id="clock">21:42</time></div>
+      </div>
+      <div class="picker" role="group" aria-label="Change demo skin">
+        <span class="label mono">Skin :</span>
+        <button class="chip" type="button" data-skin="renard" aria-pressed="true"><span class="ph"><img src="/assets/skins/renard.webp" alt=""></span>Fox</button>
+        <button class="chip" type="button" data-skin="neon" aria-pressed="false"><span class="ph"><img src="/assets/skins/neon.webp" alt=""></span>Neon</button>
+        <button class="chip" type="button" data-skin="jeva" aria-pressed="false"><span class="ph"><img src="/assets/skins/jeva.webp" alt=""></span>JEVA</button>
+        <button class="chip" type="button" data-skin="ark" aria-pressed="false"><span class="ph"><img src="/assets/skins/ark.webp" alt=""></span>ARK</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How It Works Section -->
+<section id="how-it-works" aria-labelledby="t-how">
+  <div class="wrap">
+    <p class="kicker reveal">How It Works</p>
+    <h2 id="t-how" class="section-title reveal">Not just another chatbot: your autonomous desktop AI agent.</h2>
+    <p class="section-lead reveal">Jimy lives on your desktop, floating above your active windows. Move him around, he dodges your cursor, and visually reacts to everything he automates.</p>
+    <ol class="flow">
+      <li class="reveal"><span class="n">01</span><h3>You call him</h3><p><q>“Jimy…”</q> — he answers “Yes?”. The wake word is detected locally on your machine: zero mic audio leaves your computer.</p></li>
+      <li class="reveal"><span class="n">02</span><h3>He thinks</h3><p>Using the language model of your choice with your own API key: OpenCode Go, OpenRouter, Claude, DeepSeek, or local Ollama.</p></li>
+      <li class="reveal"><span class="n">03</span><h3>He acts</h3><p>Files, shell commands, browser control, and MCP servers. Any sensitive action — sending, paying, deleting — requires your green light.</p></li>
+      <li class="reveal"><span class="n">04</span><h3>He answers</h3><p>Out loud, with an animated speech bubble. And he retains what matters for your next session.</p></li>
+    </ol>
+  </div>
+</section>
+
+<!-- Features Bento Grid -->
+<section id="features" aria-labelledby="t-feat">
+  <div class="wrap">
+    <p class="kicker reveal">Capabilities</p>
+    <h2 id="t-feat" class="section-title reveal">A real agent with hands: PC automation, browser control, and MCP servers.</h2>
+
+    <div class="bento">
+      <article class="tile wide reveal">
+        <span class="tag mono">background tasks</span>
+        <h3>He works while you focus on something else</h3>
+        <p>A long task runs in the background: you keep full control of your desktop, his voice keeps listening, and a companion avatar works alongside him until completion.</p>
+        <div class="demo log" aria-hidden="true">
+          <div class="u">› Jimy, compare prices from the three supplier quotes in Downloads</div>
+          <div>  reading 3 PDFs… extracting quotes…</div>
+          <div class="bg">  ↳ sent to background task — companion bunny on it</div>
+          <div class="u">› By the way, what's the weather outside?</div>
+          <div class="ok">  ✓ Quotes compared: cheapest is Atelier Nord (−18%)</div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">browser</span>
+        <h3>His own Chrome browser</h3>
+        <p>He searches, compares, and fills out forms. And he always asks before submitting.</p>
+        <div class="demo approve" aria-hidden="true">
+          <div class="t">Submit web form?</div>
+          <div class="d">contact@partner.com · 3 fields filled</div>
+          <div class="row"><span class="yes">Allow</span><span>Decline</span></div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">memory</span>
+        <h3>He remembers</h3>
+        <p>Your preferences, ongoing projects, and past lessons. Connect your Obsidian vault: he searches and stores your notes automatically.</p>
+        <div class="demo mem" aria-hidden="true"><div>Prefers concise answers</div><div>Project “Showcase Website” active</div><div>Lesson: double-check folder before writing</div></div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">vision</span>
+        <h3>“Look at my screen”</h3>
+        <p>He inspects your active window to help you with what you are looking at. Only upon your explicit request, never on his own.</p>
+        <div class="demo" aria-hidden="true"><div class="eye"></div></div>
+      </article>
+
+      <article class="tile reveal">
+        <span class="tag mono">models</span>
+        <h3>Any brain you choose</h3>
+        <p>A high-intelligence model for deep coding, a fast model for voice conversations. Hot-swap in one click.</p>
+        <div class="demo models" aria-hidden="true"><span class="on">OpenCode Go</span><span>OpenRouter</span><span class="on">Claude</span><span>DeepSeek</span><span>+ Local</span></div>
+      </article>
+
+      <article class="tile half reveal">
+        <span class="tag mono">mcp · skills</span>
+        <h3>He learns new skills</h3>
+        <p>Plug in Model Context Protocol servers to give him custom tools (<a href="/guides/serveurs-mcp-windows-local.html" style="color:var(--coral)">MCP Windows developer guide</a>). When a workflow succeeds, he saves it as an evolving skill.</p>
+      </article>
+
+      <article class="tile half reveal">
+        <span class="tag mono">guardrails</span>
+        <h3>Nothing sensitive without you</h3>
+        <p>Writing to a <code class="mono">.env</code>, API keys, paying, or publishing: an approval prompt pops up on your screen. You decide.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- Skins Section -->
+<section id="skins" aria-labelledby="t-skins">
+  <div class="wrap">
+    <p class="kicker reveal">Appearance</p>
+    <h2 id="t-skins" class="section-title reveal">Eight 3D companions. Pick the one that fits your workspace.</h2>
+    <p class="section-lead reveal">Five included for free right away. Three premium skins with unique animations to support ongoing development.</p>
+
+    <div class="skins-grid">
+      <div class="skin-card reveal">
+        <div class="preview"><img src="/assets/skins/renard.webp" alt="Fox Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Fox</strong> <span class="tag mono free">Free</span></div>
+        <p>The original Jimy: warm orange fur and golden scarf.</p>
+      </div>
+      <div class="skin-card reveal">
+        <div class="preview"><img src="/assets/skins/arctique.webp" alt="Arctic Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Arctic</strong> <span class="tag mono free">Free</span></div>
+        <p>Pure white fur and turquoise scarf for minimalist setups.</p>
+      </div>
+      <div class="skin-card reveal">
+        <div class="preview"><img src="/assets/skins/fennec.webp" alt="Fennec Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Fennec</strong> <span class="tag mono free">Free</span></div>
+        <p>Large expressive ears and sand-colored fur, reactive to voice.</p>
+      </div>
+      <div class="skin-card reveal">
+        <div class="preview"><img src="/assets/skins/ours.webp" alt="Bear Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Bear</strong> <span class="tag mono free">Free</span></div>
+        <p>A calm brown bear with cozy small round ears.</p>
+      </div>
+      <div class="skin-card reveal">
+        <div class="preview"><img src="/assets/skins/robot.webp" alt="Robot Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Robot</strong> <span class="tag mono free">Free</span></div>
+        <p>Metallic grey futuristic chassis for tech automation.</p>
+      </div>
+      <div class="skin-card premium reveal">
+        <div class="preview"><img src="/assets/skins/neon.webp" alt="Neon Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>Neon</strong> <span class="tag mono paid">Premium</span></div>
+        <p>Stealth dark body with bright glowing orange outlines.</p>
+      </div>
+      <div class="skin-card premium reveal">
+        <div class="preview"><img src="/assets/skins/jeva.webp" alt="JEVA Android Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>JEVA</strong> <span class="tag mono paid">Premium</span></div>
+        <p>Chrome floating android with a single illuminated eye.</p>
+      </div>
+      <div class="skin-card premium reveal">
+        <div class="preview"><img src="/assets/skins/ark.webp" alt="ARK Sphere Skin" width="770" height="960" loading="lazy"></div>
+        <div class="meta"><strong>ARK</strong> <span class="tag mono paid">Premium</span></div>
+        <p>Mechanical sphere with a green eye and 12 articulated tentacles.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Installation Section & Defender Box -->
+<section id="download" aria-labelledby="t-install">
+  <div class="wrap">
+    <p class="kicker reveal">Get Started</p>
+    <h2 id="t-install" class="section-title reveal">Install Jimy on Windows: three minutes and you're set.</h2>
+    <ol class="install">
+      <li class="reveal"><h3>Run the installer</h3><p><b>Jimy-setup.exe</b>. If Windows alerts “Windows protected your PC”: click <b>More info</b>, then <b>Run anyway</b>.</p></li>
+      <li class="reveal"><h3>Equip his voice</h3><p>On first launch, it downloads the local speech recognition model (~65 MB). Voice listening activates immediately after.</p></li>
+      <li class="reveal"><h3>Connect your model</h3><p>Add your API key (<b>OpenCode Go</b> or <b>OpenRouter</b>). It stays stored locally on your machine.</p></li>
+    </ol>
+
+    <!-- Defender Notice & PowerShell Quick Box -->
+    <aside class="defender reveal" id="defender" aria-labelledby="t-defender-en">
+      <h3 id="t-defender-en">Windows Defender blocking the installer? It's temporary: SignPath certification in progress.</h3>
+      <p>Jimy is <b>100% free and open source</b> (verifiable code on <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>). Our official code signing certification is currently being processed by <a href="https://signpath.org">SignPath Foundation</a> (see our <a href="/code-signing.html">code signing policy</a>). Until our cryptographic key is assigned, Windows SmartScreen displays a blue cautionary screen because the executable is new.</p>
+      
+      <!-- PowerShell Quick Box -->
+      <div class="ps-quickbox" style="background:#05070f;border:1px solid rgba(255,106,77,.45);border-radius:14px;padding:16px 20px;margin:20px 0;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:12.5px;font-family:var(--mono);color:var(--coral);font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px">⚡ Instant PowerShell Unblock (Zero antivirus alteration) :</div>
+          <code style="font-family:var(--mono);font-size:14px;color:#9bff7a;background:transparent;padding:0">Unblock-File "$HOME\Downloads\Jimy-setup.exe"</code>
+        </div>
+        <button type="button" class="btn btn-sm" style="background:var(--night-3);border:1px solid var(--line-2);color:var(--ink);cursor:pointer;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600" onclick="navigator.clipboard.writeText('Unblock-File \\x22$HOME\\Downloads\\Jimy-setup.exe\\x22');this.textContent='✓ Command Copied!';setTimeout(()=>this.textContent='Copy Command',2200)">Copy Command</button>
+      </div>
+
+      <div class="defender-cases">
+        <div>
+          <h4>1. At download (Edge / Chrome)</h4>
+          <p>“Jimy-setup.exe isn't commonly downloaded”: hover over the file in your download list, click <b>…</b> → <b>Keep</b>, then <b>Show more</b> → <b>Keep anyway</b>.</p>
+        </div>
+        <div>
+          <h4>2. At launch (SmartScreen)</h4>
+          <p>“Windows protected your PC”: click the <b>More info</b> link, verify the publisher or filename <b>Jimy-setup.exe</b>, then click <b>Run anyway</b>.</p>
+        </div>
+        <div>
+          <h4>3. Via PowerShell (Fastest)</h4>
+          <p>Open PowerShell in your Downloads folder and run the command above: the web-block flag is instantly stripped without weakening your antivirus protection.</p>
+        </div>
+      </div>
+      <p class="defender-foot">On Windows 11, if Smart App Control blocks the binary, wait for our signed release rather than turning off system protection. Never disable your antivirus to install Jimy.</p>
+    </aside>
+
+    <div class="cta reveal">
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Download Jimy-setup.exe
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Jimmyjoe13/jimmy-agent/releases">Release Notes</a>
+    </div>
+
+    <!-- FAQ Section -->
+    <div class="faq" id="faq">
+      <div>
+        <p class="kicker reveal">FAQ</p>
+        <h2 class="section-title reveal">Frequently asked questions about Jimy.</h2>
+      </div>
+      <div class="reveal">
+        <details><summary>Is it really free?</summary><p>The desktop app and five default skins are 100% free under the MIT open source license. You only pay for your own language model token usage with your provider (OpenCode Go, OpenRouter, Claude, or free local models via Ollama).</p></details>
+        <details><summary>Does it listen to me continuously?</summary><p>The microphone listens locally for the wake word “Jimy”. All audio processing happens on your machine via Whisper: raw audio never leaves your computer.</p></details>
+        <details><summary>What hardware is needed?</summary><p>Windows 10 or 11, 64-bit. Jimy is tested and runs smoothly on a standard laptop with 16 GB of RAM, without requiring a dedicated graphics card.</p></details>
+        <details><summary>Why does Windows show a security warning?</summary><p>The installer is awaiting certification from SignPath Foundation (<a href="/code-signing.html">Code signing policy</a>). In the meantime, executables built via GitHub Actions trigger SmartScreen simply due to novelty. Follow our unblock guide: <a href="#defender">see here</a>.</p></details>
+        <details><summary>What about macOS?</summary><p>macOS support is planned on our roadmap. For now, Jimy is optimized exclusively for Windows.</p></details>
+        <details><summary>How do I activate a premium skin?</summary><p>Once the store opens, you will receive a license key after purchase. In the app, navigate to the Skin tab → “Premium Skins”, paste your key and click Activate. The skin downloads automatically.</p></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Final Call to Action -->
+<section class="final" aria-labelledby="t-final-en">
+  <div class="wrap">
+    <span class="brand-mark mark" aria-hidden="true"></span>
+    <h2 id="t-final-en" class="reveal">Say hello to Jimy.</h2>
+    <p class="reveal">Free, open source, and ready to move onto your desktop.</p>
+    <div class="cta reveal">
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Jimmyjoe13/jimmy-agent">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.7.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.5-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.8V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+        Source Code
+      </a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- Footer -->
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></span>
+    <span>Jimy, with a single M · jimy-agent.me</span>
+    <nav aria-label="Footer Links">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Privacy</a>
+      <a href="/code-signing.html">Code Signing Policy</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Copilot Comparison</a>
+      <a href="/guides/serveurs-mcp-windows-local.html">MCP Guide</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js" defer></script>
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

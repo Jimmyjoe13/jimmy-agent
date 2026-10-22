@@ -1,21 +1,85 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://jimy-agent.me/</loc>
-    <lastmod>2026-10-12</lastmod>
+    <lastmod>2026-10-17</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/og.png</image:loc>
+      <image:title>Jimy — L'agent IA qui habite ton bureau Windows</image:title>
+      <image:caption>Aperçu de Jimy et ses avatars 3D animés sur bureau Windows.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/renard.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Renard</image:title>
+      <image:caption>Le Jimy d'origine : pelage roux et écharpe dorée.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/arctique.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Arctique</image:title>
+      <image:caption>Pelage blanc et écharpe turquoise pour les bureaux épurés.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/fennec.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Fennec</image:title>
+      <image:caption>Grandes oreilles et pelage sable réactif à la voix.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/ours.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Ours</image:title>
+      <image:caption>Avatar 3D trapu aux petites oreilles rondes et pelage brun.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/robot.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Robot</image:title>
+      <image:caption>Design futuriste gris métal pour automatisation Windows.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/neon.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin Néon Premium</image:title>
+      <image:caption>Corps sombre avec contour orange luminescent ultra-visible.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/jeva.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin JEVA Androïde</image:title>
+      <image:caption>Androïde chromé à œil unique en lévitation avec faisceaux lumineux.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://jimy-agent.me/assets/skins/ark.webp</image:loc>
+      <image:title>Avatar 3D Agent Jimy - Skin ARK Sphère Mécanique</image:title>
+      <image:caption>Sphère mécanique à œil vert fendu et douze tentacules articulés.</image:caption>
+    </image:image>
   </url>
   <url>
     <loc>https://jimy-agent.me/confidentialite.html</loc>
-    <lastmod>2026-10-12</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.3</priority>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
   </url>
   <url>
     <loc>https://jimy-agent.me/code-signing.html</loc>
-    <lastmod>2026-10-12</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.3</priority>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+  <url>
+    <loc>https://jimy-agent.me/comparatif/agent-ia-windows-vs-copilot.html</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://jimy-agent.me/guides/serveurs-mcp-windows-local.html</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://jimy-agent.me/en/</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
   </url>
 </urlset>

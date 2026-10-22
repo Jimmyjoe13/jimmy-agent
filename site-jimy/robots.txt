@@ -1,5 +1,43 @@
+# Robots.txt pour jimy-agent.me
+
+# 1. Regles generales pour les moteurs de recherche (Google, Bing, Yahoo, DuckDuckGo)
 User-agent: *
 Allow: /
 Disallow: /api/
 
+# 2. Generative Engine Optimization (GEO) : Autorisation explicite des agents IA
+# OpenAI (ChatGPT, ChatGPT Search)
+User-agent: GPTBot
+Allow: /
+Disallow: /api/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /api/
+
+# Anthropic (Claude)
+User-agent: ClaudeBot
+Allow: /
+Disallow: /api/
+
+User-agent: anthropic-ai
+Allow: /
+Disallow: /api/
+
+# Perplexity AI
+User-agent: PerplexityBot
+Allow: /
+Disallow: /api/
+
+# Google Gemini et IA Generative
+User-agent: Google-Extended
+Allow: /
+Disallow: /api/
+
+# Apple Intelligence
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /api/
+
+# 3. Declaration du sitemap officiel
 Sitemap: https://jimy-agent.me/sitemap.xml

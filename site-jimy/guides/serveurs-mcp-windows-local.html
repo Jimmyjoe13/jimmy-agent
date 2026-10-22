@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comment Créer et Connecter des Serveurs MCP sur Windows (Guide 2026)</title>
+<meta name="description" content="Tutoriel complet pas-à-pas : connecter et développer des serveurs Model Context Protocol (MCP) sur Windows pour Jimy ou votre agent IA local. Exemples stdio, Python et Node.js.">
+<link rel="canonical" href="https://jimy-agent.me/guides/serveurs-mcp-windows-local.html">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM";</script>
+<link rel="stylesheet" href="/assets/site.css">
+
+<!-- Open Graph / Réseaux sociaux -->
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://jimy-agent.me/guides/serveurs-mcp-windows-local.html">
+<meta property="og:title" content="Comment Créer et Connecter des Serveurs MCP sur Windows (Guide 2026)">
+<meta property="og:description" content="Tutoriel complet pas-à-pas : connecter et développer des serveurs Model Context Protocol (MCP) sur Windows pour Jimy ou votre agent IA local. Exemples stdio, Python et Node.js.">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<!-- Données structurées Schema.org : TechArticle -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Comment Créer et Connecter des Serveurs MCP sur Windows pour son Agent IA Local",
+  "description": "Guide technique détaillé pour installer, configurer et concevoir des serveurs Model Context Protocol (MCP) sur Windows 10 et 11 avec transport stdio, Python FastMCP et Node.js.",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "datePublished": "2026-10-17T17:00:00+02:00",
+  "dateModified": "2026-10-17T17:00:00+02:00",
+  "author": {
+    "@type": "Person",
+    "name": "Jimmyjoe13",
+    "url": "https://github.com/Jimmyjoe13"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Jimy Agent",
+    "url": "https://jimy-agent.me",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://jimy-agent.me/assets/logo/icon-256.png"
+    }
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://jimy-agent.me/guides/serveurs-mcp-windows-local.html"
+  }
+}
+</script>
+
+<!-- Fil d'ariane Schema.org -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Accueil",
+      "item": "https://jimy-agent.me/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Guides Techniques",
+      "item": "https://jimy-agent.me/guides/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Serveurs MCP sur Windows",
+      "item": "https://jimy-agent.me/guides/serveurs-mcp-windows-local.html"
+    }
+  ]
+}
+</script>
+
+<style>
+.doc .wrap { max-width: 880px; }
+.breadcrumb { font-size: 13px; color: var(--ink-mute); margin-bottom: 24px; font-family: var(--mono); }
+.breadcrumb a { color: var(--ink-dim); text-decoration: none; }
+.breadcrumb a:hover { color: var(--coral); }
+.badge-tech { display: inline-block; background: rgba(255, 106, 77, 0.12); color: var(--coral); border: 1px solid rgba(255, 106, 77, 0.3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 99px; margin-bottom: 14px; }
+.meta-article { color: var(--ink-mute); font-size: 14px; margin-bottom: 32px; font-family: var(--mono); }
+
+.guide-toc { background: var(--night-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; margin: 30px 0 40px; }
+.guide-toc h3 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); margin-bottom: 14px; }
+.guide-toc ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; font-size: 14.5px; }
+.guide-toc a { color: var(--ink); text-decoration: none; display: flex; align-items: baseline; gap: 8px; }
+.guide-toc a:hover { color: var(--coral); }
+.guide-toc .num { color: var(--coral); font-family: var(--mono); font-size: 12.5px; font-weight: 700; }
+
+.section-block { margin: 44px 0; }
+.section-block h2 { font-size: 26px; color: var(--ink); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.section-block h3 { font-size: 19px; color: var(--ink); margin: 24px 0 12px; }
+.section-block p, .section-block li { font-size: 16px; line-height: 1.7; color: var(--ink-dim); }
+.section-block ul, .section-block ol { padding-left: 22px; margin: 16px 0; }
+.section-block li { margin-bottom: 8px; }
+
+.code-wrap { background: #05070f; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; margin: 18px 0 24px; overflow: hidden; }
+.code-header { background: rgba(255, 255, 255, 0.04); padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--ink-mute); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.code-content { padding: 16px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13.5px; line-height: 1.6; color: #d6deeb; margin: 0; }
+.code-content code { background: transparent; padding: 0; color: inherit; }
+
+.callout { background: rgba(255, 106, 77, 0.06); border-left: 3px solid var(--coral); padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 24px 0; }
+.callout p { margin: 0; font-size: 15px; color: var(--ink-dim); }
+.callout strong { color: var(--ink); }
+
+.callout-tip { background: rgba(155, 255, 122, 0.06); border-left: 3px solid #9bff7a; padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 24px 0; }
+.callout-tip p { margin: 0; font-size: 15px; color: var(--ink-dim); }
+.callout-tip strong { color: #9bff7a; }
+
+.cta-box { background: linear-gradient(135deg, rgba(255, 106, 77, 0.1) 0%, rgba(20, 24, 40, 0.95) 100%); border: 1px solid rgba(255, 106, 77, 0.35); border-radius: var(--radius); padding: 36px 32px; text-align: center; margin: 50px 0 30px; }
+.cta-box h3 { font-size: 24px; margin-bottom: 12px; color: var(--ink); }
+.cta-box p { font-size: 16px; color: var(--ink-dim); max-width: 600px; margin: 0 auto 24px; }
+</style>
+</head>
+<body class="doc">
+
+<!-- En-tête -->
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Jimy, accueil"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></a>
+    <nav aria-label="Navigation principale">
+      <a href="/#comment">Comment ça marche</a>
+      <a href="/#fonctions">Fonctions</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Comparatif</a>
+      <a href="/guides/serveurs-mcp-windows-local.html" class="active">Guide MCP</a>
+      <a class="btn btn-main btn-sm" href="/#telecharger">Télécharger</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    
+    <!-- Fil d'ariane -->
+    <nav class="breadcrumb" aria-label="Fil d'ariane">
+      <a href="/">Accueil</a> &gt; <span>Guides</span> &gt; <span>Serveurs MCP Windows</span>
+    </nav>
+
+    <span class="badge-tech">Standard Ouvert · Model Context Protocol</span>
+    <h1>Comment Créer et Connecter des Serveurs MCP sur Windows pour son Agent IA</h1>
+    <p class="meta-article">Mis à jour le 17 octobre 2026 · Par Jimmyjoe13 · Temps de lecture : 8 min</p>
+
+    <p class="lead">
+      Le <strong>Model Context Protocol (MCP)</strong> est en passe de devenir le standard industriel universel pour interconnecter les modèles d'intelligence artificielle avec les données, outils et environnements d'exécution locaux. Découvrez comment exploiter toute la puissance du protocole MCP sous Windows 10 et 11 pour transformer <a href="/">Jimy</a> en un agent autonome ultra-connecté.
+    </p>
+
+    <!-- Table des matières -->
+    <div class="guide-toc">
+      <h3>Sommaire du guide</h3>
+      <ul>
+        <li><a href="#mcp-introduction"><span class="num">01.</span> Qu'est-ce que le protocole MCP et pourquoi sur Windows ?</a></li>
+        <li><a href="#transport-stdio"><span class="num">02.</span> Anatomie technique : Le transport stdio sous Windows</a></li>
+        <li><a href="#connecter-serveur-existant"><span class="num">03.</span> Tutoriel : Brancher un serveur MCP officiel (Filesystem & SQLite)</a></li>
+        <li><a href="#creer-serveur-python"><span class="num">04.</span> Créer son propre serveur MCP en Python avec FastMCP</a></li>
+        <li><a href="#creer-serveur-node"><span class="num">05.</span> Créer un serveur MCP en Node.js / TypeScript</a></li>
+        <li><a href="#securite-gardefous"><span class="num">06.</span> Sécurité sur Windows : Garde-fous et autorisations</a></li>
+        <li><a href="#faq-mcp"><span class="num">07.</span> Questions fréquentes (FAQ)</a></li>
+      </ul>
+    </div>
+
+    <!-- 01. Qu'est-ce que MCP -->
+    <section class="section-block" id="mcp-introduction">
+      <h2>01. Qu'est-ce que le protocole MCP et pourquoi sur Windows ?</h2>
+      <p>
+        Historiquement, pour donner des capacités d'action à un grand modèle de langage (LLM), chaque plateforme imposait son format propriétaire : les <i>GPT Actions</i> d'OpenAI, les <i>Plugins</i> ou les appels de fonctions sur-mesure. Dès qu'un développeur changeait de modèle ou de client, l'ensemble des intégrations devait être réécrit.
+      </p>
+      <p>
+        Initié par Anthropic puis rapidement adopté par l'ensemble de la communauté open source, le <strong>Model Context Protocol (MCP)</strong> joue pour l'IA le même rôle que le protocole <i>LSP (Language Server Protocol)</i> a joué pour les éditeurs de code comme VS Code :
+      </p>
+      <ul>
+        <li><strong>Découplage total :</strong> Le client (votre agent IA comme Jimy) n'a pas besoin de connaître la logique interne des outils.</li>
+        <li><strong>Standardisation JSON-RPC 2.0 :</strong> Tout passe par des messages structurés exposant des <i>Tools</i> (outils exécutables), des <i>Resources</i> (données lisibles) et des <i>Prompts</i> (modèles de tâches).</li>
+        <li><strong>100% Local et Privé :</strong> Les serveurs MCP s'exécutent en local sur votre machine Windows. Aucune donnée ne transite par un serveur cloud intermédiaire avant que vous ne l'autorisiez.</li>
+      </ul>
+    </section>
+
+    <!-- 02. Transport stdio sous Windows -->
+    <section class="section-block" id="transport-stdio">
+      <h2>02. Anatomie technique : Le transport stdio sous Windows</h2>
+      <p>
+        Le protocole MCP propose deux modes de communication principaux :
+      </p>
+      <ol>
+        <li><strong>stdio (Standard Input / Output) :</strong> Le client lance le processus du serveur MCP en sous-processus et communique via les flux d'entrée et de sortie standard (<code class="mono">stdin</code> et <code class="mono">stdout</code>). C'est le mode le plus simple, le plus rapide et le plus sécurisé pour une exécution de bureau locale.</li>
+        <li><strong>SSE (Server-Sent Events) via HTTP :</strong> Utilisé lorsque le serveur tourne sur une machine distante ou dans un conteneur réseau.</li>
+      </ol>
+
+      <div class="callout">
+        <p><strong>Spécificité Windows :</strong> Sous Windows, les processus fils lancés via PowerShell ou cmd doivent gérer correctement les fins de ligne (<code class="mono">\r\n</code> vs <code class="mono">\n</code>) et l'encodage UTF-8. Assurez-vous que votre environnement Python ou Node.js est configuré avec l'encodage UTF-8 activé par défaut.</p>
+      </div>
+    </section>
+
+    <!-- 03. Connecter un serveur existant -->
+    <section class="section-block" id="connecter-serveur-existant">
+      <h2>03. Tutoriel : Brancher un serveur MCP officiel (Filesystem & SQLite)</h2>
+      <p>
+        L'écosystème open source fournit déjà des dizaines de serveurs prêts à l'emploi. Prenons l'exemple du serveur officiel <strong>Filesystem</strong>, qui permet à l'agent de naviguer, lire et écrire dans des répertoires sécurisés sans compromettre le reste de votre disque dur.
+      </p>
+
+      <h3>Exemple de configuration JSON</h3>
+      <p>
+        Dans votre client agentique (ou dans le fichier de configuration des serveurs MCP de Jimy), la déclaration d'un serveur stdio ressemble à ceci :
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span>mcp_config.json</span>
+          <span>JSON</span>
+        </div>
+        <pre class="code-content"><code>{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\MonNom\\Documents\\ProjetsIA",
+        "C:\\Users\\MonNom\\Downloads"
+      ]
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "C:\\Users\\MonNom\\Databases\\ventes_2026.db"
+      ]
+    }
+  }
+}</code></pre>
+      </div>
+
+      <div class="callout-tip">
+        <p><strong>Astuce performance Windows :</strong> Préférez l'utilisation de <code class="mono">uvx</code> (fourni par l'outil ultra-rapide <code class="mono">uv</code> d'Astral) plutôt que des environnements virtuels Python lourds. <code class="mono">uvx</code> télécharge et exécute les serveurs MCP Python en quelques millisecondes dans un bac à sable isolé.</p>
+      </div>
+    </section>
+
+    <!-- 04. Créer son serveur Python -->
+    <section class="section-block" id="creer-serveur-python">
+      <h2>04. Créer son propre serveur MCP en Python avec FastMCP</h2>
+      <p>
+        Créer un serveur MCP personnalisé ne prend que quelques lignes de code grâce à la bibliothèque officielle <strong>FastMCP</strong>. Voici un exemple complet permettant à votre agent d'interroger les informations système de votre PC Windows (état de la batterie, mémoire vive libre, ou lancement d'une commande PowerShell sécurisée) :
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span>windows_system_server.py</span>
+          <span>Python 3.11+</span>
+        </div>
+        <pre class="code-content"><code># Installation : pip install "mcp[cli]" psutil
+import psutil
+from mcp.server.fastmcp import FastMCP
+
+# Initialisation du serveur MCP nommé "WindowsSystem"
+mcp = FastMCP("WindowsSystem")
+
+@mcp.tool()
+def get_system_health() -> str:
+    """Renvoie les métriques matérielles actuelles de la machine Windows : CPU, RAM et batterie."""
+    cpu_percent = psutil.cpu_percent(interval=1)
+    ram = psutil.virtual_memory()
+    battery = psutil.sensors_battery()
+    
+    battery_info = f"{battery.percent}% ({'En charge' if battery.power_plugged else 'Sur batterie'})" if battery else "Fixe / Sans batterie"
+    
+    return (
+        f"Diagnostic Windows :\n"
+        f"• Utilisation CPU : {cpu_percent}%\n"
+        f"• RAM disponible : {ram.available // (1024 * 1024)} Mo sur {ram.total // (1024 * 1024)} Mo\n"
+        f"• Batterie : {battery_info}"
+    )
+
+@mcp.tool()
+def list_active_windows_services() -> list[str]:
+    """Liste les services Windows en cours d'exécution liés aux bases de données ou aux serveurs locaux."""
+    monitored = ["postgresql", "redis", "docker", "ollama"]
+    found = []
+    for proc in psutil.process_iter(['name']):
+        name = proc.info['name'].lower()
+        if any(m in name for m in monitored):
+            found.append(name)
+    return list(set(found))
+
+if __name__ == "__main__":
+    # Démarre le transport stdio pour écouter les requêtes de Jimy
+    mcp.run(transport="stdio")</code></pre>
+      </div>
+
+      <p>
+        Pour tester votre serveur localement sous Windows dans PowerShell avant de le brancher à Jimy, utilisez l'inspecteur MCP officiel :
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span>Console PowerShell</span>
+          <span>CLI</span>
+        </div>
+        <pre class="code-content"><code>npx @modelcontextprotocol/inspector python windows_system_server.py</code></pre>
+      </div>
+    </section>
+
+    <!-- 05. Créer son serveur Node.js -->
+    <section class="section-block" id="creer-serveur-node">
+      <h2>05. Créer un serveur MCP en Node.js / TypeScript</h2>
+      <p>
+        Si votre écosystème est basé sur JavaScript ou TypeScript, le SDK officiel <code class="mono">@modelcontextprotocol/sdk</code> permet de concevoir des outils en quelques minutes :
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span>server.js</span>
+          <span>Node.js (ESM)</span>
+        </div>
+        <pre class="code-content"><code>import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+
+const server = new Server(
+  { name: "outils-projets", version: "1.0.0" },
+  { capabilities: { tools: {} } }
+);
+
+// 1. Déclarer la liste des outils disponibles
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "calculer_tva",
+        description: "Calcule le montant de la TVA et le total TTC pour un montant HT donné",
+        inputSchema: {
+          type: "object",
+          properties: {
+            montantHT: { type: "number", description: "Montant hors taxes en euros" },
+            taux: { type: "number", description: "Taux de TVA en pourcentage (ex: 20)", default: 20 }
+          },
+          required: ["montantHT"]
+        }
+      }
+    ]
+  };
+});
+
+// 2. Exécuter l'outil quand l'agent IA le demande
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === "calculer_tva") {
+    const ht = request.params.arguments.montantHT;
+    const taux = request.params.arguments.taux || 20;
+    const tva = ht * (taux / 100);
+    const ttc = ht + tva;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Résultat : HT = ${ht.toFixed(2)} €, TVA (${taux}%) = ${tva.toFixed(2)} €, Total TTC = ${ttc.toFixed(2)} €`
+        }
+      ]
+    };
+  }
+  throw new Error("Outil inconnu");
+});
+
+// Connexion sur les flux standards Windows
+const transport = new StdioServerTransport();
+await server.connect(transport);</code></pre>
+      </div>
+    </section>
+
+    <!-- 06. Sécurité sur Windows -->
+    <section class="section-block" id="securite-gardefous">
+      <h2>06. Sécurité sur Windows : Garde-fous et autorisations</h2>
+      <p>
+        Donner des outils d'exécution à une intelligence artificielle sur son système d'exploitation principal exige une politique de sécurité sans compromis. Contrairement aux modèles cloud fermés qui exécutent des requêtes dans votre dos, <a href="/">Jimy</a> applique une politique stricte de consentement :
+      </p>
+
+      <ul>
+        <li><strong>Cartes d'approbation visuelles :</strong> Dès qu'un serveur MCP sollicite une action à impact persistant (création ou suppression de fichier, exécution de binaire, envoi de données externes), Jimy affiche une carte d'autorisation interactive sur votre bureau.</li>
+        <li><strong>Isolation des répertoires :</strong> Ne donnez accès à un serveur MCP de système de fichiers qu'aux sous-dossiers stricts dont vous avez besoin (ex: votre dossier de projet ou votre coffre de notes). Ne montez jamais la racine <code class="mono">C:\</code> directement.</li>
+        <li><strong>Gestion des secrets :</strong> Les clés API et identifiants doivent être injectés via des variables d'environnement locales (<code class="mono">process.env</code> ou <code class="mono">os.environ</code>), jamais codés en dur dans vos scripts ou vos prompts.</li>
+      </ul>
+    </section>
+
+    <!-- 07. FAQ MCP -->
+    <section class="section-block" id="faq-mcp">
+      <h2>07. Questions fréquentes (FAQ) sur les serveurs MCP</h2>
+
+      <div class="faq-list">
+        <h3>Quelle est la différence entre une API REST et un serveur MCP ?</h3>
+        <p>
+          Une API REST impose des formats d'URL et des schémas JSON hétérogènes que le modèle de langage doit interpréter au cas par cas. Le protocole MCP standardise l'auto-découverte (<code class="mono">tools/list</code>), la description des types en JSON-Schema et la gestion des flux conversationnels. Le LLM sait immédiatement comment utiliser n'importe quel serveur MCP sans code d'adaptation spécifique.
+        </p>
+
+        <h3>Les serveurs MCP fonctionnent-ils avec tous les LLM ?</h3>
+        <p>
+          Oui. Même si le protocole a été initié par l'écosystème Anthropic, il est agnostique du modèle sous-jacent. Que vous utilisiez Claude 3.5 Sonnet, GPT-4o, DeepSeek V3 ou un modèle open source local exécuté sur votre machine via Ollama ou LM Studio, Jimy traduit les appels de fonction MCP vers l'API de votre modèle de façon transparente.
+        </p>
+
+        <h3>L'exécution de plusieurs serveurs MCP ralentit-elle mon PC Windows ?</h3>
+        <p>
+          Non. En mode <code class="mono">stdio</code>, les serveurs MCP ne tournent que sous forme de processus légers en attente d'événements. Leur empreinte mémoire est généralement inférieure à 30 Mo de RAM, et ils ne consomment des cycles CPU que lorsqu'une commande est explicitement demandée.
+        </p>
+      </div>
+    </section>
+
+    <!-- Call to action -->
+    <div class="cta-box">
+      <h3>Envie d'un agent IA qui pilote vos outils en local ?</h3>
+      <p>
+        Téléchargez Jimy pour Windows. Bénéficiez de la reconnaissance vocale Whisper 100% hors-ligne, de la prise en charge native des serveurs MCP et d'une présence 3D vivante sur votre bureau.
+      </p>
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="20" height="20"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Télécharger Jimy pour Windows (Gratuit)
+      </a>
+      <p style="margin-top:14px;font-size:13px;color:var(--ink-mute)">
+        Installeur gratuit et open source · <a href="/#defender" style="color:var(--coral)">Déblocage rapide Windows Defender</a>
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<!-- Pied de page -->
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></span>
+    <span>Jimy, avec un seul M · jimy-agent.me</span>
+    <nav aria-label="Liens du pied de page">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/code-signing.html">Code signing policy</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Comparatif Copilot</a>
+      <a href="/guides/serveurs-mcp-windows-local.html">Guide Serveurs MCP</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js" defer></script>
+</body>
+</html>
