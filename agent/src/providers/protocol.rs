@@ -166,6 +166,34 @@ impl Protocol {
         body
     }
 
+    /// Applique un indice de raisonnement léger (`fast = true`) sur le corps
+    /// JSON pour un tour purement conversationnel (Fast-Path) : sur les
+    /// modèles Responses (`muse-spark`, `gpt-5`, `grok`, `o3`/`o4`),
+    /// `reasoning: {"effort": "low"}` fait partir le premier fragment tout de
+    /// suite ; sur Gemini (`Protocol::Google`), `thinkingBudget: 0` coupe la
+    /// réflexion cachée. Si un fournisseur refuse ce champ (400), `LlmClient`
+    /// le retire et renvoie une fois sans.
+    pub fn apply_fast_reasoning(self, model: &str, body: &mut Value) {
+        let low = model.trim().to_lowercase();
+        let short = low.rsplit('/').next().unwrap_or(&low);
+        match self {
+            Protocol::Responses => {
+                body["reasoning"] = json!({ "effort": "low" });
+            }
+            Protocol::Google => {
+                if let Some(gen) = body.get_mut("generationConfig").and_then(|g| g.as_object_mut()) {
+                    gen.insert("thinkingConfig".into(), json!({ "thinkingBudget": 0 }));
+                }
+            }
+            Protocol::Chat => {
+                if short.starts_with("o3") || short.starts_with("o4") || short.starts_with("gpt-5") {
+                    body["reasoning_effort"] = json!("low");
+                }
+            }
+            Protocol::Messages => {}
+        }
+    }
+
     /// Réponse entière (sans flux) → [`LlmReply`].
     pub fn parse(self, value: &Value) -> Result<LlmReply> {
         match self {

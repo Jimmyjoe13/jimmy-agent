@@ -132,10 +132,20 @@ pub async fn run_with_images(
     )
     .await;
 
-    // 1. Contexte : mémoire locale puis, si la règle le justifie, le vault.
-    let step = Instant::now();
-    // Lot 3 : une demande courte est rappelée avec le sujet en cours (message
-    // précédent, résumé de la conversation, tâche de fond).
+    // 1. Contexte : détection du Fast-Path conversationnel (< 1 ms, 0 réseau).
+    // Si la demande est une discussion simple ou une question directe sans
+    // intention d'action/fichier/web/MCP et que le tour précédent n'avait pas
+    // utilisé d'outils, on passe en mode léger : rappel mémoire par hachage
+    // local (pas d'appel réseau LM Studio), pas de scan de fenêtre active,
+    // prompt divisé par ~5 et outils réduits à `remember`.
+    let recent_tools = deps.history.tool_digest(&session_id, 3, 1500).ok().flatten();
+    let mut fast_path = prompt::is_conversational_fast_path(
+        &request,
+        !images.is_empty(),
+        recent_tools.is_some(),
+    );
+
+    let step_mem = Instant::now();
     let recap = deps.history.recap(&session_id).unwrap_or_default();
     let previous = deps
         .history
@@ -148,13 +158,26 @@ pub async fn run_with_images(
     if recall_query != request {
         log::info!("[contexte] rappel enrichi : « {} »", recall_query.replace('\n', " / ").chars().take(160).collect::<String>());
     }
-    let memory_block = prompt::recall_for(&deps.memory, &settings, &recall_query).await;
-    log::info!("[agent] mémoire consultée en {} ms", step.elapsed().as_millis());
-    let step = Instant::now();
-    let vault_block = prompt::vault_context(deps.vault.as_ref(), &settings, &request).await;
+    let memory_block = if fast_path {
+        prompt::recall_for_fast(&deps.memory, &settings, &recall_query)
+    } else {
+        prompt::recall_for(&deps.memory, &settings, &recall_query).await
+    };
+    let mem_ms = step_mem.elapsed().as_millis();
     log::info!(
-        "[agent] vault en {} ms ({})",
-        step.elapsed().as_millis(),
+        "[agent] mémoire consultée en {mem_ms} ms ({})",
+        if fast_path { "fast-path local" } else { "complet" }
+    );
+
+    let step_vault = Instant::now();
+    let vault_block = if fast_path {
+        None
+    } else {
+        prompt::vault_context(deps.vault.as_ref(), &settings, &request).await
+    };
+    let vault_ms = step_vault.elapsed().as_millis();
+    log::info!(
+        "[agent] vault en {vault_ms} ms ({})",
         if vault_block.is_some() { "contexte injecté" } else { "rien" }
     );
     if vault_block.is_some() {
@@ -169,17 +192,29 @@ pub async fn run_with_images(
     }
 
     // Bloc « Maintenant » (lot 5) : date et canal, cartes d'accord en attente,
-    // navigateur, fenêtre regardée (si le réglage l'autorise).
-    let situation: Vec<String> = [
-        Some(crate::core::situation::now_line(deps.voice)),
-        crate::core::situation::approvals_line(&deps.approvals.pending_scopes()),
-        crate::core::situation::browser_line(&deps.history),
-        crate::core::situation::window_line(settings.memory.share_window_title).await,
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let system_parts = prompt::system_parts(&PromptContext {
+    // navigateur, fenêtre regardée (si le réglage l'autorise — sauté en fast-path
+    // pour éviter les ~50-400 ms de `spawn_blocking` Win32).
+    let step_prompt = Instant::now();
+    let situation: Vec<String> = if fast_path {
+        [
+            Some(crate::core::situation::now_line(deps.voice)),
+            crate::core::situation::approvals_line(&deps.approvals.pending_scopes()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    } else {
+        [
+            Some(crate::core::situation::now_line(deps.voice)),
+            crate::core::situation::approvals_line(&deps.approvals.pending_scopes()),
+            crate::core::situation::browser_line(&deps.history),
+            crate::core::situation::window_line(settings.memory.share_window_title).await,
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    };
+    let prompt_ctx = PromptContext {
         settings: &settings,
         memory: &deps.memory,
         skills: &deps.skills,
@@ -187,40 +222,59 @@ pub async fn run_with_images(
         request: &request,
         memory_block: memory_block.clone(),
         vault_block,
-        // 3 derniers tours, ≤ 1 500 caractères : le fil des outils sans
-        // rejouer leurs résultats bruts (piège 45).
-        recent_tools: deps.history.tool_digest(&session_id, 3, 1500).ok().flatten(),
+        recent_tools,
         // Carnet de bord (lots 2 et 4) : le début de la conversation sorti de
         // la fenêtre, et les chantiers suivis d'une conversation à l'autre.
         earlier: crate::core::recap::summary_block(&recap),
-        // Chantiers du projet de la conversation (et ceux sans projet) :
-        // un chantier Emile n'a rien à faire dans une session de dev.
-        chantiers: deps
-            .history
-            .chantiers_for(
-                deps.history.project(&session_id).ok().flatten().as_deref(),
-                crate::core::recap::CHANTIERS_SHOWN,
-            )
-            .ok()
-            .and_then(|list| crate::core::recap::chantiers_block(&list, &session_id)),
+        chantiers: if fast_path {
+            None
+        } else {
+            // Chantiers du projet de la conversation (et ceux sans projet) :
+            // un chantier Emile n'a rien à faire dans une session de dev.
+            deps.history
+                .chantiers_for(
+                    deps.history.project(&session_id).ok().flatten().as_deref(),
+                    crate::core::recap::CHANTIERS_SHOWN,
+                )
+                .ok()
+                .and_then(|list| crate::core::recap::chantiers_block(&list, &session_id))
+        },
         // Carnet de travail (14 octobre) : les acquis vérifiés des tours
         // outillés précédents, pour ne pas tout réinspecter à chaque « ok go ».
-        work_notes: crate::core::notes::work_notes_block(deps.history.work_notes(&session_id).ok().flatten().as_deref()),
+        work_notes: if fast_path {
+            None
+        } else {
+            crate::core::notes::work_notes_block(deps.history.work_notes(&session_id).ok().flatten().as_deref())
+        },
         // Amendements (lot « croissance ») : des instructions additionnelles
         // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
         amendments: crate::growth::read_amendments(&deps.data_dir),
         background_task: deps.tasks.prompt_block(&session_id),
         situation,
         voice: deps.voice,
-    });
+    };
+    let system_parts = if fast_path {
+        prompt::system_parts_fast(&prompt_ctx)
+    } else {
+        prompt::system_parts(&prompt_ctx)
+    };
     let mut messages = vec![Message::system(prompt::join_parts(&system_parts))];
+    let prompt_ms = step_prompt.elapsed().as_millis();
 
     // 2. Historique récent de la session.
-    messages.extend(deps.history.conversation(&session_id, crate::core::recap::WINDOW)?);
+    // Si un message `User` précédent est resté sans réponse finale (ex. une
+    // tâche de cette session est passée en arrière-plan et tourne encore), on
+    // intercale une réplique d'attente pour éviter que les deux demandes `User`
+    // consécutives ne soient fusionnées (format Messages) ou ne poussent le
+    // modèle à ré-exécuter la première au lieu de répondre à la question en
+    // parallèle (piège « cerise »).
+    let past = interleave_unanswered_users(deps.history.conversation(&session_id, crate::core::recap::WINDOW)?);
+    messages.extend(past);
     messages.push(user_message.clone());
     // Relevé du contexte (lot 0) : quel bloc coûte quoi, à chaque demande.
     log::info!(
-        "[contexte] système {} ; historique {} message(s), {} caractères ; demande {} caractères",
+        "[contexte] mode={} (mem={mem_ms}ms, vault={vault_ms}ms, prompt={prompt_ms}ms) ; système {} ; historique {} message(s), {} caractères ; demande {} caractères",
+        if fast_path { "fast-path" } else { "tool-path" },
         prompt::sizes(&system_parts),
         messages.len() - 2,
         messages[1..messages.len() - 1].iter().map(|m| m.content.chars().count()).sum::<usize>(),
@@ -244,6 +298,13 @@ pub async fn run_with_images(
         // chacun), alors que la conversation est à voix haute.
         specs
             .retain(|spec| !matches!(spec.name.as_str(), "search_memory" | "vault_search"));
+    }
+    let full_specs = specs.clone();
+    if fast_path {
+        // En Fast-Path, seul `remember` reste disponible (si l'utilisateur
+        // partage un fait sur lui) : les ~25 schémas d'outils système/fichiers/MCP
+        // (~3 500 jetons) ne sont pas envoyés.
+        specs.retain(|spec| spec.name == "remember");
     }
     let foreground_iterations = if deps.voice {
         settings.llm.max_iterations.clamp(1, VOICE_MAX_ITERATIONS)
@@ -305,7 +366,7 @@ pub async fn run_with_images(
         // en silence. Au-delà, Error::Timeout → « la demande a pris trop de temps ».
         let budget = deps.voice.then_some(VOICE_CALL_TIMEOUT);
         let mut first_try =
-            call_model_streaming(&deps, &model, &messages, &specs, &settings, budget, &events).await;
+            call_model_streaming(&deps, &model, &messages, &specs, &settings, budget, fast_path, &events).await;
         // Erreur passagère du fournisseur (5xx, 429, coupure) qui arrive vite :
         // une seule nouvelle tentative. Une panne lente n'est pas rejouée, elle
         // doublerait l'attente. Sans flux : ce qui a pu être affiché du premier
@@ -314,7 +375,7 @@ pub async fn run_with_images(
             if is_transient(error) && call_started.elapsed() < FAST_FAILURE {
                 log::warn!("[agent] erreur passagère du modèle {model} ({error}) : nouvelle tentative");
                 tokio::time::sleep(Duration::from_millis(800)).await;
-                first_try = call_model(&deps, &model, &messages, &specs, &settings, budget).await;
+                first_try = call_model(&deps, &model, &messages, &specs, &settings, budget, fast_path).await;
             }
         }
         // Coupure réseau en pleine tâche, même lente (14 octobre : capot
@@ -336,7 +397,7 @@ pub async fn run_with_images(
             );
             outage = true;
             tokio::time::sleep(*wait).await;
-            first_try = call_model(&deps, &model, &messages, &specs, &settings, budget).await;
+            first_try = call_model(&deps, &model, &messages, &specs, &settings, budget, fast_path).await;
         }
         if outage {
             // Appel perdu, attentes et reprise : rien de tout ça n'est du travail.
@@ -460,6 +521,12 @@ pub async fn run_with_images(
                 .catch();
             completed = true;
             break;
+        }
+        // Si un outil a été appelé malgré le Fast-Path (ex. `remember`), on
+        // restaure les outils complets pour l'étape suivante.
+        if fast_path {
+            fast_path = false;
+            specs = full_specs.clone();
         }
 
         // Le modèle travaille : on le montre.
@@ -697,7 +764,7 @@ pub async fn run_with_images(
         // Même budget que les autres appels : la conclusion ne doit pas, à son
         // tour, laisser l'utilisateur sans réponse pendant des minutes.
         let budget = deps.voice.then_some(VOICE_CALL_TIMEOUT);
-        if let Ok(reply) = call_model(&deps, &model, &messages, &[], &settings, budget).await {
+        if let Ok(reply) = call_model(&deps, &model, &messages, &[], &settings, budget, false).await {
             if !reply.content.trim().is_empty() {
                 final_text = reply.content.trim().to_string();
             }
@@ -1215,6 +1282,26 @@ fn webcam_note(images: &[crate::core::types::Image]) -> Option<String> {
 /// réglages (25 en vocal) et 10 min — même durée qu'à l'écrit : MiMo met 3 à
 /// 4 minutes pour une tâche de code, 180 s coupaient avant l'écriture. En
 /// fond, au moins `tasks::BACKGROUND_MAX_ITERATIONS` étapes et 20 min.
+/// Intercale une réplique d'attente après tout message `User` de l'historique
+/// qui n'est pas suivi d'une réponse finale `Assistant` (tâche passée en
+/// arrière-plan en cours d'exécution, ou tour interrompu). Garantit une
+/// alternance stricte `User` / `Assistant` avant d'ajouter la nouvelle demande.
+fn interleave_unanswered_users(history: Vec<Message>) -> Vec<Message> {
+    let mut out: Vec<Message> = Vec::with_capacity(history.len() + 1);
+    for msg in history {
+        if out.last().is_some_and(|prev| prev.role == crate::core::types::Role::User)
+            && msg.role == crate::core::types::Role::User
+        {
+            out.push(Message::assistant("(Je m'en occupe en arrière-plan.)"));
+        }
+        out.push(msg);
+    }
+    if out.last().is_some_and(|prev| prev.role == crate::core::types::Role::User) {
+        out.push(Message::assistant("(Je m'en occupe en arrière-plan.)"));
+    }
+    out
+}
+
 /// Compacte le passé si le contexte dépasse son budget, et le note au journal.
 fn compact_before_call(messages: &mut [Message]) {
     let before = crate::core::compact::context_chars(messages);
@@ -1306,8 +1393,9 @@ async fn call_model(
     specs: &[crate::core::types::ToolSpec],
     settings: &crate::config::Settings,
     budget: Option<Duration>,
+    fast_reasoning: bool,
 ) -> Result<crate::providers::llm::LlmReply> {
-    let call = deps.llm.chat(model, messages, specs, settings.llm.temperature, settings.llm.max_tokens);
+    let call = deps.llm.chat_with_mode(model, messages, specs, settings.llm.temperature, settings.llm.max_tokens, fast_reasoning);
     match budget {
         Some(limit) => tokio::time::timeout(limit, call).await.unwrap_or(Err(Error::Timeout)),
         None => call.await,
@@ -1329,15 +1417,17 @@ async fn call_model_streaming(
     specs: &[crate::core::types::ToolSpec],
     settings: &crate::config::Settings,
     budget: Option<Duration>,
+    fast_reasoning: bool,
     events: &tokio::sync::mpsc::Sender<crate::core::types::AgentEvent>,
 ) -> Result<crate::providers::llm::LlmReply> {
     let delta_tx = events.clone();
-    let call = deps.llm.chat_stream(
+    let call = deps.llm.chat_stream_with_mode(
         model,
         messages,
         specs,
         settings.llm.temperature,
         settings.llm.max_tokens,
+        fast_reasoning,
         move |text| {
             let _ = delta_tx.try_send(crate::core::types::AgentEvent::Delta { text: text.to_string() });
         },
@@ -1671,6 +1761,16 @@ mod degenerate_tests {
         assert_eq!(foreign_script_chars(&cut), 0, "{cut}");
         assert!(cut.contains("incohérente"), "{cut}");
         assert!(!cut.contains("headless pour"), "coupé avant la phrase fautive : {cut}");
+    }
+
+    #[test]
+    fn une_tache_en_fond_ne_laisse_pas_un_message_user_orphelin() {
+        let past = vec![Message::user("Exécute avec run_command Start-Sleep -Seconds 70")];
+        let fixed = interleave_unanswered_users(past);
+        assert_eq!(fixed.len(), 2);
+        assert_eq!(fixed[0].role, crate::core::types::Role::User);
+        assert_eq!(fixed[1].role, crate::core::types::Role::Assistant);
+        assert!(fixed[1].content.contains("arrière-plan"));
     }
 }
 

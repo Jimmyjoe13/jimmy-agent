@@ -44,6 +44,16 @@ pub const MIN_DENSITY_PERMILLE: u64 = 150;
 /// non.
 pub const LONG_SPEECH_FROM_MS: u64 = 1500;
 
+/// En dessous, la prise est une commande ou une question brève (« Oui »,
+/// « Confirmé », « Salut Jimy comment tu vas ? », « Quelle heure est-il ? ») :
+/// le silence de fin est plafonné à [`SHORT_SPEECH_END_MS`] au lieu d'attendre
+/// le hangover complet d'une longue phrase (fast commit, 17 octobre).
+pub const SHORT_SPEECH_UNTIL_MS: u64 = 1200;
+
+/// Silence de fin maximal d'une phrase brève : réactif sans couper une
+/// respiration normale entre deux mots.
+pub const SHORT_SPEECH_END_MS: u64 = 650;
+
 /// Allongement maximal du silence de fin, atteint à 2,5 s de parole
 /// (700 ms réglés → 1,2 s). Cas réel : « Je viens de voir que dans ta mémoire
 /// tu as mis... » coupé par une pause de réflexion.
@@ -177,11 +187,33 @@ impl SpeechTracker {
 
     /// La phrase est-elle terminée (parole puis silence suffisant) ?
     ///
-    /// Le silence exigé grandit avec la parole déjà dite : une commande brève
-    /// (« Non, c'est bon ») se clôt au réglage (1 200 ms par défaut), une
-    /// longue phrase tolère une pause de réflexion jusqu'à 500 ms de plus.
+    /// Trois régimes selon la parole déjà dite :
+    /// * brève (`≤ SHORT_SPEECH_UNTIL_MS`, « Oui », « Quelle heure est-il ? ») :
+    ///   fast commit à `SHORT_SPEECH_END_MS` (650 ms max) pour ne pas faire
+    ///   attendre le hangover complet ;
+    /// * normale (`1,2 à 1,5 s`) : le réglage (`end_of_speech_ms`, 1 200 ms par défaut) ;
+    /// * longue (`> 1,5 s`) : allongée jusqu'à `+500 ms` pour tolérer une pause
+    ///   de réflexion.
     pub fn ended(&self) -> bool {
-        self.started() && self.silence >= self.end_frames + self.extra_end_frames()
+        self.started() && self.silence >= self.required_end_frames()
+    }
+
+    fn required_end_frames(&self) -> usize {
+        let voiced = self.voiced_ms();
+        let active_samples = self.first_any.map(|f| self.last_end.saturating_sub(f)).unwrap_or(0);
+        let active_ms = (active_samples / self.frame.max(1)) as u64 * FRAME_MS as u64;
+        // Une vraie phrase brève (« Oui », « Confirmé », « Salut Jimy ça va ? »)
+        // a au moins 300 ms de parole continue et une densité ≥ 60 % : un
+        // souffle éparse (100 ms par seconde) ne déclenche jamais le fast commit.
+        let dense_short = (300..=SHORT_SPEECH_UNTIL_MS).contains(&voiced)
+            && active_ms > 0
+            && voiced * 100 >= active_ms * 60;
+        if dense_short {
+            let cap = (SHORT_SPEECH_END_MS as usize / FRAME_MS).max(1);
+            self.end_frames.min(cap)
+        } else {
+            self.end_frames + self.extra_end_frames()
+        }
     }
 
     /// Trames de silence ajoutées pour une longue phrase.
@@ -321,11 +353,28 @@ mod tests {
 
     #[test]
     fn un_vrai_silence_clot_meme_avec_un_hangover_long() {
-        // Garde-fou : l'hystérésis ne doit pas empêcher une vraie fin.
-        let audio = concat(&[tone(1000, 0.02), tone(1300, 0.001)]);
+        // Garde-fou : l'hystérésis ne doit pas empêcher une vraie fin (phrase
+        // de 1,4 s, régime normal à 1 200 ms).
+        let audio = concat(&[tone(1400, 0.02), tone(1300, 0.001)]);
         let mut tracker = SpeechTracker::new(RATE, 0.0035, 1200, 0);
         tracker.feed(&audio);
         assert!(tracker.ended(), "1,3 s de vrai silence closent la phrase");
+    }
+
+    #[test]
+    fn une_question_courte_se_clot_en_fast_commit() {
+        // « Salut Jimy, ça va ? » ou « Confirmé » (~800 ms de parole) : même
+        // avec le réglage Naturel (1 200 ms) ou Patient (1 600 ms), la prise
+        // se clôt après ~650 ms de silence sans faire attendre 1,2 à 1,6 s.
+        let audio = concat(&[tone(800, 0.02), tone(700, 0.001)]);
+        let mut tracker = SpeechTracker::new(RATE, 0.0035, 1600, 0);
+        tracker.feed(&audio);
+        assert!(tracker.ended(), "fast commit attendu après 700 ms de silence sur une phrase brève");
+        // En revanche, une phrase de 1,5 s garde le hangover complet.
+        let moyenne = concat(&[tone(1500, 0.02), tone(900, 0.001)]);
+        let mut tracker2 = SpeechTracker::new(RATE, 0.0035, 1200, 0);
+        tracker2.feed(&moyenne);
+        assert!(!tracker2.ended(), "une phrase de 1,5 s ne doit pas être coupée à 900 ms");
     }
 
     #[test]

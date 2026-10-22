@@ -128,6 +128,126 @@ d'identifiant technique ni de sortie de programme dans la prose : dis l'idée
 (« j'ai modifié le script d'envoi »), pas l'implémentation.
 "#;
 
+pub const IDENTITY_FAST: &str = r#"Tu es Jimy (« Agent Jimy »), un assistant personnel agentique qui vit sur le bureau de l'utilisateur, incarné par un renard humanoïde 3D. Ton nom s'écrit **Jimy** (souvent transcrit « Jimmy »).
+
+## Sortie : courte, nette, précise
+Réponds en français, sauf indication contraire. Va droit au but : une à trois phrases suffisent par défaut.
+- Commence par la réponse, sans préambule ni reformulation de la question.
+- La prose est lue à voix haute telle quelle : une seule idée par phrase, pas de symboles, pas de tableau, pas de code ni de chemin de fichier dans la prose.
+- Si l'utilisateur apprend ou corrige un fait stable sur lui-même, enregistre-le avec `remember`."#;
+
+/// Mots ou fragments qui signalent une action, un fichier, un système, le web
+/// ou un connecteur MCP : la demande prend alors le chemin complet (Tool-Path).
+const ACTION_MARKERS: &[&str] = &[
+    // Fichiers, dossiers, code
+    "fichier", "fichiers", "dossier", "dossiers", "repertoire", "répertoire", "chemin",
+    "code", "script", "fonction", "classe", "module", "package", "cargo", "npm", "git",
+    "commit", "push", "pull", "branch", "diff", "build", "compile", "compiler", "test",
+    "teste", "tester", "debug", "bug", "erreur", "logs", "log", "journal", "config",
+    ".rs", ".ts", ".js", ".py", ".json", ".md", ".toml", ".env", ".ps1", ".html", ".css",
+    // Lecture / écriture / recherche / exécution
+    "lis", "lire", "ecris", "écris", "ecrire", "écrire", "modifie", "modifier", "cree",
+    "crée", "creer", "créer", "supprime", "supprimer", "efface", "ajoute", "ajouter",
+    "cherche", "chercher", "recherche", "trouve", "trouver", "analyse", "analyser",
+    "inspecte", "inspecter", "verifie", "vérifie", "verifier", "vérifier", "installe",
+    "installer", "lance", "lancer", "execute", "exécute", "executer", "exécuter",
+    "demarre", "démarre", "arrete", "arrête", "tue", "kill", "terminal", "powershell",
+    "commande", "commandes", "bash", "shell",
+    // Système, fenêtres, webcam, alimentation
+    "processus", "fenetre", "fenêtre", "ecran", "écran", "capture", "webcam", "camera",
+    "caméra", "photo", "regarde-moi", "regarde mon", "tu me vois", "eteins", "éteins",
+    "eteindre", "éteindre", "redemarre", "redémarre", "verrouille", "pc", "ordinateur",
+    "machine", "disque", "memoire vive", "ram", "cpu", "port",
+    // Web, navigateur, réseau, MCP, vault, skills
+    "http", "www", "url", "site", "page", "navigateur", "chrome", "ouvre", "ouvrir",
+    "clique", "cliquer", "telecharge", "télécharge", "api", "serveur", "vps", "ssh",
+    "docker", "mcp", "obsidian", "vault", "note", "notes", "skill", "skills",
+    "synaptiq", "emile", "campagne", "prospect", "mail", "email", "gmail",
+    // Reprise ou validation d'une tâche en cours
+    "continue", "continuer", "vas-y", "go", "fais-le", "applique", "confirme", "confirmé",
+    "autorise", "toujours autoriser", "tache", "tâche", "chantier", "projet", "rapport",
+    "dashboard", "audit",
+];
+
+/// Détecte en < 1 ms (zéro appel réseau, zéro LLM) si la demande est une
+/// discussion simple ou une question directe qui n'a besoin ni des ~25 outils
+/// système/MCP ni du prompt complet de 15 000 caractères (Fast-Path).
+///
+/// Conservateur : au moindre doute (image jointe, chemin, commande, reprise de
+/// tâche, ou tour précédent outillé), on garde le Tool-Path complet.
+pub fn is_conversational_fast_path(request: &str, has_images: bool, prev_used_tools: bool) -> bool {
+    if has_images || prev_used_tools {
+        return false;
+    }
+    let trimmed = request.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 200 {
+        return false;
+    }
+    if trimmed.split_whitespace().count() > 32 {
+        return false;
+    }
+    // Signes typographiques d'un chemin, d'un bloc de code ou d'une mention.
+    if trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('`')
+        || trimmed.contains('@')
+        || trimmed.contains("http:")
+        || trimmed.contains("https:")
+        || trimmed.contains("C:")
+        || trimmed.contains("c:")
+    {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    // Découpe en mots alphanumériques pour éviter les faux positifs de
+    // sous-chaînes (« note » dans « dénote », « pc » dans « parce »), tout en
+    // gardant les extensions (`.rs`, `.env`) et expressions multi-mots.
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'')
+        .filter(|w| !w.is_empty())
+        .collect();
+    for marker in ACTION_MARKERS {
+        if marker.starts_with('.') || marker.contains(' ') {
+            if lower.contains(marker) {
+                return false;
+            }
+        } else if words.iter().any(|w| {
+            // Retire un préfixe d'élision (« l'écran » → « écran », « d'ouvrir » → « ouvrir »).
+            let stripped = w.split_once('\'').map(|(_, rest)| rest).unwrap_or(w);
+            *w == *marker || stripped == *marker
+        }) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Prompt système allégé pour le Fast-Path conversationnel (~1 800 caractères
+/// au lieu de ~15 500). Garde l'identité, la date/heure, le mode vocal et les
+/// souvenirs de l'utilisateur ; omet le catalogue d'outils, les guides MCP/webcam,
+/// les chantiers et les carnets de tâches.
+pub fn system_parts_fast(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
+    let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY_FAST.to_string())];
+    if ctx.voice {
+        parts.push(("voix", VOICE_MODE.to_string()));
+    }
+    let mut now = String::from("## Maintenant");
+    for line in ctx.background_task.iter().chain(&ctx.situation) {
+        now.push('\n');
+        now.push_str(line);
+    }
+    parts.push(("maintenant", now));
+    if let Some(amendments) = &ctx.amendments {
+        parts.push(("amendements", format!("## Amendements\n{amendments}")));
+    }
+    if let Some(block) = &ctx.memory_block {
+        if !block.trim().is_empty() {
+            parts.push(("mémoire", block.clone()));
+        }
+    }
+    parts
+}
+
 pub struct PromptContext<'a> {
     pub settings: &'a Settings,
     pub memory: &'a MemoryStore,
@@ -377,6 +497,18 @@ pub async fn recall_for(memory: &MemoryStore, settings: &Settings, request: &str
     (!block.trim().is_empty()).then_some(block)
 }
 
+/// Rappel mémoire instantané (Fast-Path) : socle + hachage local, sans appel
+/// réseau vers LM Studio.
+pub fn recall_for_fast(memory: &MemoryStore, settings: &Settings, request: &str) -> Option<String> {
+    if !settings.memory.enabled {
+        return None;
+    }
+    let block = memory
+        .context_block_fast(request, settings.memory.recall_limit as usize)
+        .ok()?;
+    (!block.trim().is_empty()).then_some(block)
+}
+
 /// Contexte du vault Obsidian à injecter, si la règle de déclenchement le
 /// justifie. Remplace Synaptiq : même idée (ramener le contexte antérieur),
 /// en local — les notes du vault sont relues en plein texte.
@@ -587,6 +719,45 @@ mod tests {
         assert_eq!(recall_query(long, Some("autre sujet"), "résumé", None), long);
         // Rien autour : la demande seule.
         assert_eq!(recall_query("vas-y", None, "", None), "vas-y");
+    }
+
+    #[test]
+    fn detection_fast_path_vs_tool_path() {
+        // Discussions simples et questions directes → Fast-Path.
+        assert!(is_conversational_fast_path("Salut Jimy, comment tu vas ?", false, false));
+        assert!(is_conversational_fast_path("Quelle est la capitale de l'Italie ?", false, false));
+        assert!(is_conversational_fast_path("Réponds uniquement par le mot : banane", false, false));
+        assert!(is_conversational_fast_path("Je t'ai dit que je suis ton créateur, que penses-tu de moi ?", false, false));
+        assert!(is_conversational_fast_path("Merci beaucoup !", false, false));
+
+        // Intentions d'action, fichiers, système, web, MCP, reprise → Tool-Path.
+        assert!(!is_conversational_fast_path("Lis le fichier Cargo.toml", false, false));
+        assert!(!is_conversational_fast_path("Exécute avec run_command Start-Sleep", false, false));
+        assert!(!is_conversational_fast_path("Regarde mon écran", false, false));
+        assert!(!is_conversational_fast_path("Prends une photo avec la webcam", false, false));
+        assert!(!is_conversational_fast_path("Ouvre https://example.com", false, false));
+        assert!(!is_conversational_fast_path("Vérifie le statut sur le VPS", false, false));
+        assert!(!is_conversational_fast_path("Cherche dans le vault Obsidian", false, false));
+        assert!(!is_conversational_fast_path("ok go continue", false, false));
+        assert!(!is_conversational_fast_path("Que contient @README.md ?", false, false));
+        // Image jointe ou tour précédent outillé → Tool-Path conservé.
+        assert!(!is_conversational_fast_path("Salut !", true, false));
+        assert!(!is_conversational_fast_path("Et maintenant ?", false, true));
+    }
+
+    #[test]
+    fn le_prompt_fast_path_est_allege() {
+        let settings = Settings::default();
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().expect("db")));
+        let memory = MemoryStore::new(db);
+        let skills = crate::skills::SkillStore::new(std::env::temp_dir().join("prompt-test-skills")).unwrap();
+        let registry = ToolRegistry::new();
+        registry.register_defaults(&crate::tools::ToolDeps { http: reqwest::Client::new() });
+        let ctx = common_context(&settings, &memory, &skills, &registry);
+        let full = join_parts(&system_parts(&ctx));
+        let fast = join_parts(&system_parts_fast(&ctx));
+        assert!(fast.chars().count() * 4 < full.chars().count(), "fast={} vs full={}", fast.chars().count(), full.chars().count());
+        assert!(!fast.contains("## Outils disponibles"));
     }
 
     /// Gabarit de contexte réutilisé entre deux variantes d'un même test.

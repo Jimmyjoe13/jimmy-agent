@@ -210,6 +210,7 @@ impl App {
 
                 // 3. Qu'a-t-il dit ? « Jimmy » seul et reconnu par le modèle
                 //    rapide : on ne relance pas le modèle précis.
+                let stt_started = Instant::now();
                 let utterance = if early_match && captured.voiced_ms <= NAME_ALONE_MAX_MS {
                     early.clone()
                 } else if !in_conversation && captured.voiced_ms <= NAME_ALONE_MAX_MS {
@@ -225,10 +226,11 @@ impl App {
                 } else {
                     transcribe_precise(&self, &captured.samples, rate).await
                 };
+                let stt_ms = stt_started.elapsed().as_millis();
                 dump_clip(&self, &captured.samples, rate, "phrase", &utterance);
                 let full_match = matches_wake_word(&utterance, &self.wake_word());
                 log::info!(
-                    "[voice] phrase en {} ms ({} ms de parole) : « {utterance} » (rapide : « {early} »)",
+                    "[voice] phrase en {} ms ({} ms de parole, STT {stt_ms} ms) : « {utterance} » (rapide : « {early} »)",
                     detected_at.elapsed().as_millis(),
                     captured.voiced_ms
                 );

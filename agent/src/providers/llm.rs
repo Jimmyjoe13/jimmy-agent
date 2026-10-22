@@ -516,15 +516,30 @@ impl LlmClient {
             // boucle (une fois, puis le verdict normal s'applique).
             let has_temp = body.as_object().is_some_and(|o| o.contains_key("temperature"))
                 || body.pointer("/generationConfig/temperature").is_some();
+            let has_fast_reasoning = body.as_object().is_some_and(|o| {
+                o.contains_key("reasoning") || o.contains_key("reasoning_effort")
+            }) || body.pointer("/generationConfig/thinkingConfig").is_some();
             if !raw.contains("ModelProtocolUnsupported")
-                && is_temperature_rejection(status.as_u16(), &raw)
-                && has_temp
+                && ((is_temperature_rejection(status.as_u16(), &raw) && has_temp)
+                    || (is_reasoning_rejection(status.as_u16(), &raw) && has_fast_reasoning))
             {
-                body.as_object_mut().map(|o| o.remove("temperature"));
-                if let Some(gen) = body.get_mut("generationConfig").and_then(|g| g.as_object_mut()) {
-                    gen.remove("temperature");
+                if is_temperature_rejection(status.as_u16(), &raw) {
+                    body.as_object_mut().map(|o| o.remove("temperature"));
+                    if let Some(gen) = body.get_mut("generationConfig").and_then(|g| g.as_object_mut()) {
+                        gen.remove("temperature");
+                    }
+                    log::warn!("[llm] {model} refuse `temperature` : nouvel essai sans");
                 }
-                log::warn!("[llm] {model} refuse `temperature` : nouvel essai sans");
+                if is_reasoning_rejection(status.as_u16(), &raw) {
+                    if let Some(o) = body.as_object_mut() {
+                        o.remove("reasoning");
+                        o.remove("reasoning_effort");
+                    }
+                    if let Some(gen) = body.get_mut("generationConfig").and_then(|g| g.as_object_mut()) {
+                        gen.remove("thinkingConfig");
+                    }
+                    log::warn!("[llm] {model} refuse l'indice de raisonnement léger : nouvel essai sans");
+                }
                 let headers = self.request_headers(&provider, protocol).await?;
                 let mut retry = self
                     .http
@@ -562,7 +577,26 @@ impl LlmClient {
         temperature: Option<f32>,
         max_tokens: u32,
     ) -> Result<LlmReply> {
-        let build = |p: Protocol| p.body(model, messages, tools, temperature, max_tokens, false);
+        self.chat_with_mode(model, messages, tools, temperature, max_tokens, false).await
+    }
+
+    /// Comme [`chat`], avec `fast_reasoning` pour le Fast-Path conversationnel.
+    pub async fn chat_with_mode(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tools: &[ToolSpec],
+        temperature: Option<f32>,
+        max_tokens: u32,
+        fast_reasoning: bool,
+    ) -> Result<LlmReply> {
+        let build = |p: Protocol| {
+            let mut b = p.body(model, messages, tools, temperature, max_tokens, false);
+            if fast_reasoning {
+                p.apply_fast_reasoning(model, &mut b);
+            }
+            b
+        };
         let provider = self.runtime_for(model);
         let service = provider.label;
         let (protocol, response) = self.send(model, false, &build, None).await?;
@@ -590,9 +624,30 @@ impl LlmClient {
         tools: &[ToolSpec],
         temperature: Option<f32>,
         max_tokens: u32,
+        on_delta: impl FnMut(&str) + Send,
+    ) -> Result<LlmReply> {
+        self.chat_stream_with_mode(model, messages, tools, temperature, max_tokens, false, on_delta).await
+    }
+
+    /// Comme [`chat_stream`], avec `fast_reasoning` pour réduire ou couper la
+    /// réflexion cachée sur les tours purement conversationnels (Fast-Path).
+    pub async fn chat_stream_with_mode(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tools: &[ToolSpec],
+        temperature: Option<f32>,
+        max_tokens: u32,
+        fast_reasoning: bool,
         mut on_delta: impl FnMut(&str) + Send,
     ) -> Result<LlmReply> {
-        let build = |p: Protocol| p.body(model, messages, tools, temperature, max_tokens, true);
+        let build = |p: Protocol| {
+            let mut b = p.body(model, messages, tools, temperature, max_tokens, true);
+            if fast_reasoning {
+                p.apply_fast_reasoning(model, &mut b);
+            }
+            b
+        };
         let provider = self.runtime_for(model);
         let service = provider.label;
         let (protocol, mut response) = self.send(model, true, &build, None).await?;
@@ -933,6 +988,23 @@ fn is_temperature_rejection(status: u16, raw: &str) -> bool {
             || low.contains("not allowed"))
 }
 
+/// Un 400 qui refuse l'indice de raisonnement léger (`reasoning`,
+/// `reasoning_effort`, `thinkingConfig` / `thinkingBudget`) : on renvoie sans.
+fn is_reasoning_rejection(status: u16, raw: &str) -> bool {
+    if status != 400 {
+        return false;
+    }
+    let low = raw.to_lowercase();
+    (low.contains("reasoning") || low.contains("thinking"))
+        && (low.contains("unknown")
+            || low.contains("unrecognized")
+            || low.contains("not supported")
+            || low.contains("unsupported")
+            || low.contains("not allowed")
+            || low.contains("invalid")
+            || low.contains("extra_forbidden"))
+}
+
 /// Le refus de facturation Anthropic sur abonnement : 400 dont le corps parle
 /// de « extra usage ». Fonction pure — testée sans réseau. `Some(message
 /// clair)` seulement pour un fournisseur en mode abonnement.
@@ -1095,5 +1167,22 @@ mod routing_tests {
         assert_eq!(headers.get("anthropic-version").and_then(|v| v.to_str().ok()), Some("2023-06-01"));
         assert_eq!(headers.get("x-api-key").and_then(|v| v.to_str().ok()), Some("sk-ant"));
         assert!(headers.get(reqwest::header::AUTHORIZATION).is_none());
+    }
+
+    #[test]
+    fn le_raisonnement_leger_s_applique_et_son_refus_se_detecte() {
+        let messages = vec![Message::user("Bonjour")];
+        let mut resp_body = Protocol::Responses.body("muse-spark-1.3-contributor", &messages, &[], None, 512, true);
+        Protocol::Responses.apply_fast_reasoning("muse-spark-1.3-contributor", &mut resp_body);
+        assert_eq!(resp_body["reasoning"], serde_json::json!({"effort": "low"}));
+
+        let mut google_body = Protocol::Google.body("gemini-4-argon-contributor", &messages, &[], None, 512, true);
+        Protocol::Google.apply_fast_reasoning("gemini-4-argon-contributor", &mut google_body);
+        assert_eq!(google_body["generationConfig"]["thinkingConfig"], serde_json::json!({"thinkingBudget": 0}));
+
+        assert!(is_reasoning_rejection(400, r#"{"error":{"message":"Unknown parameter: 'reasoning'"}}"#));
+        assert!(is_reasoning_rejection(400, r#"{"error":{"message":"thinkingConfig is not supported"}}"#));
+        assert!(!is_reasoning_rejection(400, "quota dépassé"));
+        assert!(!is_reasoning_rejection(500, "Unknown parameter: reasoning"));
     }
 }

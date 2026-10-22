@@ -111,6 +111,11 @@ pub struct App {
     /// attente du message qui les emporte (les 3 dernières, en mémoire
     /// seulement : une capture ne va jamais sur disque).
     pending_captures: std::sync::Mutex<Vec<(String, core::types::Image)>>,
+    /// Première phrase synthétisée par anticipation dès son arrivée dans le
+    /// flux du modèle (`relay_task` → [`App::prefetch_first_sentence`]),
+    /// consommée par [`App::speak`] pour faire partir l'audio sans attendre
+    /// un aller-retour réseau supplémentaire après la fin de la génération.
+    prefetched_tts: std::sync::Mutex<Option<(String, tokio::task::JoinHandle<Result<providers::tts::Speech>>)>>,
 }
 
 /// Compte une tâche en cours le temps de son exécution.
@@ -179,6 +184,10 @@ async fn relay_task(
     // fond pendant que l'utilisateur y répond.
     let mut approvals = 0usize;
     let mut detach_tx = Some(detach_tx);
+    // Streaming vers TTS : on accumule les fragments du tour en cours et on
+    // lance la synthèse de la 1re phrase dès qu'elle est complète.
+    let mut streamed_text = String::new();
+    let mut prefetched_sentence = false;
     loop {
         // Après le premier outil, tant que la tâche peut passer en fond, on se
         // réveille aussi sans événement : un appel au modèle peut durer une minute.
@@ -196,6 +205,15 @@ async fn relay_task(
                 tools += 1;
                 first_tool.get_or_insert_with(std::time::Instant::now);
                 app.tasks.set_step(&task_id, &tasks::step_label(name, arguments));
+                streamed_text.clear();
+                prefetched_sentence = false;
+            }
+            Some(AgentEvent::Delta { text }) if !prefetched_sentence && !detached.load(std::sync::atomic::Ordering::SeqCst) => {
+                streamed_text.push_str(text);
+                if let Some(first_sentence) = providers::tts::extract_first_stream_sentence(&streamed_text) {
+                    prefetched_sentence = true;
+                    app.prefetch_first_sentence(first_sentence);
+                }
             }
             Some(AgentEvent::Progress { text }) => app.tasks.set_step(&task_id, text),
             Some(AgentEvent::Approval { .. }) => approvals += 1,
@@ -495,6 +513,7 @@ impl App {
             running: std::sync::atomic::AtomicUsize::new(0),
             tasks: Arc::new(tasks::Tasks::default()),
             pending_captures: std::sync::Mutex::new(Vec::new()),
+            prefetched_tts: std::sync::Mutex::new(None),
         }))
     }
 
@@ -506,6 +525,11 @@ impl App {
     pub fn request_stop(&self) -> bool {
         let busy = self.is_busy();
         self.stop_signal.send_modify(|generation| *generation += 1);
+        if let Ok(mut slot) = self.prefetched_tts.lock() {
+            if let Some((_, old)) = slot.take() {
+                old.abort();
+            }
+        }
         voice::interrupt_playback();
         log::info!("[agent] arrêt d'urgence demandé (tâche ou parole en cours : {busy})");
         busy
@@ -1338,6 +1362,34 @@ impl App {
         self.speaking.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Lance la synthèse TTS de la première phrase dès qu'elle est complète
+    /// dans le flux SSE du modèle (`relay_task`). Quand [`App::speak`] est
+    /// appelée à la fin de la réponse, l'audio du 1er morceau est déjà prêt
+    /// ou presque : on gagne 1,5 à 3,5 s avant le premier son.
+    pub fn prefetch_first_sentence(&self, sentence: String) {
+        let settings = self.settings();
+        if !settings.voice.enabled || !settings.tts.enabled {
+            return;
+        }
+        let key = settings.tts_key(&self.secrets);
+        if key.trim().is_empty() {
+            return;
+        }
+        let tts = self.tts.clone();
+        let model = settings.tts.model.clone();
+        let voice_id = settings.tts.voice.clone();
+        let cpm = settings.tts.chars_per_minute;
+        let part = sentence.clone();
+        log::info!("[tts] pré-synthèse en streaming : « {} » ({} caractères)", sentence.chars().take(60).collect::<String>(), sentence.chars().count());
+        let handle = tokio::spawn(async move { tts.speak(&key, &model, &voice_id, &part, cpm).await });
+        if let Ok(mut slot) = self.prefetched_tts.lock() {
+            if let Some((_, old)) = slot.take() {
+                old.abort();
+            }
+            *slot = Some((sentence, handle));
+        }
+    }
+
     /// Dit `text` à voix haute (synthèse + lecture) et l'affiche dans la bulle
     /// de l'avatar. Utilisé par l'écoute **et** par le chat. Ne renvoie pas
     /// d'erreur : une voix désactivée ou indisponible ne doit pas faire échouer
@@ -1345,6 +1397,11 @@ impl App {
     pub async fn speak(&self, text: &str) {
         let settings = self.settings();
         if !settings.voice.enabled || !settings.tts.enabled {
+            if let Ok(mut slot) = self.prefetched_tts.lock() {
+                if let Some((_, old)) = slot.take() {
+                    old.abort();
+                }
+            }
             return;
         }
         let cleaned = providers::tts::prepare_for_speech(text);
@@ -1386,7 +1443,22 @@ impl App {
         let started = std::time::Instant::now();
         // Un « STOP » pendant la lecture coupe le reste de la réponse.
         let generation = self.stop_generation();
-        let mut next = parts.first().cloned().map(&synth);
+        // Si la 1re phrase a déjà été lancée en streaming pendant que le LLM
+        // générait la suite, on réutilise sa tâche au lieu de repartir de zéro.
+        let prefetched = self.prefetched_tts.lock().ok().and_then(|mut s| s.take());
+        let mut next = match (parts.first(), prefetched) {
+            (Some(first), Some((pre_text, handle))) if first == &pre_text => Some(handle),
+            (Some(first), Some((_, old))) => {
+                old.abort();
+                Some(synth(first.clone()))
+            }
+            (Some(first), None) => Some(synth(first.clone())),
+            (None, Some((_, old))) => {
+                old.abort();
+                None
+            }
+            (None, None) => None,
+        };
         for index in 0..parts.len() {
             if self.stop_generation() != generation {
                 log::info!("[tts] lecture arrêtée (arrêt d'urgence)");

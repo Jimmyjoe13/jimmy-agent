@@ -445,6 +445,47 @@ pub fn split_for_speech(text: &str, max_chars: usize) -> Vec<String> {
     parts
 }
 
+/// Première phrase complète déjà arrivée dans le flux (`raw` = texte accumulé
+/// par le streaming du modèle). Dès qu'une fin de phrase (`. `, `!`, `?`, `…`,
+/// ou un retour à la ligne après du texte) est suivie d'au moins un caractère,
+/// la première phrase est figée : on peut la nettoyer et lancer son appel TTS
+/// pendant que le modèle continue de générer la suite.
+///
+/// Renvoie `None` tant que la première phrase n'est pas terminée, si un bloc
+/// de code ou une balise d'outil est ouvert, ou si la phrase nettoyée est trop
+/// courte (`< 6` caractères).
+pub fn extract_first_stream_sentence(raw: &str) -> Option<String> {
+    if raw.contains("```") || raw.contains("<tool_call>") {
+        return None;
+    }
+    let chars: Vec<char> = raw.chars().collect();
+    // Il faut au moins un caractère *après* la ponctuation (ou un `\n`) pour
+    // être certain que la phrase est terminée (`todo.` en cours de frappe
+    // deviendrait `todo.md` au fragment suivant).
+    let mut split_char_idx = None;
+    for i in 0..chars.len() {
+        let ch = chars[i];
+        let boundary = match ch {
+            '!' | '?' | '…' => i + 1 < chars.len(),
+            '.' => i + 1 < chars.len() && chars[i + 1].is_whitespace(),
+            '\n' => i > 0,
+            _ => false,
+        };
+        if boundary {
+            split_char_idx = Some(i + 1);
+            break;
+        }
+    }
+    let end_idx = split_char_idx?;
+    let first_raw: String = chars[..end_idx].iter().collect();
+    let cleaned = prepare_for_speech(&first_raw);
+    if cleaned.chars().count() < 6 {
+        return None;
+    }
+    // Même découpage que `speak` : le premier morceau de `split_for_speech`.
+    split_for_speech(&cleaned, 220).into_iter().next().filter(|s| s.chars().count() >= 6)
+}
+
 /// Retire ce qui ne se dit jamais à voix haute mais que le seul Markdown
 /// laisse passer : payloads JSON/XML bruts, code inline technique, chemins
 /// de fichiers, tableaux ASCII, stacktraces et balises d'outil résiduelles.
@@ -881,6 +922,26 @@ Voir [la doc](https://exemple.fr) ou https://x.fr/a";
     #[test]
     fn retours_a_la_ligne_deviennent_des_espaces() {
         assert_eq!(prepare_for_speech("Bonjour.\n\nÇa va ?"), "Bonjour. Ça va ?");
+    }
+
+    #[test]
+    fn extraction_premiere_phrase_en_streaming() {
+        // Tant que le point n'est pas suivi d'un espace, ce peut être un nom
+        // de fichier en cours (« todo. » → « todo.md »).
+        assert_eq!(extract_first_stream_sentence("Le fichier todo."), None);
+        assert_eq!(extract_first_stream_sentence("Le fichier todo.md est"), None);
+        assert_eq!(
+            extract_first_stream_sentence("Le fichier todo.md est prêt. La suite"),
+            Some("Le fichier todo.md est prêt.".to_string())
+        );
+        // Point d'interrogation ou d'exclamation suivi du début de la suite.
+        assert_eq!(
+            extract_first_stream_sentence("Salut ! Je vais très bien, et toi"),
+            Some("Salut !".to_string())
+        );
+        // Jamais sur un bloc de code ou une balise d'outil.
+        assert_eq!(extract_first_stream_sentence("Voici : ```rust\nfn main()"), None);
+        assert_eq!(extract_first_stream_sentence("J'écris. <tool_call>"), None);
     }
 
     #[test]
