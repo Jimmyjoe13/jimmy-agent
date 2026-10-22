@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy 0.2.2: a new interface, English support and tidier conversations</title>
+<meta name="description" content="Jimy 0.2.2, the desktop AI agent for Windows: a “Visor” interface in the logo's colors, first screens in English, titled and searchable conversations, faster answers.">
+<link rel="canonical" href="https://jimy-agent.me/en/news/jimy-0-2-2.html">
+<link rel="alternate" hreflang="fr" href="https://jimy-agent.me/nouveautes/jimy-0-2-2.html">
+<link rel="alternate" hreflang="en" href="https://jimy-agent.me/en/news/jimy-0-2-2.html">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM";</script>
+<link rel="stylesheet" href="/assets/site.css">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://jimy-agent.me/en/news/jimy-0-2-2.html">
+<meta property="og:title" content="Jimy 0.2.2: a new interface, English support and tidier conversations">
+<meta property="og:description" content="A “Visor” interface, first screens in English, titled and searchable conversations, faster answers.">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Jimy 0.2.2: a new interface, English support and tidier conversations",
+  "description": "What's new in Jimy 0.2.2, the open source desktop AI agent for Windows.",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "inLanguage": "en",
+  "datePublished": "2026-10-22T09:00:00+02:00",
+  "dateModified": "2026-10-22T09:00:00+02:00",
+  "author": { "@type": "Person", "name": "Jimmyjoe13", "url": "https://github.com/Jimmyjoe13" },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Jimy Agent",
+    "url": "https://jimy-agent.me",
+    "logo": { "@type": "ImageObject", "url": "https://jimy-agent.me/assets/logo/icon-256.png" }
+  },
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://jimy-agent.me/en/news/jimy-0-2-2.html" }
+}
+</script>
+
+<style>
+.doc .wrap { max-width: 880px; }
+.breadcrumb { font-size: 13px; color: var(--ink-mute); margin-bottom: 24px; font-family: var(--mono); }
+.breadcrumb a { color: var(--ink-dim); text-decoration: none; }
+.breadcrumb a:hover { color: var(--coral); }
+.badge-tech { display: inline-block; background: rgba(255, 106, 77, 0.12); color: var(--coral); border: 1px solid rgba(255, 106, 77, 0.3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 99px; margin-bottom: 14px; }
+.meta-article { color: var(--ink-mute); font-size: 14px; margin-bottom: 32px; font-family: var(--mono); }
+.tldr { background: var(--night-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; margin: 30px 0 40px; }
+.tldr h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); margin: 0 0 14px; }
+.tldr ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.tldr li { color: var(--ink); line-height: 1.55; }
+.section-block { margin: 44px 0; }
+.section-block h2 { font-size: 26px; color: var(--ink); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.section-block p, .section-block li { font-size: 16px; line-height: 1.7; color: var(--ink-dim); }
+.section-block ul { padding-left: 22px; margin: 16px 0; }
+.section-block li { margin-bottom: 8px; }
+.callout { background: rgba(255, 106, 77, 0.06); border-left: 3px solid var(--coral); padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 24px 0; }
+.callout p { margin: 0; font-size: 15px; color: var(--ink-dim); }
+.callout strong { color: var(--ink); }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.swatch { display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 99px; background: var(--night-2); border: 1px solid var(--line); font-size: 14px; color: var(--ink-dim); }
+.swatch i { width: 26px; height: 26px; border-radius: 99px; display: block; }
+.cta-box { background: linear-gradient(135deg, rgba(255, 106, 77, 0.1) 0%, rgba(20, 24, 40, 0.95) 100%); border: 1px solid rgba(255, 106, 77, 0.35); border-radius: var(--radius); padding: 36px 32px; text-align: center; margin: 50px 0 30px; }
+.cta-box h3 { font-size: 24px; margin-bottom: 12px; color: var(--ink); }
+.cta-box p { font-size: 16px; color: var(--ink-dim); max-width: 600px; margin: 0 auto 24px; }
+</style>
+</head>
+<body class="doc">
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/en/" aria-label="Jimy, Home"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></a>
+    <nav aria-label="Main Navigation">
+      <a href="/en/#how-it-works">How It Works</a>
+      <a href="/en/#features">Features</a>
+      <a href="/en/news/jimy-0-2-2.html" class="active">What's new</a>
+      <a class="btn btn-main btn-sm" href="/en/#download">Download</a>
+      <a href="/nouveautes/jimy-0-2-2.html" class="lang-switch" title="Lire en français" style="font-family:var(--mono);font-size:12px;color:var(--ink-mute);text-decoration:none;border:1px solid var(--line-2);padding:4px 8px;border-radius:6px;margin-left:6px">FR</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="/en/">Home</a> &gt; <span>What's new</span> &gt; <span>Jimy 0.2.2</span>
+    </nav>
+
+    <span class="badge-tech">New release · Exclusive</span>
+    <h1>Jimy 0.2.2: a new interface, English support and conversations that finally stay tidy</h1>
+    <p class="meta-article">Published October 22, 2026 · By Jimmyjoe13 · 5 min read · <a href="/nouveautes/jimy-0-2-2.html">Lire en français</a></p>
+
+    <p class="lead">
+      Jimy is an open source desktop AI agent for Windows that you drive by voice or by text. For 0.2.2, we started by looking at how it is really used: weeks of logs, hundreds of conversations. The verdict was clear: Jimy did his job well, but finding your way around was hard. This release tidies the house.
+    </p>
+
+    <div class="tldr">
+      <h2>In short</h2>
+      <ul>
+        <li><strong>A new “Visor” interface</strong> in the logo's colors, with Jimy's live state at the top of every screen.</li>
+        <li><strong>Jimy speaks English</strong>: pick the language in Settings; the first screens are translated, the rest is coming.</li>
+        <li><strong>Tidier conversations</strong>: automatic titles, search across your whole history, pin, rename, archive.</li>
+        <li><strong>More responsive</strong>: simple questions take a light path, and the voice starts sooner.</li>
+        <li><strong>A more reliable memory</strong> that knows which memories actually help.</li>
+      </ul>
+    </div>
+
+    <section class="section-block" id="visor">
+      <h2>An interface in Jimy's colors: the “Visor”</h2>
+      <p>The old interface was clean, but it looked like a developer tool. The new one takes the logo's colors, with one simple rule you will find everywhere:</p>
+      <div class="swatches" aria-hidden="true">
+        <span class="swatch"><i style="background: linear-gradient(90deg, #8b5cf6, #5b5bf0, #22d3ee)"></i>The gradient is Jimy</span>
+        <span class="swatch"><i style="background: #ff6a45"></i>Coral is you</span>
+        <span class="swatch"><i style="background: #0e111b; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15)"></i>Night blue keeps it calm</span>
+      </div>
+      <ul>
+        <li><strong>The “Visor” bar</strong> at the top of every screen shows what Jimy is doing right now: idle, listening, thinking, speaking. A light line moves while he works.</li>
+        <li><strong>Two switches always at hand</strong>: “Jimy speaks” (mute his voice, he then answers in text only) and “Mic” (turn listening off).</li>
+        <li><strong>The active brain</strong>, the AI model in use, is always visible, and one click takes you to its setting.</li>
+        <li><strong>Clear tab names</strong>: Chat, Voice, Memory, Tools, Appearance, Archives, Settings.</li>
+      </ul>
+    </section>
+
+    <section class="section-block" id="english">
+      <h2>Jimy speaks English</h2>
+      <p>This was the most important step to open Jimy to everyone. In <strong>Settings › Language</strong>, choose Français, English, or Automatic, which follows your Windows language.</p>
+      <div class="callout">
+        <p><strong>To be honest:</strong> in 0.2.2, navigation, the Visor bar, Jimy's states and the Archives are translated. The other screens, then Jimy's spoken answers, come in the next releases. Translation is checked automatically: a release cannot ship if a single English text is missing.</p>
+      </div>
+    </section>
+
+    <section class="section-block" id="conversations">
+      <h2>Conversations that finally stay tidy</h2>
+      <p>In real use, almost one conversation out of two was simply called “Voice session” or “New session”. Impossible to find anything. 0.2.2 fixes that:</p>
+      <ul>
+        <li><strong>Automatic titles</strong>: every conversation gets a real title, then Jimy suggests a shorter one once the topic is clear. Old conversations were renamed during the update.</li>
+        <li><strong>Search across your whole history</strong>: titles, projects, summaries and message content, no longer just the last 50 conversations.</li>
+        <li><strong>Pin, rename, archive</strong> from the Archives. A title you choose never changes by itself.</li>
+        <li><strong>Every answer stays in its conversation</strong>: if you switch conversations while Jimy is answering, his reply no longer shows up in the wrong place, and you are told it is ready.</li>
+        <li><strong>Projects keep their own tasks</strong>: when you work on one project, Jimy no longer brings up another project's open tasks, and tasks idle for two weeks go to sleep.</li>
+      </ul>
+    </section>
+
+    <section class="section-block" id="speed">
+      <h2>More responsive, especially by voice</h2>
+      <ul>
+        <li><strong>A light path for simple questions</strong>: a question that needs no tool (no file, no web, no action) goes out with a much shorter context. The answer comes faster and costs less.</li>
+        <li><strong>The voice starts sooner</strong>: Jimy prepares the audio of his first sentence as soon as it is written, while he writes the rest, instead of waiting for the full answer.</li>
+      </ul>
+    </section>
+
+    <section class="section-block" id="memory">
+      <h2>A more reliable memory</h2>
+      <p>Jimy now knows which memories he actually uses to answer you: the groundwork for keeping what helps and letting the rest go. We also removed stray memories left behind by our automated tests.</p>
+    </section>
+
+    <section class="section-block" id="update">
+      <h2>How to update</h2>
+      <ul>
+        <li><strong>You already have Jimy</strong>: download the new installer and run it over the old one. Your conversations, settings and memories are kept (they live in <code class="mono">%APPDATA%\Jimmy</code>).</li>
+        <li><strong>First install</strong>: download the installer below. Jimy is free and open source, and your data stays on your PC.</li>
+      </ul>
+    </section>
+
+    <section class="section-block" id="next">
+      <h2>What's next?</h2>
+      <p>0.2.2 lays the foundations. Here is what is coming:</p>
+      <ul>
+        <li>a <strong>conversation list</strong> next to the Chat, showing what is running, what awaits your approval and unread messages;</li>
+        <li><strong>picking your AI model in three clicks</strong> (provider, key, model), with clear labels: free, fast, offline;</li>
+        <li><strong>the voice you want</strong>: Windows voices (free and offline), any OpenAI-compatible service or ElevenLabs, on top of today's voices;</li>
+        <li>a <strong>home screen</strong> to pick up where you left off, and <strong>real projects</strong>;</li>
+        <li><strong>full English translation</strong>, all the way to Jimy's voice.</li>
+      </ul>
+    </section>
+
+    <div class="cta-box">
+      <h3>Try Jimy 0.2.2</h3>
+      <p>An AI agent that lives on your Windows desktop, that you drive by voice, and that keeps your data at home.</p>
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="20" height="20"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Download Jimy for Windows (free)
+      </a>
+      <p style="margin-top:14px;font-size:13px;color:var(--ink-mute)">
+        Free, open source installer · <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases/tag/v0.2.2" style="color:var(--coral)">Release notes on GitHub</a>
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></span>
+    <span>Jimy, with a single M · jimy-agent.me</span>
+    <nav aria-label="Footer Links">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Privacy</a>
+      <a href="/code-signing.html">Code Signing Policy</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Copilot Comparison</a>
+      <a href="/guides/serveurs-mcp-windows-local.html">MCP Guide</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js" defer></script>
+</body>
+</html>
