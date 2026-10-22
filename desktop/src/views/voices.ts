@@ -8,9 +8,7 @@
  */
 import { api, type VoiceInfo } from "../api";
 import { attempt, guard, h, mount, toast } from "../ui";
-
-/** Phrase lue pour un essai : courte, avec le nom de Jimy. */
-const PREVIEW_TEXT = "Bonjour, je suis Jimy. Voici ma voix, pour lire tes réponses.";
+import { t } from "../i18n";
 
 export interface VoicesPanelHooks {
   /**
@@ -34,19 +32,19 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
   const searchInput = h("input", {
     class: "field",
     type: "search",
-    placeholder: "Chercher une voix française (narrateur, calme, grave…)",
-    "aria-label": "Chercher une voix dans le catalogue Fish Audio",
+    placeholder: t("voices.searchPlaceholder"),
+    "aria-label": t("voices.searchLabel"),
     onkeydown: (event: Event) => {
       if ((event as KeyboardEvent).key === "Enter") void search();
     },
   }) as HTMLInputElement;
-  const searchButton = h("button", { class: "primary", onclick: () => void search() }, "Chercher");
+  const searchButton = h("button", { class: "primary", onclick: () => void search() }, t("voices.search"));
 
   const all = () => [...presets, ...library];
   const isPreset = (id: string) => presets.some((v) => v.id === id);
 
   async function load() {
-    const data = await guard(() => api.ttsVoices(), "voix");
+    const data = await guard(() => api.ttsVoices(), t("guard.voice"));
     if (!data) return;
     current = data.current;
     presets = data.presets;
@@ -59,36 +57,36 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
     if (playing) return;
     playing = voice.id;
     render();
-    await attempt(() => api.ttsPreview(PREVIEW_TEXT, voice.id), "essai de voix");
+    await attempt(() => api.ttsPreview(t("voices.previewText"), voice.id), t("guard.voicePreview"));
     playing = null;
     render();
   }
 
   async function choose(voice: VoiceInfo) {
-    if (!(await attempt(() => api.ttsSetVoice(voice), "choix de la voix"))) return;
+    if (!(await attempt(() => api.ttsSetVoice(voice), t("guard.voiceChoice")))) return;
     current = voice.id;
     if (!isPreset(voice.id) && !library.some((v) => v.id === voice.id)) library = [...library, voice];
     hooks.onApplied(current, library);
     render();
-    toast(`Voix de Jimy : ${voice.label}`);
+    toast(t("voices.chosen", { label: voice.label }));
   }
 
   async function remove(voice: VoiceInfo) {
-    const next = await guard(() => api.ttsRemoveVoice(voice.id), "retrait de la voix");
+    const next = await guard(() => api.ttsRemoveVoice(voice.id), t("guard.voiceRemove"));
     if (next === undefined) return;
     library = library.filter((v) => v.id !== voice.id);
     current = next;
     hooks.onApplied(current, library);
     render();
-    toast(`« ${voice.label} » retirée de la bibliothèque`);
+    toast(t("voices.removed", { label: voice.label }));
   }
 
   async function search() {
     const query = searchInput.value.trim();
     if (!query) return;
     searchButton.setAttribute("disabled", "");
-    mount(resultsBox, h("p", { class: "note" }, "Recherche dans le catalogue Fish Audio…"));
-    const found = await guard(() => api.ttsSearchVoices(query), "catalogue Fish Audio");
+    mount(resultsBox, h("p", { class: "note" }, t("voices.searching")));
+    const found = await guard(() => api.ttsSearchVoices(query), t("guard.fishCatalog"));
     searchButton.removeAttribute("disabled");
     results = found ?? [];
     renderResults();
@@ -107,9 +105,9 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
           "strong",
           {},
           voice.label,
-          active ? h("span", { class: "badge main", title: "Voix utilisée par Jimy" }, "actuelle") : null,
-          isPreset(voice.id) ? h("span", { class: "badge", title: "Voix proposée par défaut" }, "prédéfinie") : null,
-          voice.uses ? h("span", { class: "row-meta", title: "Utilisations sur Fish Audio" }, `${formatUses(voice.uses)} lectures`) : null,
+          active ? h("span", { class: "badge main", title: t("voices.currentHint") }, t("voices.currentBadge")) : null,
+          isPreset(voice.id) ? h("span", { class: "badge", title: t("voices.presetHint") }, t("voices.presetBadge")) : null,
+          voice.uses ? h("span", { class: "row-meta", title: t("voices.usesHint") }, t("voices.uses", { count: formatUses(voice.uses) })) : null,
         ),
         voice.description ? h("p", { class: "model-desc", title: voice.description }, voice.description) : null,
       ),
@@ -119,11 +117,11 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
         h(
           "button",
           { class: "ghost small", disabled: playing !== null, onclick: () => void preview(voice) },
-          busy ? "Lecture…" : "Écouter",
+          busy ? t("voices.playing") : t("voices.listen"),
         ),
-        active ? null : h("button", { class: "small", onclick: () => void choose(voice) }, "Choisir"),
+        active ? null : h("button", { class: "small", onclick: () => void choose(voice) }, t("voices.choose")),
         inLibrary && !isPreset(voice.id)
-          ? h("button", { class: "ghost small", title: "Retirer de la bibliothèque", onclick: () => void remove(voice) }, "Retirer")
+          ? h("button", { class: "ghost small", title: t("voices.removeHint"), onclick: () => void remove(voice) }, t("voices.remove"))
           : null,
       ),
     );
@@ -136,8 +134,8 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
       h(
         "div",
         {},
-        h("span", { class: "model-role" }, "Voix"),
-        h("strong", {}, voice?.label ?? "voix personnalisée"),
+        h("span", { class: "model-role" }, t("voices.role")),
+        h("strong", {}, voice?.label ?? t("voices.custom")),
         voice?.description ? h("span", { class: "note" }, ` · ${voice.description}`) : h("code", {}, current),
       ),
     );
@@ -147,7 +145,7 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
 
   function renderResults() {
     if (results.length === 0) {
-      mount(resultsBox, searchInput.value.trim() ? h("p", { class: "note" }, "Aucune voix trouvée.") : null);
+      mount(resultsBox, searchInput.value.trim() ? h("p", { class: "note" }, t("voices.noneFound")) : null);
       return;
     }
     mount(resultsBox, ...results.map((v) => row(v, all().some((x) => x.id === v.id))));
@@ -157,9 +155,9 @@ export function voicesPanel(hooks: VoicesPanelHooks): HTMLElement {
     "div",
     { class: "voices-panel" },
     currentBox,
-    h("p", { class: "row-meta" }, "Ta bibliothèque"),
+    h("p", { class: "row-meta" }, t("voices.library")),
     list,
-    h("p", { class: "row-meta" }, "Ajouter une voix depuis le catalogue Fish Audio"),
+    h("p", { class: "row-meta" }, t("voices.addFromCatalog")),
     h("div", { class: "voice-search" }, searchInput, searchButton),
     resultsBox,
   );

@@ -13,6 +13,7 @@
 import { api, type ProviderConfig, type ProviderStatus } from "../api";
 import { attempt, guard, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
+import { t, type Key } from "../i18n";
 
 /** Carte locale : même style que `card` de settings.ts, sans import circulaire. */
 function card(title: string, ...children: (Node | string | null | false)[]): HTMLElement {
@@ -25,30 +26,30 @@ export interface ProvidersHooks {
   onChanged: () => void;
 }
 
-const PROTOCOLS: [string, string][] = [
-  ["auto", "auto (catalogue, puis essais)"],
-  ["chat", "chat — /chat/completions"],
-  ["responses", "responses — /responses"],
-  ["messages", "messages — /messages (Claude)"],
-  ["google", "google — Gemini natif (:generateContent)"],
+const PROTOCOLS: [string, Key][] = [
+  ["auto", "providers.proto.auto"],
+  ["chat", "providers.proto.chat"],
+  ["responses", "providers.proto.responses"],
+  ["messages", "providers.proto.messages"],
+  ["google", "providers.proto.google"],
 ];
 
 export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElement {
   const container = h("div", { class: "providers-panel" });
   let configs: ProviderConfig[] = [];
 
-  const addLabel = h("input", { class: "field", type: "text", placeholder: "Nom — ex. LM Studio" }) as HTMLInputElement;
+  const addLabel = h("input", { class: "field", type: "text", placeholder: t("providers.addLabelPlaceholder") }) as HTMLInputElement;
   const addUrl = h("input", { class: "field", type: "text", placeholder: "http://127.0.0.1:1234/v1" }) as HTMLInputElement;
   const addProtocol = h("select", { class: "field" }) as HTMLSelectElement;
-  const addKey = h("input", { class: "field provider-key", type: "password", placeholder: "clé (facultative)" }) as HTMLInputElement;
-  for (const [value, label] of PROTOCOLS) addProtocol.append(h("option", { value }, label));
+  const addKey = h("input", { class: "field provider-key", type: "password", placeholder: t("providers.addKeyPlaceholder") }) as HTMLInputElement;
+  for (const [value, labelKey] of PROTOCOLS) addProtocol.append(h("option", { value }, t(labelKey)));
 
   function statusFor(id: string): ProviderStatus | undefined {
     return ctx.status.llm.providers?.find((p) => p.id === id);
   }
 
   async function reload() {
-    const loaded = await guard(() => api.getSettings(), "fournisseurs");
+    const loaded = await guard(() => api.getSettings(), t("guard.providers"));
     if (!loaded) return;
     configs = loaded.llm.providers ?? [];
     await ctx.refreshStatus();
@@ -59,39 +60,39 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
   }
 
   function keyState(status: ProviderStatus | undefined): HTMLElement {
-    if (!status) return h("span", { class: "badge" }, "état inconnu");
+    if (!status) return h("span", { class: "badge" }, t("providers.state.unknown"));
     if (status.key_from === "abonnement") {
-      return h("span", { class: "badge ok", title: "Jeton lu dans la session Claude Code (~/.claude/.credentials.json), rafraîchi par Jimy" }, `abonnement${status.subscription ? ` ${status.subscription}` : ""}`);
+      return h("span", { class: "badge ok", title: t("providers.state.subHint") }, t("providers.state.sub", { sub: status.subscription ? ` ${status.subscription}` : "" }));
     }
     if (status.key_from === "interface") {
-      return h("span", { class: "badge ok", title: "Clé saisie dans l'interface, stockée dans config.json (jamais journalisée)" }, `clé ••••${status.key_hint ?? ""}`);
+      return h("span", { class: "badge ok", title: t("providers.state.uiHint") }, t("providers.state.ui", { hint: status.key_hint ?? "" }));
     }
     if (status.key_from === "environnement") {
-      return h("span", { class: "badge ok", title: "Clé lue dans le fichier .env : repli seulement, une saisie ici gagne dessus" }, "clé .env");
+      return h("span", { class: "badge ok", title: t("providers.state.envHint") }, t("providers.state.env"));
     }
     if (status.auth === "claude-plan") {
-      return h("span", { class: "badge warn", title: "Ouvre Claude Code (claude /login) pour rétablir la session" }, "session Claude Code introuvable");
+      return h("span", { class: "badge warn", title: t("providers.state.noSessionHint") }, t("providers.state.noSession"));
     }
-    return h("span", { class: "badge warn", title: "Aucune clé : saisis-la, ou une variable d'environnement pour les intégrés" }, "aucune clé");
+    return h("span", { class: "badge warn", title: t("providers.state.noKeyHint") }, t("providers.state.noKey"));
   }
 
   function row(config: ProviderConfig): HTMLElement {
     const status = statusFor(config.id);
     const urlInput = h("input", { class: "field", type: "text", value: config.base_url }) as HTMLInputElement;
     const protocolSelect = h("select", { class: "field provider-protocol" }) as HTMLSelectElement;
-    for (const [value, label] of PROTOCOLS) protocolSelect.append(h("option", { value }, label));
+    for (const [value, labelKey] of PROTOCOLS) protocolSelect.append(h("option", { value }, t(labelKey)));
     protocolSelect.value = config.protocol ?? "auto";
     const enabledBox = h("input", { type: "checkbox" }) as HTMLInputElement;
     enabledBox.checked = config.enabled;
     // Seul Anthropic connaît l'abonnement Claude (session Claude Code).
     const authSelect =
       config.id === "anthropic"
-        ? (h("select", { class: "field provider-auth", title: "Méthode d'accès" }) as HTMLSelectElement)
+        ? (h("select", { class: "field provider-auth", title: t("providers.authHint") }) as HTMLSelectElement)
         : null;
     if (authSelect) {
       authSelect.append(
-        h("option", { value: "api-key" }, "Clé API"),
-        h("option", { value: "claude-plan" }, "Abonnement Claude (session Claude Code)"),
+        h("option", { value: "api-key" }, t("providers.auth.apiKey")),
+        h("option", { value: "claude-plan" }, t("providers.auth.claudePlan")),
       );
       authSelect.value = config.auth || "api-key";
     }
@@ -101,16 +102,16 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
       type: "password",
       placeholder:
         status?.key_from === "abonnement"
-          ? "abonnement actif : aucun secret à saisir"
+          ? t("providers.keyPlaceholder.sub")
           : status?.key_from === "interface"
-            ? `••••${status.key_hint ?? ""} (inchangée si vide)`
-            : "sk-… (la clé ne part jamais du Rust)",
+            ? t("providers.keyPlaceholder.ui", { hint: status.key_hint ?? "" })
+            : t("providers.keyPlaceholder.empty"),
     }) as HTMLInputElement;
 
     async function save() {
       // Abonnement Claude : aucun secret à écrire, la clé est ignorée.
       const key = keyInput.value.trim();
-      if (!planMode() && key && !(await attempt(() => api.llmSetProviderKey(config.id, key), "clé"))) return;
+      if (!planMode() && key && !(await attempt(() => api.llmSetProviderKey(config.id, key), t("guard.key")))) return;
       if (
         !(await attempt(
           () =>
@@ -122,29 +123,29 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
               auth: authSelect?.value ?? null,
               enabled: enabledBox.checked,
             }),
-          "fournisseur",
+          t("guard.provider"),
         ))
       )
         return;
       keyInput.value = "";
-      toast(planMode() ? `« ${config.label} » — la session Claude Code est utilisée` : `« ${config.label} » enregistré`);
+      toast(planMode() ? t("providers.savedPlan", { label: config.label }) : t("providers.saved", { label: config.label }));
       hooks.onChanged();
       await reload();
     }
 
     const buttons: HTMLElement[] = [
-      h("button", { class: "primary small", onclick: () => void save() }, "Enregistrer"),
+      h("button", { class: "primary small", onclick: () => void save() }, t("providers.save")),
       h(
         "button",
         {
           class: "ghost small",
-          title: "Liste les modèles accessibles : prouve que la clé et l'URL sont bonnes",
+          title: t("providers.testHint"),
           onclick: async () => {
-            const count = await guard(() => api.llmCheckProvider(config.id), "connexion");
-            if (count !== undefined) toast(`${count} modèle(s) accessible(s) chez « ${config.label} »`);
+            const count = await guard(() => api.llmCheckProvider(config.id), t("guard.connection"));
+            if (count !== undefined) toast(t("providers.testCount", { count, label: config.label }));
           },
         },
-        "Tester",
+        t("providers.test"),
       ),
     ];
     if (status?.key_from === "interface") {
@@ -153,15 +154,15 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
           "button",
           {
             class: "ghost small",
-            title: "Retirer la clé saisie (le repli .env reste disponible)",
+            title: t("providers.removeKeyHint"),
             onclick: async () => {
-              if (!(await attempt(() => api.llmSetProviderKey(config.id, ""), "retrait de clé"))) return;
-              toast("Clé retirée");
+              if (!(await attempt(() => api.llmSetProviderKey(config.id, ""), t("guard.removeKey")))) return;
+              toast(t("providers.keyRemoved"));
               hooks.onChanged();
               await reload();
             },
           },
-          "Retirer la clé",
+          t("providers.removeKey"),
         ),
       );
     }
@@ -172,22 +173,22 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
           {
             class: "ghost small",
             onclick: async () => {
-              if (!(await attempt(() => api.llmRemoveProvider(config.id), "suppression"))) return;
-              toast(`« ${config.label} » retiré`);
+              if (!(await attempt(() => api.llmRemoveProvider(config.id), t("guard.delete")))) return;
+              toast(t("providers.removed", { label: config.label }));
               hooks.onChanged();
               await reload();
             },
           },
-          "Supprimer",
+          t("providers.delete"),
         ),
       );
     }
 
     const badges: HTMLElement[] = [];
-    if (ctx.status.llm.provider === config.id) badges.push(h("span", { class: "badge main" }, "principal"));
+    if (ctx.status.llm.provider === config.id) badges.push(h("span", { class: "badge main" }, t("providers.badge.main")));
     const voiceProvider = ctx.status.llm.voice_provider || ctx.status.llm.provider;
-    if (voiceProvider === config.id && ctx.status.llm.voice_model) badges.push(h("span", { class: "badge voice" }, "vocal"));
-    if (config.builtin) badges.push(h("span", { class: "badge", title: "Fournisseur proposé d'office : désactivable, pas supprimable" }, "intégré"));
+    if (voiceProvider === config.id && ctx.status.llm.voice_model) badges.push(h("span", { class: "badge voice" }, t("providers.badge.voice")));
+    if (config.builtin) badges.push(h("span", { class: "badge", title: t("providers.badge.builtinHint") }, t("providers.badge.builtin")));
 
     return h(
       "div",
@@ -199,7 +200,7 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
         h("code", {}, config.id),
         keyState(status),
       ),
-      h("div", { class: "provider-fields" }, urlInput, protocolSelect, ...(authSelect ? [authSelect] : []), h("label", { class: "toggle" }, enabledBox, h("span", {}, "activé")), keyInput),
+      h("div", { class: "provider-fields" }, urlInput, protocolSelect, ...(authSelect ? [authSelect] : []), h("label", { class: "toggle" }, enabledBox, h("span", {}, t("providers.enabled"))), keyInput),
       h("div", { class: "provider-actions" }, ...buttons),
     );
   }
@@ -208,18 +209,18 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
     const label = addLabel.value.trim();
     const baseUrl = addUrl.value.trim();
     if (!label || !baseUrl) {
-      toast("Nom et URL de base sont requis.", "error");
+      toast(t("providers.addRequired"), "error");
       return;
     }
     const id = await guard(
       () => api.llmAddProvider({ label, baseUrl, protocol: addProtocol.value === "auto" ? null : addProtocol.value, apiKey: addKey.value.trim() || undefined }),
-      "ajout de fournisseur",
+      t("guard.addProvider"),
     );
     if (!id) return;
     addLabel.value = "";
     addUrl.value = "";
     addKey.value = "";
-    toast(`« ${label} » ajouté`);
+    toast(t("providers.added", { label }));
     hooks.onChanged();
     await reload();
   }
@@ -228,24 +229,24 @@ export function providersPanel(ctx: AppContext, hooks: ProvidersHooks): HTMLElem
     mount(
       container,
       card(
-        "Fournisseurs",
+        t("providers.title"),
         h(
           "p",
           { class: "note" },
-          "Clé et URL par fournisseur. Le modèle principal se choisit dans la bibliothèque, sous cette carte ; le modèle vocal dans l'onglet Voix. « Tester » liste les modèles accessibles (une requête, comme les tiennes).",
+          t("providers.note1"),
         ),
         h(
           "p",
           { class: "note" },
-          "Les clés sont stockées dans data/config.json (jamais commité, jamais journalisé) ; une clé vide laisse la ligne inchangée. Pour OpenCode Go et OpenRouter, la variable d'environnement sert de repli si rien n'est saisi ici.",
+          t("providers.note2"),
         ),
         ...configs.map(row),
         h(
           "div",
           { class: "provider-row provider-add" },
-          h("strong", {}, "Ajouter un fournisseur"),
+          h("strong", {}, t("providers.addTitle")),
           h("div", { class: "provider-fields" }, addLabel, addUrl, addProtocol, addKey),
-          h("div", { class: "provider-actions" }, h("button", { class: "ghost small", onclick: () => void add() }, "Ajouter")),
+          h("div", { class: "provider-actions" }, h("button", { class: "ghost small", onclick: () => void add() }, t("providers.addButton"))),
         ),
       ),
     );

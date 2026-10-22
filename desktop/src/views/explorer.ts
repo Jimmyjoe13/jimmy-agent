@@ -7,6 +7,7 @@
  * (un exécutable est seulement montré dans l'Explorateur, jamais lancé).
  */
 import { api, type FsEntry } from "../api";
+import { locale, t } from "../i18n";
 import { attempt, guard, h, mount, toast } from "../ui";
 
 export interface ExplorerPanel {
@@ -17,33 +18,33 @@ export interface ExplorerPanel {
 
 /** Taille lisible (o, Ko, Mo). */
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} Mo`;
+  if (bytes < 1024) return t("explorer.bytes", { n: bytes });
+  if (bytes < 1024 * 1024) return t("explorer.kb", { n: Math.round(bytes / 1024) });
+  return t("explorer.mb", { n: (bytes / (1024 * 1024)).toLocaleString(locale(), { maximumFractionDigits: 1 }) });
 }
 
 export function explorerPanel(): ExplorerPanel {
   let root = "";
   let selected: HTMLElement | null = null;
 
-  const title = h("strong", { class: "explorer-title" }, "Fichiers");
-  const tree = h("div", { class: "explorer-tree", role: "tree", "aria-label": "Fichiers du projet" });
+  const title = h("strong", { class: "explorer-title" }, t("explorer.files"));
+  const tree = h("div", { class: "explorer-tree", role: "tree", "aria-label": t("explorer.filesLabel") });
   const preview = h("div", { class: "explorer-preview", hidden: true });
 
   /** Lignes d'un dossier, insérées dans `container`, au niveau `depth`. */
   async function fill(container: HTMLElement, path: string, depth: number) {
-    const listing = await guard(() => api.fsList(path), "explorateur");
+    const listing = await guard(() => api.fsList(path), t("guard.explorer"));
     if (!listing) {
       mount(container);
       return;
     }
     mount(container);
     if (listing.entries.length === 0) {
-      container.append(h("div", { class: "tree-empty", style: `padding-left:${8 + depth * 14}px` }, "dossier vide"));
+      container.append(h("div", { class: "tree-empty", style: `padding-left:${8 + depth * 14}px` }, t("explorer.emptyFolder")));
     }
     for (const entry of listing.entries) container.append(row(entry, depth));
     if (listing.truncated) {
-      container.append(h("div", { class: "tree-empty", style: `padding-left:${8 + depth * 14}px` }, "… liste tronquée (500 entrées)"));
+      container.append(h("div", { class: "tree-empty", style: `padding-left:${8 + depth * 14}px` }, t("explorer.truncated")));
     }
   }
 
@@ -77,15 +78,15 @@ export function explorerPanel(): ExplorerPanel {
   }
 
   async function open(path: string) {
-    const how = await guard(() => api.fsOpen(path), "ouverture");
-    if (how === "revealed") toast("Fichier exécutable : montré dans l'Explorateur, pas lancé.");
+    const how = await guard(() => api.fsOpen(path), t("guard.opening"));
+    if (how === "revealed") toast(t("explorer.exeRevealed"));
   }
 
   async function show(entry: FsEntry, line: HTMLElement) {
     selected?.classList.remove("selected");
     selected = line;
     line.classList.add("selected");
-    const data = await guard(() => api.fsPreview(entry.path), "aperçu");
+    const data = await guard(() => api.fsPreview(entry.path), t("guard.preview"));
     if (!data) return;
     preview.hidden = false;
     mount(
@@ -102,32 +103,32 @@ export function explorerPanel(): ExplorerPanel {
         h(
           "button",
           { class: "small", onclick: () => void open(entry.path) },
-          data.executable ? "Afficher dans l'Explorateur" : "Ouvrir",
+          data.executable ? t("explorer.reveal") : t("explorer.open"),
         ),
         data.executable
           ? null
-          : h("button", { class: "ghost small", onclick: () => void attempt(() => api.fsReveal(entry.path), "Explorateur") }, "Dans l'Explorateur"),
-        h("button", { class: "ghost small", title: "Fermer l'aperçu", onclick: () => (preview.hidden = true) }, "×"),
+          : h("button", { class: "ghost small", onclick: () => void attempt(() => api.fsReveal(entry.path), t("explorer.windowsExplorer")) }, t("explorer.inExplorer")),
+        h("button", { class: "ghost small", title: t("explorer.closePreview"), onclick: () => (preview.hidden = true) }, "×"),
       ),
       data.binary
-        ? h("p", { class: "note" }, "Fichier binaire : pas d'aperçu.")
-        : h("pre", { class: "preview-text" }, data.text || "(fichier vide)"),
-      data.truncated ? h("p", { class: "row-meta" }, "Aperçu limité aux 64 premiers Ko.") : null,
+        ? h("p", { class: "note" }, t("explorer.binary"))
+        : h("pre", { class: "preview-text" }, data.text || t("explorer.emptyFile")),
+      data.truncated ? h("p", { class: "row-meta" }, t("explorer.previewLimit")) : null,
     );
   }
 
   const element = h(
     "aside",
-    { class: "explorer", "aria-label": "Explorateur de fichiers" },
+    { class: "explorer", "aria-label": t("explorer.label") },
     h(
       "div",
       { class: "explorer-head" },
       title,
-      h("button", { class: "ghost small", title: "Actualiser", onclick: () => root && void fill(tree, root, 0) }, "↻"),
+      h("button", { class: "ghost small", title: t("explorer.refresh"), onclick: () => root && void fill(tree, root, 0) }, "↻"),
       h(
         "button",
-        { class: "ghost small", title: "Ouvrir le dossier dans l'Explorateur Windows", onclick: () => root && void open(root) },
-        "Explorateur",
+        { class: "ghost small", title: t("explorer.openInWindows"), onclick: () => root && void open(root) },
+        t("explorer.windowsExplorer"),
       ),
     ),
     tree,

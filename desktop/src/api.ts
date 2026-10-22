@@ -184,6 +184,8 @@ export interface Session {
   pinned?: boolean;
   /** Archivée : hors de la liste par défaut. */
   archived?: boolean;
+  /** Réponses de Jimy non lues depuis la dernière ouverture. */
+  unread?: number;
 }
 
 /** Un projet proposé dans le sélecteur du Chat. */
@@ -508,6 +510,7 @@ export const api = {
     invoke<Session[]>("sessions", { query: query ?? null, archived }),
   sessionGet: (sessionId: string) => invoke<Session | null>("session_get", { sessionId }),
   sessionRename: (sessionId: string, title: string) => invoke<void>("session_rename", { sessionId, title }),
+  sessionMarkRead: (sessionId: string) => invoke<void>("session_mark_read", { sessionId }),
   sessionPin: (sessionId: string, pinned: boolean) => invoke<void>("session_pin", { sessionId, pinned }),
   sessionArchive: (sessionId: string, archived: boolean) => invoke<void>("session_archive", { sessionId, archived }),
   sessionMessages: (sessionId: string) =>

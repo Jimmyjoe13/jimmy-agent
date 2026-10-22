@@ -1,9 +1,9 @@
 /** Vue Paramètres : deux sous-onglets — Général (voix, écoute, avatar…) et
  *  LLM (fournisseurs, modèles, réglages du modèle de langage). */
 import { api, type Settings, type StartupMode } from "../api";
-import { QUALITY_LABEL, attempt, guard, h, mount, toast } from "../ui";
+import { attempt, guard, h, mount, qualityLabel, toast } from "../ui";
 import type { AppContext } from "../context";
-import { setLanguage, t } from "../i18n";
+import { setLanguage, t, type Key } from "../i18n";
 import { modelsPanel } from "./models";
 import { providersPanel } from "./providers";
 
@@ -32,12 +32,12 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const memoryModelInput = h("input", {
     class: "field",
     type: "text",
-    placeholder: "Vide = modèle principal",
+    placeholder: t("settings.memoryModelPlaceholder"),
   }) as HTMLInputElement;
   const memoryProviderSelect = h("select", { class: "field" }) as HTMLSelectElement;
 
   async function load() {
-    const loaded = await guard(() => api.getSettings(), "paramètres");
+    const loaded = await guard(() => api.getSettings(), t("guard.settings"));
     if (!loaded) return;
     settings = loaded;
 
@@ -49,7 +49,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
 
     mount(qualitySelect);
     for (const level of ["low", "medium", "high"]) {
-      qualitySelect.append(h("option", { value: level }, QUALITY_LABEL[level]));
+      qualitySelect.append(h("option", { value: level }, qualityLabel(level)));
     }
     qualitySelect.value = settings.avatar.quality;
 
@@ -65,33 +65,36 @@ export function settingsView(ctx: AppContext): HTMLElement {
 
     mount(startupSelect);
     startupSelect.append(
-      h("option", { value: "manual" }, "Lancement manuel"),
-      h("option", { value: "with_windows" }, "Démarrer avec Windows (visible)"),
-      h("option", { value: "with_windows_hidden" }, "Démarrer avec Windows (en arrière-plan)"),
+      h("option", { value: "manual" }, t("settings.startup.manual")),
+      h("option", { value: "with_windows" }, t("settings.startup.visible")),
+      h("option", { value: "with_windows_hidden" }, t("settings.startup.hidden")),
     );
     startupSelect.value = settings.startup;
 
     vaultPathInput.value = settings.memory.vault_path;
     // Vide = automatique : on montre le vault réellement ouvert.
-    const origin: Record<string, string> = { obsidian: "vault d'Obsidian", own: "vault propre de Jimy" };
+    const origin: Record<string, string> = {
+      obsidian: t("settings.vaultOrigin.obsidian"),
+      own: t("settings.vaultOrigin.own"),
+    };
     const detected = ctx.status.vault.path;
     vaultPathInput.placeholder = detected
-      ? `Automatique — ${detected} (${origin[ctx.status.vault.origin] ?? "réglé"})`
-      : "Automatique (vault d'Obsidian, sinon vault propre de Jimy)";
+      ? t("settings.vaultAutoDetected", { path: detected, origin: origin[ctx.status.vault.origin] ?? t("settings.vaultOrigin.configured") })
+      : t("settings.vaultAutoFallback");
     vaultFolderInput.value = settings.memory.vault_folder;
     vaultEnabled.checked = settings.memory.vault_enabled;
     shareWindowTitle.checked = settings.memory.share_window_title;
     memoryModelInput.value = settings.memory.model ?? "";
     // Fournisseur de la mémoire : vide = celui du principal (14 octobre).
     mount(memoryProviderSelect);
-    memoryProviderSelect.append(h("option", { value: "" }, "Celui du modèle principal"));
+    memoryProviderSelect.append(h("option", { value: "" }, t("settings.memoryProviderSame")));
     for (const provider of settings.llm.providers) {
       if (!provider.enabled) continue;
       memoryProviderSelect.append(h("option", { value: provider.id }, provider.label));
     }
     const currentMemoryProvider = settings.llm.memory_provider ?? "";
     if (currentMemoryProvider && ![...memoryProviderSelect.options].some((o) => o.value === currentMemoryProvider)) {
-      memoryProviderSelect.append(h("option", { value: currentMemoryProvider }, `${currentMemoryProvider} (désactivé)`));
+      memoryProviderSelect.append(h("option", { value: currentMemoryProvider }, t("settings.providerDisabled", { id: currentMemoryProvider })));
     }
     memoryProviderSelect.value = currentMemoryProvider;
 
@@ -133,7 +136,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     // fraîche de Rust pour ne rien écraser d'un formulaire resté ouvert
     // pendant ce temps. Les clés masquées sont restaurées côté Rust (une clé
     // vide = inchangée).
-    const fresh = await guard(() => api.getSettings(), "fournisseurs");
+    const fresh = await guard(() => api.getSettings(), t("guard.providers"));
     if (fresh) {
       settings.llm.providers = fresh.llm.providers;
       settings.llm.voice_model = fresh.llm.voice_model;
@@ -151,13 +154,13 @@ export function settingsView(ctx: AppContext): HTMLElement {
     settings.memory.model = memoryModelInput.value.trim();
     settings.llm.memory_provider = memoryProviderSelect.value;
 
-    if (!(await attempt(() => api.saveSettings(settings as Settings), "enregistrement"))) return;
+    if (!(await attempt(() => api.saveSettings(settings as Settings), t("guard.save")))) return;
     await ctx.refreshStatus();
-    toast("Paramètres enregistrés");
+    toast(t("settings.saved"));
   }
 
   async function applyStartup() {
-    if (!(await attempt(() => api.setStartup(startupSelect.value as StartupMode), "démarrage automatique"))) return;
+    if (!(await attempt(() => api.setStartup(startupSelect.value as StartupMode), t("guard.startup")))) return;
     await persist();
   }
 
@@ -167,8 +170,8 @@ export function settingsView(ctx: AppContext): HTMLElement {
   const llmPane = h("div", {});
   let tab: "general" | "llm" = "general";
   const tabButtons = {
-    general: h("button", { class: "subtab", role: "tab", onclick: () => select("general") }, "Général"),
-    llm: h("button", { class: "subtab", role: "tab", onclick: () => select("llm") }, "LLM"),
+    general: h("button", { class: "subtab", role: "tab", onclick: () => select("general") }, t("settings.tab.general")),
+    llm: h("button", { class: "subtab", role: "tab", onclick: () => select("llm") }, t("settings.tab.llm")),
   };
 
   function select(next: "general" | "llm") {
@@ -188,12 +191,12 @@ export function settingsView(ctx: AppContext): HTMLElement {
       h(
         "header",
         { class: "view-header sticky" },
-        h("p", { class: "note" }, "Les changements ne sont appliqués qu'après « Enregistrer »."),
+        h("p", { class: "note" }, t("settings.headerNote")),
         h(
           "div",
           { class: "row" },
-          h("button", { class: "ghost", onclick: () => void load() }, "Annuler"),
-          h("button", { class: "primary", onclick: () => void persist() }, "Enregistrer"),
+          h("button", { class: "ghost", onclick: () => void load() }, t("settings.cancel")),
+          h("button", { class: "primary", onclick: () => void persist() }, t("settings.save")),
         ),
       ),
       languageCard(),
@@ -204,18 +207,18 @@ export function settingsView(ctx: AppContext): HTMLElement {
     mount(
       generalPane,
       card(
-        "Dossier de travail",
-        field("Dossier de travail par défaut", workspaceInput, ctx.status.workspace),
+        t("settings.workspace.title"),
+        field(t("settings.workspace.label"), workspaceInput, ctx.status.workspace),
       ),
       card(
-        "Voix et écoute",
-        h("p", { class: "note" }, "Tout ce qui touche à la voix de Jimy (modèle vocal, synthèse, écoute, mot d'activation) se règle dans l'onglet ", h("strong", {}, "Voix"), "."),
+        t("settings.voiceCard.title"),
+        h("p", { class: "note" }, t("settings.voiceCard.noteBefore"), h("strong", {}, t("settings.voiceCard.noteTab")), "."),
       ),
       card(
-        "Avatar",
-        h("p", { class: "note" }, "Rendu 3D par Godot, sur un serveur HTTP local."),
-        field("Qualité graphique", qualitySelect),
-        field("Skin", skinSelect),
+        t("settings.avatar.title"),
+        h("p", { class: "note" }, t("settings.avatar.note")),
+        field(t("settings.avatar.quality"), qualitySelect),
+        field(t("settings.avatar.skin"), skinSelect),
         h(
           "div",
           { class: "row" },
@@ -226,61 +229,61 @@ export function settingsView(ctx: AppContext): HTMLElement {
               onclick: async () => {
                 // Sans ce test, l'échec affichait « Avatar démarré » juste
                 // après le message d'erreur.
-                if (!(await attempt(() => api.avatarStart(), "avatar"))) return;
+                if (!(await attempt(() => api.avatarStart(), t("guard.avatar")))) return;
                 await ctx.refreshStatus();
-                toast("Avatar démarré");
+                toast(t("settings.avatar.started"));
               },
             },
-            "Démarrer l'avatar",
+            t("settings.avatar.start"),
           ),
           h(
             "button",
             {
               class: "ghost",
               onclick: async () => {
-                if (!(await attempt(() => api.avatarStop(), "avatar"))) return;
+                if (!(await attempt(() => api.avatarStop(), t("guard.avatar")))) return;
                 await ctx.refreshStatus();
-                toast("Avatar arrêté");
+                toast(t("settings.avatar.stopped"));
               },
             },
-            "Arrêter l'avatar",
+            t("settings.avatar.stop"),
           ),
         ),
       ),
       card(
-        "Démarrage",
-        field("Comportement au démarrage de Windows", startupSelect),
+        t("settings.startup.title"),
+        field(t("settings.startup.label"), startupSelect),
         h(
           "button",
           { class: "ghost", onclick: () => void applyStartup() },
-          "Appliquer et enregistrer",
+          t("settings.startup.apply"),
         ),
       ),
       card(
-        "Vault Obsidian",
+        t("settings.vault.title"),
         h(
           "p",
           { class: "note" },
-          "Mémoire persistante de Jimy : ses souvenirs sont des notes Markdown dans ton vault, que tu relis comme les autres. Jimy lit tout le vault et écrit dans son dossier. Chemin vide = automatique (le vault d'Obsidian de la machine, sinon le sien, rangé en PARA).",
+          t("settings.vault.note"),
         ),
-        toggle("Connecter le vault Obsidian", vaultEnabled),
-        field("Chemin du vault", vaultPathInput),
-        field("Dossier des souvenirs de Jimy", vaultFolderInput),
-        field("Modèle de la mémoire (apprentissage et tri du vault)", memoryModelInput),
-        field("Fournisseur de la mémoire (vide = celui du principal)", memoryProviderSelect),
+        toggle(t("settings.vault.enable"), vaultEnabled),
+        field(t("settings.vault.path"), vaultPathInput),
+        field(t("settings.vault.folder"), vaultFolderInput),
+        field(t("settings.vault.model"), memoryModelInput),
+        field(t("settings.vault.provider"), memoryProviderSelect),
       ),
       card(
-        "Contexte",
+        t("settings.context.title"),
         h(
           "p",
           { class: "note" },
-          "À chaque demande, Jimy sait l'heure, le projet, sa tâche de fond, les accords en attente et la dernière page de son navigateur. Le titre de la fenêtre que tu regardes ne part au modèle que si tu l'autorises (jamais d'image sans ta demande).",
+          t("settings.context.note"),
         ),
-        toggle("Donner à Jimy le titre de la fenêtre que je regarde", shareWindowTitle),
+        toggle(t("settings.context.shareWindow"), shareWindowTitle),
       ),
       card(
-        "Permissions",
-        h("p", { class: "note" }, "Jimy agit sans redemander tant qu'une capacité est accordée."),
+        t("settings.permissions.title"),
+        h("p", { class: "note" }, t("settings.permissions.note")),
         h(
           "div",
           { class: "permissions" },
@@ -289,7 +292,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
               "div",
               { class: `permission ${permission.granted ? "on" : "off"}` },
               h("strong", {}, permission.capability),
-              h("span", {}, permission.granted ? "accordé" : "refusé"),
+              h("span", {}, permission.granted ? t("settings.permissions.granted") : t("settings.permissions.denied")),
             ),
           ),
         ),
@@ -301,7 +304,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
               void openPermissions();
             },
           },
-          "Ajuster les permissions",
+          t("settings.permissions.adjust"),
         ),
       ),
     );
@@ -309,41 +312,41 @@ export function settingsView(ctx: AppContext): HTMLElement {
       llmPane,
       providersCard,
       card(
-        "Modèle de langage",
-        h("p", { class: "note" }, "Le modèle principal sert au Chat et aux tâches — choisis-le dans la bibliothèque ci-dessous, ou tape l'identifiant ici. Le modèle vocal (échanges à voix haute) se choisit dans l'onglet Voix."),
-        field("Modèle principal", modelInput, "space-bunny-free, mimo-v2.6-pro, deepseek-chat…"),
-        field("Température (vide = réglage du fournisseur)", temperatureInput),
+        t("settings.llm.title"),
+        h("p", { class: "note" }, t("settings.llm.note")),
+        field(t("settings.llm.main"), modelInput, "space-bunny-free, mimo-v2.6-pro, deepseek-chat…"),
+        field(t("settings.llm.temperature"), temperatureInput),
       ),
       modelsCard,
       card(
-        "Budget de l'agent",
-        h("p", { class: "note" }, "Limites d'une seule demande. Trop bas, Jimy s'arrête avant d'avoir fini ; trop haut, une dérive coûte cher."),
-        field("Jetons maximum par réponse", maxTokensInput),
+        t("settings.budget.title"),
+        h("p", { class: "note" }, t("settings.budget.note")),
+        field(t("settings.budget.maxTokens"), maxTokensInput),
         h(
           "p",
           { class: "note" },
-          "Le raisonnement caché d'un modèle compte dans ce budget : 16 384 est le minimum confortable (mesuré le 4 octobre).",
+          t("settings.budget.maxTokensNote"),
         ),
-        field("Allers-retours maximum avec les outils", maxIterationsInput),
+        field(t("settings.budget.maxIter"), maxIterationsInput),
       ),
     );
     select(tab);
   }
 
   async function openPermissions() {
-    const permissions = await guard(() => api.getPermissions(), "permissions");
+    const permissions = await guard(() => api.getPermissions(), t("guard.permissions"));
     if (!permissions) return;
     // Accords « Toujours autoriser » donnés depuis les cartes du Chat ou d'ici.
-    const always = (await guard(() => api.approvalsAlways(), "autorisations permanentes")) ?? [];
+    const always = (await guard(() => api.approvalsAlways(), t("guard.alwaysApprovals"))) ?? [];
     const alwaysList = h("div", { class: "always-list" });
     const POWER_SCOPE = "machine : éteindre ou redémarrer l'ordinateur";
     const POWER_DENIES = ["shutdown*", "reboot*", "halt*", "poweroff*"];
     const powerSelect = h(
       "select",
       { class: "field power-mode-select" },
-      h("option", { value: "ask" }, "Demander à chaque fois (carte ou « confirmé » vocal)"),
-      h("option", { value: "always" }, "Toujours autoriser (sans redemander)"),
-      h("option", { value: "deny" }, "Interdit (jamais)"),
+      h("option", { value: "ask" }, t("settings.perm.mode.ask")),
+      h("option", { value: "always" }, t("settings.perm.mode.always")),
+      h("option", { value: "deny" }, t("settings.perm.mode.deny")),
     ) as HTMLSelectElement;
 
     const currentPowerMode = (): "ask" | "always" | "deny" => {
@@ -359,7 +362,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
 
     const renderAlways = () => {
       if (!always.length) {
-        mount(alwaysList, h("p", { class: "note" }, "Aucune : chaque action qui t'engage demande une carte."));
+        mount(alwaysList, h("p", { class: "note" }, t("settings.perm.alwaysNone")));
         return;
       }
       mount(
@@ -374,15 +377,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
               {
                 class: "ghost small",
                 onclick: async () => {
-                  if (!(await attempt(() => api.approvalRevoke(key), "autorisation"))) return;
+                  if (!(await attempt(() => api.approvalRevoke(key), t("guard.approval")))) return;
                   always.splice(always.indexOf(key), 1);
                   powerSelect.value = currentPowerMode();
                   webcamSelect.value = currentWebcamMode();
                   renderAlways();
-                  toast("Autorisation retirée : la carte reviendra");
+                  toast(t("settings.perm.alwaysRevoked"));
                 },
               },
-              "Retirer",
+              t("settings.perm.remove"),
             ),
           ),
         ),
@@ -398,24 +401,24 @@ export function settingsView(ctx: AppContext): HTMLElement {
       if (mode === "deny") {
         permissions.execute.deny_commands.push("shutdown*");
       }
-      if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
+      if (!(await attempt(() => api.savePermissions(permissions), t("guard.permissions")))) return;
       if (mode === "always") {
         if (!always.includes(POWER_SCOPE)) {
-          if (!(await attempt(() => api.approvalGrant(POWER_SCOPE), "autorisation"))) return;
+          if (!(await attempt(() => api.approvalGrant(POWER_SCOPE), t("guard.approval")))) return;
           always.push(POWER_SCOPE);
           always.sort();
         }
       } else if (always.includes(POWER_SCOPE)) {
-        if (!(await attempt(() => api.approvalRevoke(POWER_SCOPE), "autorisation"))) return;
+        if (!(await attempt(() => api.approvalRevoke(POWER_SCOPE), t("guard.approval")))) return;
         always.splice(always.indexOf(POWER_SCOPE), 1);
       }
       renderAlways();
       toast(
         mode === "always"
-          ? "Extinction autorisée sans redemander"
+          ? t("settings.perm.power.always")
           : mode === "deny"
-            ? "Extinction de l'ordinateur interdite"
-            : "Jimy demandera ton accord avant d'éteindre",
+            ? t("settings.perm.power.deny")
+            : t("settings.perm.power.ask"),
       );
     });
 
@@ -427,9 +430,9 @@ export function settingsView(ctx: AppContext): HTMLElement {
     const webcamSelect = h(
       "select",
       { class: "field webcam-mode-select" },
-      h("option", { value: "ask" }, "Demander à chaque fois (carte ou « confirmé » vocal)"),
-      h("option", { value: "always" }, "Toujours autoriser (sans redemander)"),
-      h("option", { value: "deny" }, "Interdit (jamais)"),
+      h("option", { value: "ask" }, t("settings.perm.mode.ask")),
+      h("option", { value: "always" }, t("settings.perm.mode.always")),
+      h("option", { value: "deny" }, t("settings.perm.mode.deny")),
     ) as HTMLSelectElement;
 
     const currentWebcamMode = (): "ask" | "always" | "deny" => {
@@ -451,25 +454,25 @@ export function settingsView(ctx: AppContext): HTMLElement {
       if (mode === "deny") {
         permissions.execute.deny_commands.push("webcam*");
       }
-      if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
+      if (!(await attempt(() => api.savePermissions(permissions), t("guard.permissions")))) return;
       if (mode === "always") {
         if (!always.includes(WEBCAM_SCOPE)) {
-          if (!(await attempt(() => api.approvalGrant(WEBCAM_SCOPE), "autorisation"))) return;
+          if (!(await attempt(() => api.approvalGrant(WEBCAM_SCOPE), t("guard.approval")))) return;
           always.push(WEBCAM_SCOPE);
           always.sort();
         }
       } else if (always.includes(WEBCAM_SCOPE)) {
-        if (!(await attempt(() => api.approvalRevoke(WEBCAM_SCOPE), "autorisation"))) return;
+        if (!(await attempt(() => api.approvalRevoke(WEBCAM_SCOPE), t("guard.approval")))) return;
         always.splice(always.indexOf(WEBCAM_SCOPE), 1);
       }
       powerSelect.value = currentPowerMode();
       renderAlways();
       toast(
         mode === "always"
-          ? "Webcam autorisée sans redemander (1 photo/min max)"
+          ? t("settings.perm.webcam.always")
           : mode === "deny"
-            ? "Webcam interdite : Jimy ne pourra pas voir"
-            : "Jimy demandera ton accord avant chaque photo (1/min max)",
+            ? t("settings.perm.webcam.deny")
+            : t("settings.perm.webcam.ask"),
       );
     });
     const keys: (keyof typeof permissions)[] = ["read", "write", "execute", "network"];
@@ -477,11 +480,11 @@ export function settingsView(ctx: AppContext): HTMLElement {
       const rule = permissions[key];
       const checkbox = h("input", { type: "checkbox" }) as HTMLInputElement;
       checkbox.checked = rule.granted;
-      const label = h("span", {}, rule.granted ? "accordé" : "refusé");
+      const label = h("span", {}, rule.granted ? t("settings.permissions.granted") : t("settings.permissions.denied"));
       checkbox.addEventListener("change", () => {
         rule.granted = checkbox.checked;
         // Le libellé suivait l'état initial et ne changeait jamais.
-        label.textContent = checkbox.checked ? "accordé" : "refusé";
+        label.textContent = checkbox.checked ? t("settings.permissions.granted") : t("settings.permissions.denied");
       });
       return h(
         "div",
@@ -491,11 +494,14 @@ export function settingsView(ctx: AppContext): HTMLElement {
         h(
           "details",
           {},
-          h("summary", {}, "motifs autorisés"),
+          h("summary", {}, t("settings.perm.allowedPatterns")),
           h(
             "div",
             { class: "note pre" },
-            `chemins : ${rule.allow_paths.join(", ") || "tous"}\ninterdits : ${rule.deny_commands.join(", ") || "aucun"}`,
+            t("settings.perm.pathsAndDenies", {
+              paths: rule.allow_paths.join(", ") || t("settings.perm.allPaths"),
+              denies: rule.deny_commands.join(", ") || t("settings.perm.noDenies"),
+            }),
           ),
         ),
       );
@@ -505,15 +511,15 @@ export function settingsView(ctx: AppContext): HTMLElement {
       h(
         "header",
         { class: "view-header" },
-        h("button", { class: "ghost", onclick: () => render() }, "← Retour"),
-        h("h2", {}, "Permissions"),
+        h("button", { class: "ghost", onclick: () => render() }, t("settings.perm.back")),
+        h("h2", {}, t("settings.permissions.title")),
       ),
       card(
-        "Capacités",
+        t("settings.perm.capabilities"),
         h(
           "p",
           { class: "note" },
-          "Une capacité non accordée produit un refus lisible que Jimy reçoit et peut expliquer.",
+          t("settings.perm.capabilitiesNote"),
         ),
         ...rows,
         h(
@@ -521,36 +527,36 @@ export function settingsView(ctx: AppContext): HTMLElement {
           {
             class: "primary",
             onclick: async () => {
-              if (!(await attempt(() => api.savePermissions(permissions), "permissions"))) return;
+              if (!(await attempt(() => api.savePermissions(permissions), t("guard.permissions")))) return;
               await ctx.refreshStatus();
               render();
-              toast("Permissions enregistrées");
+              toast(t("settings.perm.saved"));
             },
           },
-          "Enregistrer",
+          t("settings.save"),
         ),
       ),
       card(
-        "Contrôle de l'ordinateur",
+        t("settings.perm.pcTitle"),
         h(
           "p",
           { class: "note" },
-          "Choisis si Jimy peut éteindre, redémarrer ou mettre en veille ton PC (avec un délai de sécurité de 15 s avant l'arrêt pour te laisser le temps d'annuler).",
+          t("settings.perm.pcNote"),
         ),
-        field("Éteindre, redémarrer ou mettre en veille", powerSelect),
+        field(t("settings.perm.powerLabel"), powerSelect),
         h(
           "p",
           { class: "note" },
-          "Webcam : Jimy ne voit que si tu le lui demandes explicitement (« regarde-moi »), 1 photo par minute au plus, image jointe au modèle puis oubliée (jamais sur disque).",
+          t("settings.perm.webcamNote"),
         ),
-        field("Voir via la webcam", webcamSelect),
+        field(t("settings.perm.webcamLabel"), webcamSelect),
       ),
       card(
-        "Autorisations permanentes",
+        t("settings.perm.alwaysTitle"),
         h(
           "p",
           { class: "note" },
-          "Données par « Toujours autoriser » sur une carte du Chat : par type d'action dans le navigateur, par fichier pour les fichiers sensibles. Jimy les fait sans redemander, à la voix aussi.",
+          t("settings.perm.alwaysNote"),
         ),
         alwaysList,
       ),
@@ -561,37 +567,37 @@ export function settingsView(ctx: AppContext): HTMLElement {
   return container;
 }
 
-/** Durées proposées pour la conversation continue : [secondes, libellé]. */
-export const FOLLOW_UP_CHOICES: [number, string][] = [
-  [0, "Désactivée (dire « Jimy » à chaque phrase)"],
-  [5, "5 secondes"],
-  [8, "8 secondes (recommandé)"],
-  [12, "12 secondes"],
-  [20, "20 secondes"],
+/** Durées proposées pour la conversation continue : [secondes, clé i18n]. */
+export const FOLLOW_UP_CHOICES: [number, Key][] = [
+  [0, "voice.followUp.0"],
+  [5, "voice.followUp.5"],
+  [8, "voice.followUp.8"],
+  [12, "voice.followUp.12"],
+  [20, "voice.followUp.20"],
 ];
 
-/** Tolérance aux hésitations (silence qui termine la phrase) : [ms, libellé]. */
-export const HESITATION_CHOICES: [number, string][] = [
-  [700, "Rapide (700 ms — répond vite, peut couper)"],
-  [1200, "Naturel (1,2 s — recommandé)"],
-  [1600, "Patient (1,6 s — laisse chercher ses mots)"],
+/** Tolérance aux hésitations (silence qui termine la phrase) : [ms, clé i18n]. */
+export const HESITATION_CHOICES: [number, Key][] = [
+  [700, "voice.hesitation.700"],
+  [1200, "voice.hesitation.1200"],
+  [1600, "voice.hesitation.1600"],
 ];
 
-/** Longueur lue à voix haute : [caractères, libellé]. */
-export const SPOKEN_LENGTH_CHOICES: [number, string][] = [
-  [240, "Court (~240 caractères, 1-2 phrases)"],
-  [900, "Standard (~900 caractères, recommandé)"],
-  [6000, "Intégral (tout le texte naturel)"],
+/** Longueur lue à voix haute : [caractères, clé i18n]. */
+export const SPOKEN_LENGTH_CHOICES: [number, Key][] = [
+  [240, "voice.spoken.240"],
+  [900, "voice.spoken.900"],
+  [6000, "voice.spoken.6000"],
 ];
 
 /** Langues proposées pour la reconnaissance vocale (codes Whisper). */
-export const LANGUAGES: [string, string][] = [
-  ["fr", "Français"],
-  ["en", "Anglais"],
-  ["es", "Espagnol"],
-  ["de", "Allemand"],
-  ["it", "Italien"],
-  ["auto", "Détection automatique"],
+export const LANGUAGES: [string, Key][] = [
+  ["fr", "voice.lang.fr"],
+  ["en", "voice.lang.en"],
+  ["es", "voice.lang.es"],
+  ["de", "voice.lang.de"],
+  ["it", "voice.lang.it"],
+  ["auto", "voice.lang.auto"],
 ];
 
 export function card(title: string, ...children: (Node | string | null | false)[]): HTMLElement {

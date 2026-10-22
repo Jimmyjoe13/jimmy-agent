@@ -14,7 +14,8 @@ use crate::error::Result;
 /// ajoutée au script doit faire monter ce numéro, sinon les bases existantes
 /// ne la reçoivent jamais (piège payé : « no such table: memory_semantic »).
 /// Version 6 : sessions épinglées, archivées, titre verrouillé.
-pub const SCHEMA_VERSION: i64 = 6;
+/// Version 7 : date de dernière lecture (`read_at`, messages non lus).
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Titres génériques donnés à la création d'une session, remplacés dès
 /// qu'une vraie demande arrive (`History::auto_title`).
@@ -68,7 +69,8 @@ impl Db {
                 project     TEXT,
                 pinned       INTEGER NOT NULL DEFAULT 0,
                 archived     INTEGER NOT NULL DEFAULT 0,
-                title_locked INTEGER NOT NULL DEFAULT 0
+                title_locked INTEGER NOT NULL DEFAULT 0,
+                read_at      TEXT
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -215,6 +217,19 @@ impl Db {
         if version < 6 {
             self.retitle_generic_sessions()?;
         }
+        // v7 : date de dernière lecture. Les conversations d'avant sont
+        // considérées lues (sinon 195 pastilles « non lu » d'un coup).
+        let has_read_at = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'read_at'")?
+            .exists([])?;
+        if !has_read_at {
+            self.conn.execute_batch("ALTER TABLE sessions ADD COLUMN read_at TEXT;")?;
+        }
+        if version < 7 {
+            self.conn
+                .execute_batch("UPDATE sessions SET read_at = updated_at WHERE read_at IS NULL;")?;
+        }
 
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -325,6 +340,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Une base v6 reçoit `read_at` ; ses conversations sont marquées lues.
+    #[test]
+    fn migration_v6_vers_v7_conversations_existantes_lues() {
+        let dir = std::env::temp_dir().join(format!("jimmy-db-v7-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v6.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'x',
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL, project TEXT,
+                     pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
+                     title_locked INTEGER NOT NULL DEFAULT 0);
+                 INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('s', 'Titre', 'a', '2026-10-20T10:00:00+00:00');
+                 PRAGMA user_version = 6;",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).expect("ouverture");
+        let read_at: Option<String> =
+            db.conn().query_row("SELECT read_at FROM sessions WHERE id = 's'", [], |r| r.get(0)).unwrap();
+        assert_eq!(read_at.as_deref(), Some("2026-10-20T10:00:00+00:00"));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Une base v5 (la vraie base au 21 octobre) reçoit épinglage, archivage
     /// et verrou de titre ; les sessions au titre générique prennent leur
     /// première vraie demande (au moins trois mots) comme titre.
@@ -370,7 +412,7 @@ de Caroline', NULL, NULL, 0, '2');
             .unwrap();
         assert_eq!(cols, 3);
         let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, SCHEMA_VERSION);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }

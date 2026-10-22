@@ -122,7 +122,7 @@ let stepPage = null;
 
   await step("Chat : envoi, attente visible, réponse", async () => {
     await nav("Discuter");
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
     await guetterFlux();
     await p.keyboard.press("Enter");
@@ -362,7 +362,7 @@ let stepPage = null;
     const repoName = repo.split(/[\\/]/).filter(Boolean).pop();
     const nameIs = (n) => p.waitForFunction((x) => document.querySelector(".project-name")?.textContent === x, n, { timeout: 5000 });
     // Nouvelle conversation : elle garde le projet en cours.
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await nameIs(repoName);
     // Retour au dossier par défaut, puis le projet récent, sans envoyer de message.
     await p.locator(".project-button").click();
@@ -408,7 +408,7 @@ let stepPage = null;
     // fichier sensible, si le modèle est lent) : une seule place de fond, on
     // attend qu'elle se libère pour ne pas lire son bandeau à elle.
     for (let i = 0; i < 180 && (await invoke("tasks_list")).some((t) => t.background); i++) await p.waitForTimeout(1000);
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill(
       "Exécute avec run_command la commande : Start-Sleep -Seconds 70; 'fini-fond'. Puis réponds uniquement par ce qu'elle affiche.",
     );
@@ -449,7 +449,7 @@ let stepPage = null;
   await step("Chat : « Arrêter » du bandeau arrête la tâche de fond et retire le bandeau", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
     for (let i = 0; i < 180 && (await invoke("tasks_list")).some((t) => t.background); i++) await p.waitForTimeout(1000);
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill(
       "Exécute avec run_command la commande : Start-Sleep -Seconds 120; 'fond-stop'. Puis réponds uniquement par ce qu'elle affiche.",
     );
@@ -474,7 +474,7 @@ let stepPage = null;
   // pendant le travail, Échap l'actionne depuis n'importe où dans la fenêtre.
   await step("Arrêt d'urgence : bouton de la barre du haut et touche Échap", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Lis un par un tous les fichiers du dossier agent et résume chacun en détail.");
     await p.keyboard.press("Enter");
     await p.waitForSelector(".global-stop:not([hidden])", { timeout: 15_000 });
@@ -1016,12 +1016,12 @@ let stepPage = null;
   await step("Sessions : une réponse reste dans sa conversation", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
     await nav("Discuter");
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill("Réponds uniquement par le mot : banane");
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
     // Conversation quittée avant la réponse.
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     let origin = null;
     for (let i = 0; i < 60 && !origin; i++) {
       await p.waitForTimeout(1000);
@@ -1033,14 +1033,31 @@ let stepPage = null;
     await p.waitForTimeout(800);
     const leaked = await p.locator(".stream .bubble.assistant", { hasText: /banane/i }).count();
     expect(leaked === 0, `la réponse s'affiche dans la nouvelle conversation (${leaked} bulle(s))`);
-    return "réponse gardée dans sa conversation, nouvelle conversation vide";
+    // Étape 1 de la refonte : la notification propose « Ouvrir », la liste
+    // montre la réponse non lue, un clic ouvre la conversation et la marque lue.
+    await p.waitForSelector(".toast .toast-action", { timeout: 8000 });
+    // Fenêtre étroite : la liste est repliée d'office ; on la déplie.
+    if (await p.locator(".conv-rail.collapsed").count()) await p.locator(".conv-rail .conv-toggle").first().click();
+    const row = p.locator(`.conv-row`, { hasText: /banane/i }).first();
+    await row.locator(".conv-unread").waitFor({ timeout: 8000 });
+    await row.click();
+    await p.waitForSelector(".stream .bubble.assistant", { timeout: 8000 });
+    const shown = await p.locator(".stream .bubble.assistant", { hasText: /banane/i }).count();
+    expect(shown > 0, "la conversation ouverte depuis la liste ne montre pas la réponse");
+    await p.waitForFunction(() => {
+      const r = [...document.querySelectorAll(".conv-row")].find((e) => /banane/i.test(e.textContent ?? ""));
+      return r && !r.querySelector(".conv-unread") && r.classList.contains("active");
+    }, null, { timeout: 8000 });
+    return "réponse gardée dans sa conversation ; « Ouvrir », non-lu, ouverture depuis la liste et lecture OK";
   });
 
   // Lot A (21 octobre) : recherche dans le contenu, épingler, renommer, archiver.
   await step("Historique : épingler, renommer, archiver, chercher dans le contenu", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
-    const origin = newest(await invoke("sessions"));
-    expect(origin && origin.title.includes("banane"), `session de test introuvable : ${origin?.title}`);
+    // La session « banane » du parcours précédent, cherchée par son titre :
+    // une autre tâche a pu toucher une session plus récente entre-temps.
+    const origin = newest((await invoke("sessions")).filter((s) => /banane/i.test(s.title)));
+    expect(origin, "session de test « banane » introuvable");
     const row = () => p.locator(`.list-row[data-session="${origin.id}"]`);
     await nav("Archives");
     try {
@@ -1116,7 +1133,7 @@ let stepPage = null;
     const fichier = path.join(OUT, "notes-reunion.txt");
     require("fs").writeFileSync(fichier, `Compte rendu\nréférence du dossier : ${cle}\nfin\n`);
     await nav("Discuter");
-    await p.locator("button", { hasText: "Nouvelle session" }).click();
+    await p.locator(".chat-header button", { hasText: "Nouvelle session" }).click();
     await p.locator(".composer-input").fill(`Lis le fichier ${fichier} avec read_file, puis réponds uniquement : lu.`);
     await p.keyboard.press("Enter");
     await p.waitForSelector(".bubble.pending", { timeout: 5000 });
@@ -1203,6 +1220,44 @@ let stepPage = null;
     await p.waitForFunction(() => document.querySelector(".topbar h1")?.textContent === "Archives", null, { timeout: 5000 });
     await nav("Discuter");
     return already ? "vraie alerte : pastille et clic vérifiés" : "pastille simulée, clic vers Historique, disparue après restauration";
+  });
+
+  // Version anglaise (22 octobre) : l'interface passe en anglais, les onglets
+  // et le Chat suivent ; la langue de l'utilisateur est rendue à la fin.
+  await step("Langue : interface en anglais puis restaurée", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args ?? {}]);
+    const setLang = async (value) => {
+      const s = await invoke("get_settings");
+      s.ui.language = value;
+      await invoke("save_settings", { settings: s });
+      await p.reload();
+      await p.waitForSelector(".nav-item", { timeout: 20000 });
+      await p.waitForTimeout(800);
+    };
+    const before = (await invoke("get_settings")).ui.language;
+    try {
+      await setLang("en");
+      const labels = await p.$$eval(".nav-item", (els) => els.map((e) => e.textContent.trim()));
+      expect(["Chat", "Voice", "Memory", "Tools", "Appearance", "Archives", "Settings", "Diagnostics"].every((l) => labels.includes(l)), `onglets : ${labels.join(", ")}`);
+      await p.locator(".nav-item", { hasText: "Chat" }).click();
+      await p.waitForTimeout(500);
+      const send = (await p.locator(".send-label").textContent()) ?? "";
+      const html = await p.evaluate(() => document.documentElement.lang);
+      expect(send === "Send" && html === "en", `bouton « ${send} », lang=${html}`);
+      await p.locator(".nav-item", { hasText: "Voice" }).click();
+      await p.waitForSelector(".card h3", { timeout: 5000 });
+      const voiceH3 = await p.$$eval(".card h3", (els) => els.map((e) => e.textContent?.trim()));
+      expect(voiceH3.includes("Voice activation"), `titres Voice : ${voiceH3.join(", ")}`);
+      await p.locator(".nav-item", { hasText: "Settings" }).click();
+      await p.waitForSelector(".card h3", { timeout: 5000 });
+      const settingsH3 = await p.$$eval(".card h3", (els) => els.map((e) => e.textContent?.trim()));
+      expect(settingsH3.includes("Workspace"), `titres Settings : ${settingsH3.join(", ")}`);
+    } finally {
+      await setLang(before);
+    }
+    const back = await p.$$eval(".nav-item", (els) => els.map((e) => e.textContent.trim()));
+    expect(back.includes("Discuter") || before === "en", `langue non restaurée : ${back.join(", ")}`);
+    return `onglets et Chat en anglais, langue « ${before} » restaurée`;
   });
 
   await step("Aucune erreur JavaScript", async () => {

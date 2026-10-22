@@ -9,6 +9,8 @@ import { api, type AgentEvent, type ChatMessage, type MentionEntry, type Project
 import { attempt, capitalize, guard, h, icon, mount, toast } from "../ui";
 import type { AppContext } from "../context";
 import { explorerPanel } from "./explorer";
+import { conversationRail } from "./conversations";
+import { t } from "../i18n";
 
 /** Préférence d'affichage du panneau Fichiers (par machine). */
 const FILES_KEY = "jimmy.chat.files";
@@ -34,6 +36,11 @@ const ANSWER_TIMEOUT_MS = 180_000;
 
 export function chatView(ctx: AppContext): HTMLElement {
   let sessionId: string | null = ctx.lastSessionId;
+  // Changements de conversation (ouverture, nouvelle) : un envoi terminé après
+  // un changement ne ramène pas l'utilisateur en arrière.
+  let navToken = 0;
+  // Premier message d'une conversation neuve en cours d'envoi.
+  let awaitingNewSession = false;
   let pending: HTMLElement | null = null;
   let safety = 0;
   // Filet armé ou non : `clearTimeout` seul ne suffit pas à le savoir.
@@ -65,14 +72,14 @@ export function chatView(ctx: AppContext): HTMLElement {
     "button",
     {
       class: "ghost project-button",
-      title: "Choisir le projet de cette conversation",
+      title: t("chat.project.choose"),
       "aria-haspopup": "menu",
       onclick: (event: Event) => {
         event.stopPropagation();
         void toggleProjectMenu();
       },
     },
-    h("span", { class: "project-kicker" }, "Projet"),
+    h("span", { class: "project-kicker" }, t("chat.project.kicker")),
     projectLabel,
     h("span", { class: "project-caret" }, icon("caret", 14, 2)),
   );
@@ -80,7 +87,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     "button",
     {
       class: `ghost files-button${filesOpen ? " active" : ""}`,
-      title: "Afficher ou masquer les fichiers du projet",
+      title: t("chat.files.toggle"),
       onclick: () => {
         filesOpen = !filesOpen;
         explorer.element.hidden = !filesOpen;
@@ -89,7 +96,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       },
     },
     icon("folder", 16),
-    "Fichiers",
+    t("chat.files"),
   );
 
   const nameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -97,24 +104,24 @@ export function chatView(ctx: AppContext): HTMLElement {
   /** Met l'en-tête et l'explorateur au diapason du projet courant. */
   function renderProject() {
     const path = project ?? defaultFolder?.path ?? "";
-    projectLabel.textContent = project ? nameOf(project) : "aucun (dossier par défaut)";
-    projectButton.setAttribute("title", path ? `Jimy travaille dans : ${path}` : "Choisir un projet");
-    if (path) explorer.setRoot(path, project ? nameOf(project) : "Dossier par défaut");
+    projectLabel.textContent = project ? nameOf(project) : t("chat.project.none");
+    projectButton.setAttribute("title", path ? t("chat.project.worksIn", { path }) : t("chat.project.pick"));
+    if (path) explorer.setRoot(path, project ? nameOf(project) : t("chat.project.default"));
   }
 
   /** Rattache `path` (ou rien) à la conversation ; appliqué au prochain message. */
   async function applyProject(path: string | null, readable = true) {
     projectMenu.hidden = true;
     // Commande sans retour : `attempt` (piège 13). Échec = on ne change rien.
-    if (sessionId && !(await attempt(() => api.sessionSetProject(sessionId as string, path), "projet"))) return;
+    if (sessionId && !(await attempt(() => api.sessionSetProject(sessionId as string, path), t("guard.project")))) return;
     project = path;
     // Pas encore de conversation : le choix doit survivre au changement d'onglet.
     if (!sessionId) ctx.pendingProject = path;
     renderProject();
     if (path && !readable) {
-      toast("Jimy n'a pas la permission de lire ce dossier : ajoute-le dans Paramètres → Permissions.", "error");
+      toast(t("chat.project.noPermission"), "error");
     } else if (path) {
-      toast(`Projet : ${nameOf(path)}`);
+      toast(t("chat.project.set", { name: nameOf(path) }));
     }
   }
 
@@ -125,7 +132,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         class: `project-item${info.path === project ? " current" : ""}`,
         role: "menuitem",
         disabled: !info.exists,
-        title: info.exists ? info.path : `${info.path} (introuvable)`,
+        title: info.exists ? info.path : t("chat.project.missing", { path: info.path }),
         onclick: () => void applyProject(label ? null : info.path, info.readable),
       },
       h("strong", {}, label ?? info.name),
@@ -138,7 +145,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       projectMenu.hidden = true;
       return;
     }
-    const data = await guard(() => api.projectsRecent(), "projets récents");
+    const data = await guard(() => api.projectsRecent(), t("guard.recentProjects"));
     if (!data) return;
     defaultFolder = data.default;
     const recent = data.recent.filter((p) => p.path !== data.default.path);
@@ -151,20 +158,20 @@ export function chatView(ctx: AppContext): HTMLElement {
           role: "menuitem",
           onclick: async () => {
             projectMenu.hidden = true;
-            const picked = await guard(() => api.pickFolder(), "choix du dossier");
+            const picked = await guard(() => api.pickFolder(), t("guard.pickFolder"));
             if (picked) {
               const known = [...data.recent, data.default].find((p) => p.path === picked);
               await applyProject(picked, known?.readable ?? true);
             }
           },
         },
-        h("strong", {}, "Ouvrir un dossier…"),
-        h("span", { class: "row-meta" }, "Choisir un projet sur le disque"),
+        h("strong", {}, t("chat.project.openFolder")),
+        h("span", { class: "row-meta" }, t("chat.project.openFolderHint")),
       ),
-      recent.length ? h("div", { class: "project-sep" }, "Récents") : null,
+      recent.length ? h("div", { class: "project-sep" }, t("chat.project.recent")) : null,
       ...recent.map((p) => projectItem(p)),
-      h("div", { class: "project-sep" }, "Sans projet"),
-      projectItem(data.default, "Dossier par défaut"),
+      h("div", { class: "project-sep" }, t("chat.project.noProject")),
+      projectItem(data.default, t("chat.project.default")),
     );
     projectMenu.hidden = false;
   }
@@ -172,15 +179,15 @@ export function chatView(ctx: AppContext): HTMLElement {
   const stream = h("div", { class: "stream", "aria-live": "polite" });
   // Journal d'activité (outils, mémoire, vault). Masqué en CSS tant qu'il
   // est vide. Avant, il n'était jamais inséré dans la page.
-  const activity = h("div", { class: "activity", "aria-label": "Activité de Jimy" });
+  const activity = h("div", { class: "activity", "aria-label": t("chat.activity") });
 
   const input = h("textarea", {
     class: "composer-input",
     rows: 1,
-    placeholder: "Dis à Jimy quoi faire…",
-    "aria-label": "Message pour Jimy",
+    placeholder: t("chat.placeholder"),
+    "aria-label": t("chat.inputLabel"),
   }) as HTMLTextAreaElement;
-  const sendLabel = h("span", { class: "send-label" }, "Envoyer");
+  const sendLabel = h("span", { class: "send-label" }, t("chat.send"));
   const sendButton = h(
     "button",
     { class: "primary send-button", onclick: () => void submit() },
@@ -193,16 +200,16 @@ export function chatView(ctx: AppContext): HTMLElement {
     {
       class: "danger stop-button",
       hidden: true,
-      title: "Arrêter la tâche en cours (comme dire « STOP »)",
-      onclick: () => void attempt(() => api.agentStop(), "arrêt"),
+      title: t("chat.stopHint"),
+      onclick: () => void attempt(() => api.agentStop(), t("guard.stop")),
     },
-    "Arrêter",
+    t("chat.stop"),
   );
   // ── Tâche de fond ────────────────────────────────────────────────────────
   // Bandeau au-dessus de la saisie : ce qui tourne en arrière-plan pendant
   // que la conversation continue, avec son étape et son propre arrêt
   // (« Arrêter » du composer et « STOP » n'arrêtent que le premier plan).
-  const tasksBand = h("div", { class: "tasks-band", hidden: true, "aria-label": "Tâche en arrière-plan" });
+  const tasksBand = h("div", { class: "tasks-band", hidden: true, "aria-label": t("chat.bgTask") });
   let backgroundTask: TaskInfo | null = null;
   // Instant de lecture de `elapsedSecs` : la durée avance sans relire.
   let taskReadAt = 0;
@@ -219,18 +226,18 @@ export function chatView(ctx: AppContext): HTMLElement {
     tasksBand.hidden = false;
     mount(
       tasksBand,
-      h("span", { class: "tasks-band-kind" }, "En arrière-plan"),
+      h("span", { class: "tasks-band-kind" }, t("chat.bgKind")),
       h("span", { class: "tasks-band-title", title: task.title }, task.title),
-      h("span", { class: "tasks-band-step" }, task.step || "démarrage"),
+      h("span", { class: "tasks-band-step" }, task.step || t("chat.bgStarting")),
       h("em", { class: "tasks-band-time" }, duration),
       h(
         "button",
         {
           class: "danger small tasks-band-stop",
-          title: "Arrêter cette tâche de fond",
+          title: t("chat.bgStopHint"),
           onclick: () => void stopBackground(task.id),
         },
-        "Arrêter",
+        t("chat.stop"),
       ),
     );
   }
@@ -238,14 +245,14 @@ export function chatView(ctx: AppContext): HTMLElement {
   /** Arrêt de la tâche de fond : relecture immédiate du registre, le bandeau
    *  disparaît même si la fin de la tâche n'arrive jamais par événement. */
   async function stopBackground(id: string) {
-    const stopped = await guard(() => api.taskStop(id), "arrêt de la tâche");
+    const stopped = await guard(() => api.taskStop(id), t("guard.taskStop"));
     // `undefined` : échec, déjà signalé par `guard`.
-    if (stopped !== undefined) toast(stopped ? "Tâche de fond arrêtée." : "Cette tâche était déjà terminée.", "info");
+    if (stopped !== undefined) toast(stopped ? t("chat.bgStopped") : t("chat.bgAlreadyDone"), "info");
     await refreshTasks();
   }
 
   async function refreshTasks() {
-    const list = await guard(() => api.tasksList(), "tâches");
+    const list = await guard(() => api.tasksList(), t("guard.tasks"));
     backgroundTask = list?.find((task) => task.background) ?? null;
     taskReadAt = Date.now();
     renderTasks();
@@ -270,20 +277,20 @@ export function chatView(ctx: AppContext): HTMLElement {
     const current = capture;
     mount(
       captureChip,
-      h("img", { class: "capture-thumb", src: current.preview, alt: `Capture : ${current.label}` }),
-      h("span", { class: "capture-label", title: current.label }, `Fenêtre jointe : « ${current.label} »`),
+      h("img", { class: "capture-thumb", src: current.preview, alt: t("chat.capture.alt", { label: current.label }) }),
+      h("span", { class: "capture-label", title: current.label }, t("chat.capture.attached", { label: current.label })),
       h(
         "button",
         {
           class: "ghost small",
-          title: "Retirer la capture",
+          title: t("chat.capture.removeHint"),
           onclick: () => {
             capture = null;
             renderCapture();
-            void attempt(() => api.screenDiscard(current.id), "capture");
+            void attempt(() => api.screenDiscard(current.id), t("guard.capture"));
           },
         },
-        "Retirer",
+        t("chat.capture.remove"),
       ),
     );
   }
@@ -292,29 +299,29 @@ export function chatView(ctx: AppContext): HTMLElement {
     "button",
     {
       class: "ghost capture-button",
-      title: "Joindre la fenêtre sur laquelle tu travailles (Jimy ne regarde jamais sans ta demande)",
+      title: t("chat.capture.hint"),
       onclick: async () => {
-        const got = await guard(() => api.screenCapture(), "capture");
+        const got = await guard(() => api.screenCapture(), t("guard.capture"));
         if (!got) return;
-        if (capture) void attempt(() => api.screenDiscard(capture!.id), "capture");
+        if (capture) void attempt(() => api.screenDiscard(capture!.id), t("guard.capture"));
         capture = got;
         renderCapture();
         input.focus();
       },
     },
-    "Joindre ma fenêtre",
+    t("chat.capture.button"),
   );
 
   const hint = h(
     "span",
     { class: "composer-hint" },
     // Une seule ligne discrète sous la saisie (coupée si la place manque).
-    h("kbd", {}, "Entrée"),
-    " envoyer · ",
-    h("kbd", {}, "Maj+Entrée"),
-    " nouvelle ligne · ",
+    h("kbd", {}, t("chat.hint.enter")),
+    t("chat.hint.send"),
+    h("kbd", {}, t("chat.hint.shiftEnter")),
+    t("chat.hint.newline"),
     h("kbd", {}, "@"),
-    " citer un fichier",
+    t("chat.hint.mention"),
   );
 
   // Bouton « @ » du compositeur : insère le caractère au curseur et relance
@@ -324,8 +331,8 @@ export function chatView(ctx: AppContext): HTMLElement {
     {
       class: "composer-icon",
       type: "button",
-      title: "Citer un fichier du projet",
-      "aria-label": "Citer un fichier",
+      title: t("chat.mention.hint"),
+      "aria-label": t("chat.mention.label"),
       onclick: () => {
         const at = input.selectionStart ?? input.value.length;
         const before = input.value.slice(0, at);
@@ -393,7 +400,7 @@ export function chatView(ctx: AppContext): HTMLElement {
             void mentionAccept(item),
         },
         h("span", { class: "mention-name" }, item.name),
-        h("span", { class: "mention-path" }, item.dir ? `dossier  ${item.display}` : item.display),
+        h("span", { class: "mention-path" }, item.dir ? `${t("chat.mention.folder")}  ${item.display}` : item.display),
       );
       mentionMenu.append(row);
     }
@@ -401,7 +408,7 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   async function mentionFetch(start: number, query: string, seq: number) {
     const root = project ?? defaultFolder?.path ?? "";
-    const got = await guard(() => api.fsSearch(root, query), "mentions");
+    const got = await guard(() => api.fsSearch(root, query), t("guard.mentions"));
     if (!got) return;
     // Abandon : le jeton a changé pendant la recherche.
     const current = mentionToken();
@@ -454,10 +461,10 @@ export function chatView(ctx: AppContext): HTMLElement {
     stopButton.hidden = !busy;
     if (busy) {
       sendButton.setAttribute("disabled", "");
-      sendLabel.textContent = "Jimy travaille…";
+      sendLabel.textContent = t("chat.working");
     } else {
       sendButton.removeAttribute("disabled");
-      sendLabel.textContent = "Envoyer";
+      sendLabel.textContent = t("chat.send");
       window.clearTimeout(safety);
       safetyOn = false;
     }
@@ -525,7 +532,7 @@ export function chatView(ctx: AppContext): HTMLElement {
   /** Une puce de chemin dans une bulle ; le clic ouvre l'aperçu. */
   function addPathChip(paragraph: HTMLElement, label: string, path: string, line?: number) {
     paragraph.append(document.createTextNode(" "));
-    const chip = h("button", { type: "button", class: "msg-path", title: "Aperçu du fichier" }, label);
+    const chip = h("button", { type: "button", class: "msg-path", title: t("chat.preview") }, label);
     chip.addEventListener("click", () => void openFileModal(path, line));
     paragraph.append(chip);
   }
@@ -545,15 +552,15 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   async function openFileModal(path: string, line?: number) {
     const clean = resolvePath(path);
-    const data = await guard(() => api.fsPreview(clean), "aperçu");
+    const data = await guard(() => api.fsPreview(clean), t("guard.preview"));
     fileModal?.remove();
     if (!data) return;
     const body = h("div", { class: "file-modal-body" });
     if (data.binary) {
-      body.append(h("p", { class: "file-modal-note" }, "Fichier binaire : pas d'aperçu texte."));
+      body.append(h("p", { class: "file-modal-note" }, t("chat.preview.binary")));
     } else if (data.executable) {
       body.append(
-        h("p", { class: "file-modal-note" }, "Exécutable : il n'est jamais lancé depuis le Chat, il est montré dans l'Explorateur."),
+        h("p", { class: "file-modal-note" }, t("chat.preview.exe")),
       );
       body.append(h("pre", { class: "file-modal-text" }, data.text || ""));
     } else {
@@ -572,10 +579,10 @@ export function chatView(ctx: AppContext): HTMLElement {
     const open = data.executable
       ? h(
           "button",
-          { class: "ghost", title: "Montrer dans l'Explorateur (un exécutable n'est pas lancé)" },
-          "Montrer dans l'Explorateur",
+          { class: "ghost", title: t("chat.preview.revealHint") },
+          t("chat.preview.reveal"),
         ) as HTMLButtonElement
-      : h("button", { class: "ghost", title: "Ouvrir avec l'application par défaut de Windows" }, "Ouvrir") as HTMLButtonElement;
+      : h("button", { class: "ghost", title: t("chat.preview.openHint") }, t("chat.preview.open")) as HTMLButtonElement;
     open.addEventListener("click", () => void attempt(() => api.fsOpen(clean), "ouverture"));
     fileModal = h(
       "div",
@@ -588,7 +595,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       h(
         "div",
         { class: "file-modal-card" },
-        h("div", { class: "file-modal-head" }, h("strong", {}, data.path), open, h("button", { class: "ghost", onclick: closeModal }, "Fermer")),
+        h("div", { class: "file-modal-head" }, h("strong", {}, data.path), open, h("button", { class: "ghost", onclick: closeModal }, t("chat.close"))),
         body,
       ),
     );
@@ -632,11 +639,11 @@ export function chatView(ctx: AppContext): HTMLElement {
 
   function workBlock(files: string[]): HTMLElement {
     const block = h("div", { class: "work-block" });
-    block.append(h("div", { class: "work-kicker" }, `Travaux — ${files.length} fichier(s) écrit(s)`));
+    block.append(h("div", { class: "work-kicker" }, t("chat.work.kicker", { count: files.length })));
     for (const file of files) {
-      const chip = h("button", { type: "button", class: "work-file", title: "Aperçu du fichier" }, nameOf(file));
+      const chip = h("button", { type: "button", class: "work-file", title: t("chat.preview") }, nameOf(file));
       chip.addEventListener("click", () => void openFileModal(file));
-      const diff = h("button", { type: "button", class: "ghost small work-diff", title: "Diff git du fichier" }, "Diff");
+      const diff = h("button", { type: "button", class: "ghost small work-diff", title: t("chat.diffHint") }, t("chat.diff"));
       diff.addEventListener("click", () => void showDiff(file));
       block.append(h("div", { class: "work-row" }, chip, diff));
     }
@@ -646,10 +653,10 @@ export function chatView(ctx: AppContext): HTMLElement {
   /** Le diff git d'un fichier écrit pendant le tour. Dépôt absent, fichier
    * nouveau non commité ou lenteur : le message reste clair. */
   async function showDiff(file: string) {
-    const data = await guard(() => api.fsDiff(file), "diff");
+    const data = await guard(() => api.fsDiff(file), t("guard.diff"));
     if (!data) return;
     if (!data.diff) {
-      toast(data.reason || "Diff git indisponible (fichier nouveau ou hors dépôt).");
+      toast(data.reason || t("chat.diffUnavailable"));
       return;
     }
     fileModal?.remove();
@@ -667,9 +674,9 @@ export function chatView(ctx: AppContext): HTMLElement {
         h(
           "div",
           { class: "file-modal-head" },
-          h("strong", {}, `${nameOf(file)} — diff git`),
-          h("button", { class: "ghost", title: "Aperçu du fichier tel quel", onclick: () => void openFileModal(file) }, "Aperçu"),
-          h("button", { class: "ghost", onclick: closeModal }, "Fermer"),
+          h("strong", {}, t("chat.diffTitle", { name: nameOf(file) })),
+          h("button", { class: "ghost", title: t("chat.previewAsIs"), onclick: () => void openFileModal(file) }, t("chat.previewShort")),
+          h("button", { class: "ghost", onclick: closeModal }, t("chat.close")),
         ),
         body,
       ),
@@ -723,13 +730,13 @@ export function chatView(ctx: AppContext): HTMLElement {
     streaming.remove();
     streaming = null;
     if (announced) {
-      logActivity(activityLine("annonce", "note", h("span", { class: "activity-detail" }, announced)));
+      logActivity(activityLine(t("chat.act.note"), "note", h("span", { class: "activity-detail" }, announced)));
     }
     if (!pending) {
       pending = h(
         "div",
         { class: "bubble assistant pending" },
-        h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
+        h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), t("chat.thinking")),
       );
       append(pending);
     }
@@ -746,7 +753,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     safety = window.setTimeout(() => {
       safetyOn = false;
       if (pending || streaming) {
-        settle(bubble("error", "Pas de réponse après 3 minutes. Réessaie, ou regarde le diagnostic."));
+        settle(bubble("error", t("chat.timeout")));
       }
     }, ANSWER_TIMEOUT_MS);
   }
@@ -778,16 +785,16 @@ export function chatView(ctx: AppContext): HTMLElement {
     const id = event.id ?? "";
     if (!id || approvalCards.has(id)) return;
     if (event.taskId) approvalTasks.set(id, event.taskId);
-    const status = h("span", { class: "approval-status" }, "Jimy attend ta réponse");
-    const allow = h("button", { class: "small" }, "Autoriser une fois") as HTMLButtonElement;
+    const status = h("span", { class: "approval-status" }, t("chat.approval.waiting"));
+    const allow = h("button", { class: "small" }, t("chat.approval.once")) as HTMLButtonElement;
     // « Toujours » : la portée (type d'action ou fichier) est retenue, plus de
     // carte pour elle — elle se retire dans Paramètres → Ajuster les permissions.
     const always = h(
       "button",
-      { class: "primary small", title: `Ne plus demander pour : ${event.scope ?? event.target ?? ""}` },
-      "Toujours autoriser",
+      { class: "primary small", title: t("chat.approval.alwaysHint", { scope: event.scope ?? event.target ?? "" }) },
+      t("chat.approval.always"),
     ) as HTMLButtonElement;
-    const deny = h("button", { class: "danger small" }, "Refuser") as HTMLButtonElement;
+    const deny = h("button", { class: "danger small" }, t("chat.approval.deny")) as HTMLButtonElement;
     const answer = async (approved: boolean, forever = false) => {
       allow.disabled = true;
       always.disabled = true;
@@ -795,7 +802,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       // Marqué avant l'appel : la clôture (`approvalResolved`) peut arriver
       // avant sa réponse.
       if (forever) alwaysGiven.add(id);
-      const accepted = await guard(() => api.approvalRespond(id, approved, forever), "autorisation");
+      const accepted = await guard(() => api.approvalRespond(id, approved, forever), t("guard.approval"));
       // Demande expirée ou tâche arrêtée entre-temps : rien n'a été exécuté.
       if (accepted === false) closeApproval(id, null);
     };
@@ -808,15 +815,13 @@ export function chatView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "approval-title" },
-        `Autorisation demandée${event.taskId ? " par la tâche de fond" : ""} : ${
-          (event.target ?? "").startsWith("navigateur : ")
-            ? "action en ton nom dans le navigateur"
-            : "modifier un fichier sensible"
-        }`,
+        t(event.taskId ? "chat.approval.titleBg" : "chat.approval.title", {
+          what: (event.target ?? "").startsWith("navigateur : ") ? t("chat.approval.browser") : t("chat.approval.file"),
+        }),
       ),
       h("code", { class: "approval-target" }, event.target ?? ""),
       h("pre", { class: "approval-detail" }, event.detail ?? ""),
-      event.scope ? h("p", { class: "note approval-scope" }, `« Toujours » vaudra pour : ${event.scope}`) : null,
+      event.scope ? h("p", { class: "note approval-scope" }, t("chat.approval.scope", { scope: event.scope })) : null,
       h("div", { class: "approval-actions" }, status, deny, allow, always),
     );
     approvalCards.set(id, card);
@@ -845,12 +850,12 @@ export function chatView(ctx: AppContext): HTMLElement {
     if (status)
       status.textContent =
         approved === null
-          ? "Demande expirée : rien n'a été modifié"
+          ? t("chat.approval.expired")
           : approved
             ? forever
-              ? "Autorisé — sans redemander désormais"
-              : "Autorisé"
-            : "Refusé : rien n'a été modifié";
+              ? t("chat.approval.allowedForever")
+              : t("chat.approval.allowed")
+            : t("chat.approval.denied");
   }
 
   async function submit() {
@@ -862,26 +867,40 @@ export function chatView(ctx: AppContext): HTMLElement {
     autosize();
     const userBubble = bubble("user", text);
     const sentCapture = capture;
-    if (sentCapture) userBubble.append(h("div", { class: "capture-note" }, `Fenêtre jointe : « ${sentCapture.label} »`));
+    if (sentCapture) userBubble.append(h("div", { class: "capture-note" }, t("chat.capture.attached", { label: sentCapture.label })));
     capture = null;
     renderCapture();
     append(userBubble);
     pending = h(
       "div",
       { class: "bubble assistant pending" },
-      h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
+      h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), t("chat.thinking")),
     );
     append(pending);
     setBusy(true);
     armSafety();
 
-    const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project, sentCapture?.id ?? null), "envoi");
+    // Premier message d'une conversation neuve : son identifiant n'est connu
+    // qu'au retour de `chat`, ses événements peuvent arriver avant.
+    const creating = !sessionId;
+    if (creating) awaitingNewSession = true;
+    const token = navToken;
+    const id = await guard(() => api.chat(sessionId, text, sessionId ? null : project, sentCapture?.id ?? null), t("guard.send"));
+    if (creating) awaitingNewSession = false;
+    // L'utilisateur a changé de conversation pendant l'envoi : il reste où il
+    // est, la conversation créée apparaît simplement dans la liste.
+    if (token !== navToken) {
+      refreshRailSoon();
+      return;
+    }
     if (!id) {
-      settle(bubble("error", "Le message n'a pas pu être envoyé."));
+      settle(bubble("error", t("chat.sendFailed")));
       return;
     }
     sessionId = id;
     ctx.lastSessionId = id;
+    // Nouvelle conversation créée, ou la courante remonte en tête.
+    refreshRailSoon();
   }
 
   input.addEventListener("keydown", (event) => {
@@ -943,7 +962,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           if (path && !files.includes(path)) files.push(path);
           backgroundFiles.set(taskId, files);
         }
-        logActivity(activityLine("fond", "tool", h("code", {}, event.name ?? "?")));
+        logActivity(activityLine(t("chat.act.bg"), "tool", h("code", {}, event.name ?? "?")));
         if (backgroundTask?.id === taskId) {
           backgroundTask.step = event.name ?? backgroundTask.step;
           renderTasks();
@@ -972,7 +991,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           const node =
             event.type === "final"
               ? bubble("assistant", event.text ?? "")
-              : bubble("error", `Tâche de fond en échec : ${event.message ?? ""}`);
+              : bubble("error", t("chat.bgFailed", { message: event.message ?? "" }));
           node.classList.add("from-background");
           if (event.type === "final" && files.length > 0) node.append(workBlock(files));
           // Au-dessus d'un tour en cours : sa bulle d'attente reste la dernière.
@@ -980,12 +999,13 @@ export function chatView(ctx: AppContext): HTMLElement {
           if (live?.isConnected) live.before(node);
           else append(node);
           stream.scrollTop = stream.scrollHeight;
-        } else if (event.type === "final") {
-          toast(`Tâche de fond terminée : ${title}. Réponse dans sa conversation.`, "info");
-        } else {
-          toast(`Tâche de fond en échec : ${event.message ?? ""}`, "error");
+        } else if (wrapper.sessionId) {
+          // Réponse d'une tâche de fond dans une autre conversation : un clic l'ouvre.
+          notifyOther(wrapper.sessionId, event.type === "final" ? null : event.message ?? "", title);
         }
+        if (wrapper.sessionId === sessionId && sessionId) void markRead(sessionId);
         void refreshTasks();
+        refreshRailSoon();
         break;
       }
       default:
@@ -997,11 +1017,18 @@ export function chatView(ctx: AppContext): HTMLElement {
     // Lot D1 : un événement d'une autre conversation n'entre jamais dans le
     // fil affiché (deux tâches en parallèle, ou conversation changée pendant
     // une réponse). Sa fin est signalée ; elle reste dans sa conversation.
+    // La liste des conversations suit tout ce qui change un état : réponse,
+    // échec, passage en fond, commande vocale, demande d'accord.
+    if (["final", "failed", "detached", "background", "spoken", "approval", "approvalResolved"].includes(event.type)) {
+      refreshRailSoon();
+    }
     if (fromOtherConversation(event)) {
-      if (event.type === "final") toast("Réponse prête dans une autre conversation (voir Historique).", "info");
-      else if (event.type === "failed") toast(`Échec dans une autre conversation : ${event.message ?? ""}`, "error");
+      if (event.type === "final") notifyOther(event.sessionId as string, null);
+      else if (event.type === "failed") notifyOther(event.sessionId as string, event.message ?? "");
       return;
     }
+    // Réponse vue dans la conversation affichée : rien de non lu.
+    if (event.type === "final" && sessionId) void markRead(sessionId);
     switch (event.type) {
       case "toolStart":
         // Ce qui a été écrit en flux n'était qu'une annonce (« Je lis le
@@ -1013,13 +1040,13 @@ export function chatView(ctx: AppContext): HTMLElement {
           const path = typeof (args as { path?: unknown } | null)?.path === "string" ? String((args as { path: string }).path) : null;
           if (path && !turnFiles.includes(path)) turnFiles.push(path);
         }
-        logActivity(activityLine("outil", "tool", h("code", {}, event.name ?? "?")));
+        logActivity(activityLine(t("chat.act.tool"), "tool", h("code", {}, event.name ?? "?")));
         pokeSafety();
         break;
       case "toolEnd":
         logActivity(
           activityLine(
-            event.ok ? "fait" : "échec",
+            event.ok ? t("chat.act.done") : t("chat.act.failed"),
             event.ok ? "ok" : "ko",
             h("code", {}, event.name ?? "?"),
             h("span", { class: "activity-detail" }, event.summary ?? ""),
@@ -1029,20 +1056,20 @@ export function chatView(ctx: AppContext): HTMLElement {
         pokeSafety();
         break;
       case "memory":
-        logActivity(activityLine("mémoire", "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        logActivity(activityLine(t("chat.act.memory"), "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
         pokeSafety();
         break;
       case "skill":
-        logActivity(activityLine("compétence", "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        logActivity(activityLine(t("chat.act.skill"), "memory", h("span", { class: "activity-detail" }, event.detail ?? "")));
         pokeSafety();
         break;
       case "progress":
         // Étape d'une longue tâche vocale (aussi dite à voix haute).
-        logActivity(activityLine("étape", "tool", h("span", { class: "activity-detail" }, event.text ?? "")));
+        logActivity(activityLine(t("chat.act.step"), "tool", h("span", { class: "activity-detail" }, event.text ?? "")));
         pokeSafety();
         break;
       case "vault":
-        logActivity(activityLine("Vault", "vault", h("span", { class: "activity-detail" }, event.detail ?? "")));
+        logActivity(activityLine(t("chat.act.vault"), "vault", h("span", { class: "activity-detail" }, event.detail ?? "")));
         pokeSafety();
         break;
       case "spoken":
@@ -1056,7 +1083,7 @@ export function chatView(ctx: AppContext): HTMLElement {
           pending = h(
             "div",
             { class: "bubble assistant pending" },
-            h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " Jimy réfléchit"),
+            h("p", {}, h("span", { class: "dots" }, h("i"), h("i"), h("i")), t("chat.thinking")),
           );
           append(pending);
         }
@@ -1086,7 +1113,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       }
       case "failed":
         closeApprovalsOf(null);
-        settle(bubble("error", event.message ?? "La demande a échoué."));
+        settle(bubble("error", event.message ?? t("chat.failed")));
         break;
       case "detached": {
         // Le tour devient une tâche de fond : le Chat est de nouveau libre.
@@ -1094,7 +1121,7 @@ export function chatView(ctx: AppContext): HTMLElement {
         resolveStreamingAsAnnouncement();
         if (event.taskId) backgroundFiles.set(event.taskId, turnFiles);
         turnFiles = [];
-        settle(bubble("assistant", "Je m'en occupe en arrière-plan. Tu peux continuer, je te préviens à la fin."));
+        settle(bubble("assistant", t("chat.detached")));
         void refreshTasks();
         break;
       }
@@ -1121,8 +1148,8 @@ export function chatView(ctx: AppContext): HTMLElement {
         },
         label,
       );
-    const title = h("h2", { class: "chat-empty-title" }, "Dis « ");
-    title.append(h("em", {}, capitalize(ctx.status.stt.wake_word)), " » pour lancer une commande, ou écris ici.");
+    const title = h("h2", { class: "chat-empty-title" }, t("chat.empty.before"));
+    title.append(h("em", {}, capitalize(ctx.status.stt.wake_word)), t("chat.empty.after"));
     mount(
       stream,
       h(
@@ -1136,13 +1163,13 @@ export function chatView(ctx: AppContext): HTMLElement {
           h("div", { class: "chat-orb-shell" }, h("div", { class: "chat-orb-core" })),
         ),
         title,
-        h("p", { class: "chat-empty-example" }, "Exemple : « Jimy, analyse ce dossier et explique-moi ce que tu trouves. »"),
+        h("p", { class: "chat-empty-example" }, t("chat.empty.example")),
         h(
           "div",
           { class: "chat-suggestions" },
-          suggest("Analyser un dossier", "Analyse ce dossier et explique-moi ce que tu trouves."),
-          suggest("Chercher dans mon vault", "Cherche dans mon vault Obsidian : "),
-          suggest("Résumer ma journée", "Résume ce que nous avons fait aujourd'hui."),
+          suggest(t("chat.suggest.folder"), t("chat.suggest.folderPrompt")),
+          suggest(t("chat.suggest.vault"), t("chat.suggest.vaultPrompt")),
+          suggest(t("chat.suggest.day"), t("chat.suggest.dayPrompt")),
         ),
       ),
     );
@@ -1157,16 +1184,102 @@ export function chatView(ctx: AppContext): HTMLElement {
    */
   function fromOtherConversation(event: AgentEvent): boolean {
     const global = ["spoken", "approval", "approvalResolved", "background", "detached", "state", "listen", "heard"];
-    return !!event.sessionId && !!sessionId && event.sessionId !== sessionId && !global.includes(event.type);
+    if (!event.sessionId || global.includes(event.type)) return false;
+    if (sessionId) return event.sessionId !== sessionId;
+    // Nouvelle conversation vide : tout événement porte une autre conversation,
+    // sauf pendant l'envoi du premier message (identifiant pas encore connu).
+    return !awaitingNewSession;
+  }
+
+  // ── Liste des conversations (étape 1 de la refonte) ─────────────────────
+  const rail = conversationRail({
+    activeId: () => sessionId,
+    // La voix continue la conversation affichée (`conversation_focus`) : le
+    // repère n'a de sens que si l'écoute tourne.
+    voiceId: () => (ctx.voice?.running ? sessionId : null),
+    approvals: () => [...ctx.approvals.values()],
+    onOpen: (id) => void openSession(id),
+    onNew: (projectPath) => startNewConversation(projectPath),
+  });
+  ctx.onCleanup(() => rail.dispose());
+  let railTimer = 0;
+  /** Relit la liste un peu après une rafale d'événements (une seule lecture). */
+  function refreshRailSoon() {
+    window.clearTimeout(railTimer);
+    railTimer = window.setTimeout(() => void rail.refresh(), 400);
+  }
+  ctx.onCleanup(() => window.clearTimeout(railTimer));
+
+  /** Conversation vue : ses réponses ne comptent plus comme non lues. */
+  async function markRead(id: string) {
+    await api.sessionMarkRead(id).catch(() => undefined);
+    refreshRailSoon();
+  }
+
+  /** Réponse (ou échec) arrivée dans une autre conversation : un message
+   *  avec « Ouvrir », au lieu d'un renvoi vers les Archives. */
+  async function notifyOther(id: string, failure: string | null, knownTitle = "") {
+    const title = knownTitle || (await api.sessionGet(id).catch(() => null))?.title || "";
+    const open = { label: t("chat.open"), run: () => void openSession(id) };
+    if (failure !== null) toast(t("chat.otherFailed", { title: title || "…", message: failure }), "error", open);
+    else toast(title ? t("chat.otherReady", { title }) : t("chat.otherReadyUntitled"), "info", open);
+  }
+
+  /** Ouvre une conversation sur place : fil, projet, cible de la voix. Le
+   *  tour éventuellement en cours ailleurs continue ; ses événements restent
+   *  dans sa conversation (lot D1). */
+  /** Quitte la conversation affichée : le tour en cours (s'il y en a un)
+   *  continue ailleurs, l'affichage repart de zéro. */
+  function leaveCurrent() {
+    navToken += 1;
+    pending?.remove();
+    pending = null;
+    streaming?.remove();
+    streaming = null;
+    turnFiles = [];
+    setBusy(false);
+  }
+
+  async function openSession(id: string) {
+    if (id === sessionId) return;
+    leaveCurrent();
+    sessionId = id;
+    ctx.lastSessionId = id;
+    void attempt(() => api.conversationFocus(id), t("guard.conversation"));
+    mount(activity);
+    await loadHistory();
+    ctx.approvals.forEach((event) => showApproval(event));
+    await loadProject();
+    await markRead(id);
+    input.focus();
+  }
+
+  /** Nouvelle conversation, dans le projet donné (filtre de la liste) ou le
+   *  projet courant, comme un nouveau fil chez Codex. */
+  function startNewConversation(projectPath: string | null = project) {
+    leaveCurrent();
+    sessionId = null;
+    ctx.lastSessionId = null;
+    // La voix ne continue plus l'ancienne conversation.
+    void attempt(() => api.conversationFocus(null), t("guard.newConversation"));
+    ctx.pendingProject = projectPath;
+    if (projectPath !== project) {
+      project = projectPath;
+      renderProject();
+    }
+    mount(activity);
+    void loadHistory();
+    refreshRailSoon();
+    input.focus();
   }
 
   /** Projet de la conversation courante. */
   async function loadProject() {
-    const data = await guard(() => api.projectsRecent(), "projets");
+    const data = await guard(() => api.projectsRecent(), t("guard.projects"));
     if (data) defaultFolder = data.default;
     if (sessionId) {
       // Lu directement : une vieille session (hors des dernières) garde son projet.
-      const session = await guard(() => api.sessionGet(sessionId as string), "session");
+      const session = await guard(() => api.sessionGet(sessionId as string), t("guard.session"));
       project = session?.project ?? null;
     }
     renderProject();
@@ -1191,7 +1304,7 @@ export function chatView(ctx: AppContext): HTMLElement {
       emptyState();
       return;
     }
-    const messages = await guard(() => api.sessionMessages(sessionId as string), "historique");
+    const messages = await guard(() => api.sessionMessages(sessionId as string), t("guard.history"));
     if (!messages || messages.length === 0) {
       emptyState();
       return;
@@ -1212,27 +1325,21 @@ export function chatView(ctx: AppContext): HTMLElement {
   void refreshTasks();
   // Conversation affichée (Historique, retour sur le Chat) : la voix la
   // continuera. Sans conversation affichée, l'état de la voix est gardé.
-  if (sessionId) void attempt(() => api.conversationFocus(sessionId), "conversation");
+  if (sessionId) void attempt(() => api.conversationFocus(sessionId), t("guard.conversation"));
   window.setTimeout(() => input.focus(), 0);
 
   const newSessionButton = h(
     "button",
     {
       class: "ghost",
-      title: "Commencer une nouvelle conversation",
-      onclick: () => {
-        sessionId = null;
-        ctx.lastSessionId = null;
-        // La voix ne continue plus l'ancienne conversation.
-        void attempt(() => api.conversationFocus(null), "nouvelle conversation");
-        // Nouveau fil dans le même projet, comme chez Codex.
-        ctx.pendingProject = project;
-        mount(activity);
-        void loadHistory();
-      },
+      title: t("chat.newHint"),
+      // Nouveau fil dans le même projet, comme chez Codex.
+      onclick: () => startNewConversation(project),
     },
-    "Nouvelle session",
+    t("chat.new"),
   );
+  // Conversation affichée à l'ouverture de l'onglet : lue.
+  if (sessionId) void markRead(sessionId);
 
   // Barre du projet : les actions de la conversation y vivent (avant sous la
   // saisie, où elles écrasaient l'aide sur une ligne).
@@ -1260,6 +1367,7 @@ export function chatView(ctx: AppContext): HTMLElement {
     h(
       "div",
       { class: "chat-body" },
+      rail.element,
       h(
         "div",
         { class: "chat-main" },

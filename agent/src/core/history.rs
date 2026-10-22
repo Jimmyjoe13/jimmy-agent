@@ -31,11 +31,15 @@ pub struct SessionSummary {
     pub pinned: bool,
     /// Archivée : hors de la liste par défaut, retrouvable à part.
     pub archived: bool,
+    /// Réponses finales de Jimy arrivées depuis la dernière lecture.
+    pub unread: i64,
 }
 
 /// Colonnes lues par `session_row` (même ordre).
 const SUMMARY_COLUMNS: &str = "s.id, s.title, s.created_at, s.updated_at,
-     (SELECT count(*) FROM messages m WHERE m.session_id = s.id), s.project, s.pinned, s.archived";
+     (SELECT count(*) FROM messages m WHERE m.session_id = s.id), s.project, s.pinned, s.archived,
+     (SELECT count(*) FROM messages m WHERE m.session_id = s.id AND m.role = 'assistant'
+        AND m.tool_calls IS NULL AND m.content != '' AND (s.read_at IS NULL OR m.created_at > s.read_at))";
 
 fn session_row(row: &Row) -> rusqlite::Result<SessionSummary> {
     Ok(SessionSummary {
@@ -47,6 +51,7 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionSummary> {
         project: row.get(5)?,
         pinned: row.get::<_, i64>(6)? != 0,
         archived: row.get::<_, i64>(7)? != 0,
+        unread: row.get(8)?,
     })
 }
 
@@ -65,7 +70,7 @@ impl History {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.db.lock().unwrap().conn().execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+            "INSERT INTO sessions (id, title, created_at, updated_at, read_at) VALUES (?1, ?2, ?3, ?3, ?3)",
             params![id, title, now],
         )?;
         Ok(id)
@@ -119,6 +124,16 @@ impl History {
         self.db.lock().unwrap().conn().execute(
             "UPDATE sessions SET title = ?2, title_locked = 1 WHERE id = ?1",
             params![session_id, title.chars().take(120).collect::<String>()],
+        )?;
+        Ok(())
+    }
+
+    /// La conversation est lue (ouverte dans le Chat, réponse vue) : ses
+    /// messages ne comptent plus comme non lus.
+    pub fn mark_read(&self, session_id: &str) -> Result<()> {
+        self.db.lock().unwrap().conn().execute(
+            "UPDATE sessions SET read_at = ?2 WHERE id = ?1",
+            params![session_id, Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -571,6 +586,25 @@ mod tests {
         h.set_title_auto(&t, "Audit des campagnes Emile").unwrap();
         assert_eq!(titre(&h, &t), "Audit des campagnes Emile");
         assert!(h.rename(&t, "   ").is_err(), "titre vide refusé");
+    }
+
+    /// Étape 1 de la refonte (liste des conversations) : une réponse finale
+    /// de Jimy arrivée après la dernière lecture compte comme non lue ; les
+    /// messages intermédiaires (appels d'outils) et ceux de l'utilisateur non.
+    #[test]
+    fn les_reponses_non_lues_sont_comptees() {
+        let h = history();
+        let s = h.create_session("t").unwrap();
+        let unread = |h: &History| h.session(&s).unwrap().unwrap().unread;
+        assert_eq!(unread(&h), 0, "conversation neuve : rien à lire");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        tour_avec_outils(&h, &s, "Analyse", "Fini", 2);
+        assert_eq!(unread(&h), 1, "seule la réponse finale compte");
+        h.append(&s, &Message::assistant("Autre chose ?")).unwrap();
+        assert_eq!(unread(&h), 2);
+        h.mark_read(&s).unwrap();
+        assert_eq!(unread(&h), 0);
+        assert_eq!(h.search_sessions(None, false, 10).unwrap()[0].unread, 0);
     }
 
     /// La recherche porte sur toutes les sessions (plus seulement les 50

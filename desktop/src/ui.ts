@@ -80,6 +80,10 @@ const ICONS = {
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  speaker: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  "chevron-left": '<path d="M15 6l-6 6 6 6"/>',
+  "chevron-right": '<path d="M9 6l6 6-6 6"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
@@ -120,18 +124,41 @@ export class Store<T> {
 }
 
 /** Affiche une erreur sans casser l'interface. */
-export function toast(message: string, kind: "info" | "error" = "info") {
+/** Action proposée dans un message (« Ouvrir » la conversation concernée). */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+export function toast(message: string, kind: "info" | "error" = "info", action?: ToastAction) {
   let host = document.getElementById("toasts");
   if (!host) {
     host = h("div", { id: "toasts", class: "toasts" });
     document.body.append(host);
   }
-  const node = h("div", { class: `toast ${kind}` }, message);
-  host.append(node);
-  setTimeout(() => {
+  const leave = () => {
     node.classList.add("leaving");
     setTimeout(() => node.remove(), 300);
-  }, kind === "error" ? 7000 : 3500);
+  };
+  const node = h("div", { class: `toast ${kind}${action ? " with-action" : ""}` }, h("span", {}, message));
+  if (action) {
+    node.append(
+      h(
+        "button",
+        {
+          class: "toast-action",
+          onclick: () => {
+            action.run();
+            leave();
+          },
+        },
+        action.label,
+      ),
+    );
+  }
+  host.append(node);
+  // Avec une action, le message reste plus longtemps : le temps d'y répondre.
+  setTimeout(leave, action ? 9000 : kind === "error" ? 7000 : 3500);
 }
 
 /** Exécute une action asynchrone en affichant ses erreurs. */
@@ -165,13 +192,17 @@ export async function attempt(
   }
 }
 
-/** Libellés français partagés par les vues. */
-export const QUALITY_LABEL: Record<string, string> = { low: "Basse", medium: "Moyenne", high: "Haute" };
-export const MEMORY_KIND_LABEL: Record<string, string> = {
-  semantic: "fait",
-  procedural: "règle",
-  episodic: "épisode",
-};
+/** Qualité graphique de l'avatar, dans la langue de l'interface. */
+export function qualityLabel(level: string): string {
+  const key = `quality.${level}` as Key;
+  return key in fr ? t(key) : level;
+}
+
+/** Type de souvenir (fait, règle, épisode), dans la langue de l'interface. */
+export function memoryKindLabel(kind: string): string {
+  const key = `memory.kind.${kind}` as Key;
+  return key in fr ? t(key) : kind;
+}
 /** État de l'avatar, en une expression courte (barre du haut), dans la langue
  *  de l'interface. Un état inconnu s'affiche tel quel. */
 export function stateLabel(state: string): string {

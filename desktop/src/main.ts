@@ -41,13 +41,13 @@ const routeSubtitle = (id: Route) => t(`nav.${id}.subtitle` as Key);
 async function main() {
   const root = document.getElementById("app");
   if (!root) throw new Error("#app introuvable");
-  // Avant tout : la fenêtre n'a plus de barre native, ses boutons doivent
-  // exister même si le démarrage échoue.
-  mountTitlebar();
-
-  // Langue de l'interface avant tout rendu (réglage `ui.language`).
+  // Langue de l'interface avant tout rendu (réglage `ui.language`) ; sans
+  // réglage lisible, celle de Windows.
   const settings = await api.getSettings().catch(() => null);
   setLanguage(settings?.ui.language);
+  // Puis la barre de titre : la fenêtre n'a plus de barre native, ses
+  // boutons doivent exister même si le démarrage échoue.
+  mountTitlebar();
 
   const bootstrap = await guard(() => api.bootstrap(), t("guard.start"));
   if (!bootstrap) {
@@ -341,7 +341,7 @@ async function main() {
             if (await attempt(() => api.voiceSetEnabled("speech", !speaking), t("guard.voice"))) await ctx.refreshStatus();
           },
         },
-        icon("voice", 14, 2),
+        icon("speaker", 14, 2),
         speaking ? t("visor.speakOn") : t("visor.speakOff"),
       ),
       h(
@@ -360,7 +360,7 @@ async function main() {
             if (ok) await ctx.refreshStatus();
           },
         },
-        icon("voice", 14, 2),
+        icon("mic", 14, 2),
         listening ? t("visor.micOn") : t("visor.micOff"),
       ),
     );

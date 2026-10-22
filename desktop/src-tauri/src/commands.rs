@@ -388,7 +388,7 @@ fn session_json(s: jimmy_agent::core::history::SessionSummary) -> serde_json::Va
         "id": s.id, "title": s.title,
         "createdAt": s.created_at, "updatedAt": s.updated_at,
         "messageCount": s.message_count, "project": s.project,
-        "pinned": s.pinned, "archived": s.archived
+        "pinned": s.pinned, "archived": s.archived, "unread": s.unread
     })
 }
 
@@ -420,6 +420,12 @@ pub async fn session_get(state: State<'_, AppState>, session_id: String) -> std:
 #[tauri::command]
 pub async fn session_rename(state: State<'_, AppState>, session_id: String, title: String) -> std::result::Result<(), String> {
     state.app.history.rename(&session_id, &title).map_err(err)
+}
+
+/// Conversation ouverte ou réponse vue : plus de messages non lus.
+#[tauri::command]
+pub async fn session_mark_read(state: State<'_, AppState>, session_id: String) -> std::result::Result<(), String> {
+    state.app.history.mark_read(&session_id).map_err(err)
 }
 
 #[tauri::command]

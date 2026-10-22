@@ -14,6 +14,7 @@
 import { api, type ModelInfo, type ModelTest } from "../api";
 import { attempt, h, mount, toast } from "../ui";
 import type { AppContext } from "../context";
+import { locale, t } from "../i18n";
 
 type Role = "main" | "voice";
 type Stored = ModelTest & { at: number };
@@ -50,7 +51,7 @@ function formatContext(tokens: number): string {
 }
 
 function formatCost(model: ModelInfo): string {
-  if (model.free) return "gratuit";
+  if (model.free) return t("models.free");
   if (!model.in_catalog) return "?";
   const fmt = (n: number) => (n < 1 ? n.toFixed(2) : n.toFixed(1)).replace(".", ",");
   return `${fmt(model.cost_input)} / ${fmt(model.cost_output)} $`;
@@ -62,10 +63,10 @@ function formatSeconds(ms: number): string {
 
 function ago(at: number): string {
   const minutes = Math.round((Date.now() - at) / 60000);
-  if (minutes < 1) return "à l'instant";
-  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 1) return t("models.ago.now");
+  if (minutes < 60) return t("models.ago.min", { n: minutes });
   const hours = Math.round(minutes / 60);
-  return hours < 48 ? `il y a ${hours} h` : `il y a ${Math.round(hours / 24)} j`;
+  return hours < 48 ? t("models.ago.hours", { n: hours }) : t("models.ago.days", { n: Math.round(hours / 24) });
 }
 
 export interface ModelsPanelHooks {
@@ -91,32 +92,32 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
   const progress = h("span", { class: "note" }, "");
   const rows = new Map<string, HTMLElement>();
 
-  const providerSelect = h("select", { class: "field", "aria-label": "Fournisseur" }) as HTMLSelectElement;
+  const providerSelect = h("select", { class: "field", "aria-label": t("models.providerLabel") }) as HTMLSelectElement;
   const searchInput = h("input", {
     class: "field",
     type: "search",
-    placeholder: "Rechercher un modèle…",
-    "aria-label": "Rechercher un modèle",
+    placeholder: t("models.searchPlaceholder"),
+    "aria-label": t("models.searchLabel"),
   }) as HTMLInputElement;
-  const sortSelect = h("select", { class: "field", "aria-label": "Tri" }) as HTMLSelectElement;
+  const sortSelect = h("select", { class: "field", "aria-label": t("models.sortLabel") }) as HTMLSelectElement;
   for (const [value, label] of [
-    ["recommended", "Tri : recommandés"],
-    ["name", "Tri : nom"],
-    ["speed", "Tri : vitesse (testés)"],
-    ["context", "Tri : contexte"],
-    ["recent", "Tri : récents"],
+    ["recommended", t("models.sort.recommended")],
+    ["name", t("models.sort.name")],
+    ["speed", t("models.sort.speed")],
+    ["context", t("models.sort.context")],
+    ["recent", t("models.sort.recent")],
   ] as const) {
     sortSelect.append(h("option", { value }, label));
   }
   const workingBox = h("input", { type: "checkbox" }) as HTMLInputElement;
-  const refreshButton = h("button", { class: "ghost", onclick: () => void load(true) }, "Actualiser la liste");
-  const batchButton = h("button", { class: "primary", onclick: () => void toggleBatch() }, "Tester tous les modèles");
+  const refreshButton = h("button", { class: "ghost", onclick: () => void load(true) }, t("models.refresh"));
+  const batchButton = h("button", { class: "primary", onclick: () => void toggleBatch() }, t("models.testAll"));
 
   // ── Données ────────────────────────────────────────────────────────────────
 
   async function load(refresh = false) {
     refreshButton.setAttribute("disabled", "");
-    mount(list, h("div", { class: "empty" }, h("p", {}, "Chargement des modèles du compte…")));
+    mount(list, h("div", { class: "empty" }, h("p", {}, t("models.loading"))));
     try {
       models = await api.listModels(refresh, providerId);
     } catch (error) {
@@ -126,7 +127,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
         h(
           "div",
           { class: "empty" },
-          h("p", {}, "Impossible de récupérer la liste des modèles de ce fournisseur."),
+          h("p", {}, t("models.loadFailed")),
           h("p", { class: "hint" }, String(error)),
         ),
       );
@@ -192,12 +193,12 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
   async function toggleBatch() {
     if (batchRunning) {
       batchCancelled = true;
-      batchButton.textContent = "Arrêt…";
+      batchButton.textContent = t("models.stopping");
       return;
     }
     batchRunning = true;
     batchCancelled = false;
-    batchButton.textContent = "Arrêter le test";
+    batchButton.textContent = t("models.stopTest");
     batchButton.className = "ghost";
     // Les modèles absents du catalogue passent aussi : le compte les autorise.
     const queue = visibleModels().map((m) => m.id);
@@ -214,12 +215,12 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     batchRunning = false;
-    batchButton.textContent = "Tester tous les modèles";
+    batchButton.textContent = t("models.testAll");
     batchButton.className = "primary";
     const working = models.filter((m) => tests[testKey(m.id)]?.ok && tests[testKey(m.id)]?.tools).length;
     progress.textContent = batchCancelled
-      ? `Arrêté — ${done} testé(s)`
-      : `Terminé : ${working} modèle(s) fonctionnel(s) sur ${models.length}`;
+      ? t("models.stoppedCount", { done })
+      : t("models.doneCount", { working, total: models.length });
     // Re-tri à la fin seulement : les lignes ne sautent pas pendant le test.
     renderList();
   }
@@ -231,34 +232,32 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
     let result: Stored | undefined = tests[key];
     // Un modèle n'est appliqué que s'il a été vu fonctionner récemment.
     if (!result || Date.now() - result.at > FRESH_MS) {
-      toast(`Test de « ${id} » avant de l'appliquer…`);
+      toast(t("models.testingBeforeApply", { id }));
       result = (await runTest(id)) ?? undefined;
     }
     if (!result || !result.ok) {
-      toast(`« ${id} » ne répond pas : ${result?.error ?? "test impossible"}. Choix annulé.`, "error");
+      toast(t("models.testFailedCancel", { id, error: result?.error ?? t("models.testImpossible") }), "error");
       return;
     }
     if (!result.tools) {
-      const accepted = window.confirm(
-        `« ${id} » répond, mais refuse les outils.\n\nAvec lui, Jimy ne pourrait plus lire de fichiers ni lancer de commandes : il ne ferait que discuter.\n\nL'appliquer quand même ?`,
-      );
+      const accepted = window.confirm(t("models.noToolsConfirm", { id }));
       if (!accepted) return;
     }
-    if (!(await attempt(() => api.setLlmModel(role, id, providerId), "choix du modèle"))) return;
+    if (!(await attempt(() => api.setLlmModel(role, id, providerId), t("guard.modelChoice")))) return;
     hooks.onApplied(role, id, providerId);
     await ctx.refreshStatus();
     renderCurrent();
     for (const model of models) updateRow(model.id);
-    toast(role === "main" ? `Modèle principal : ${id}` : `Modèle vocal : ${id}`);
+    toast(role === "main" ? t("models.mainChosen", { id }) : t("models.voiceChosen", { id }));
   }
 
   async function clearVoice() {
-    if (!(await attempt(() => api.setLlmModel("voice", ""), "modèle vocal"))) return;
+    if (!(await attempt(() => api.setLlmModel("voice", ""), t("guard.voiceModel")))) return;
     hooks.onApplied("voice", "", "");
     await ctx.refreshStatus();
     renderCurrent();
     for (const model of models) updateRow(model.id);
-    toast("Le modèle vocal est le même que le principal.");
+    toast(t("models.voiceCleared"));
   }
 
   // ── Affichage ──────────────────────────────────────────────────────────────
@@ -280,7 +279,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
         ? h(
             "div",
             {},
-            h("span", { class: "model-role" }, "Principal"),
+            h("span", { class: "model-role" }, t("models.role.main")),
             h("code", {}, main),
             name(main) ? ` · ${name(main)}` : "",
             ` — ${providerLabel(ctx.status.llm.provider)}`,
@@ -290,11 +289,11 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
         ? h(
             "div",
             {},
-            h("span", { class: "model-role" }, "Vocal"),
-            voice ? h("code", {}, voice) : h("em", {}, "même modèle que le principal"),
+            h("span", { class: "model-role" }, t("models.role.voice")),
+            voice ? h("code", {}, voice) : h("em", {}, t("models.sameAsMain")),
             voice && name(voice) ? ` · ${name(voice)}` : "",
             voice ? ` — ${providerLabel(ctx.status.llm.voice_provider || ctx.status.llm.provider)}` : "",
-            voice ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, "Retirer") : null,
+            voice ? h("button", { class: "ghost small", onclick: () => void clearVoice() }, t("models.clearVoice")) : null,
           )
         : null,
     );
@@ -303,25 +302,25 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
   function status(model: ModelInfo): HTMLElement {
     const key = testKey(model.id);
     if (testing.has(key)) {
-      return h("span", { class: "model-test testing" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")), " test");
+      return h("span", { class: "model-test testing" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")), t("models.testing"));
     }
     const test = tests[key];
-    if (!test) return h("span", { class: "model-test none", title: "Pas encore testé" }, "non testé");
+    if (!test) return h("span", { class: "model-test none", title: t("models.untestedHint") }, t("models.untested"));
     const when = ago(test.at);
     if (test.ok && test.tools) {
       return h(
         "span",
         {
           class: "model-test good",
-          title: `Répond en ${test.latency_ms} ms, outils acceptés (${test.tools_latency_ms} ms) — testé ${when}. La latence varie selon la charge du fournisseur.`,
+          title: t("models.goodHint", { latency: test.latency_ms, toolsLatency: test.tools_latency_ms, when }),
         },
         `✓ ${formatSeconds(test.latency_ms)}`,
       );
     }
     if (test.ok) {
-      return h("span", { class: "model-test warn", title: `${test.error} — testé ${when}` }, "⚠ sans outils");
+      return h("span", { class: "model-test warn", title: t("models.testedWhen", { error: test.error, when }) }, t("models.warnNoTools"));
     }
-    return h("span", { class: "model-test bad", title: `${test.error} — testé ${when}` }, "✗ échec");
+    return h("span", { class: "model-test bad", title: t("models.testedWhen", { error: test.error, when }) }, t("models.badFailed"));
   }
 
   function badge(label: string, title: string, kind = ""): HTMLElement {
@@ -335,10 +334,10 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
     const broken = Boolean(test && !test.ok);
     const busy = testing.has(testKey(model.id));
     const capabilities: HTMLElement[] = [];
-    if (model.reasoning) capabilities.push(badge("raisonne", "Réfléchit avant de répondre : plus lent mais plus juste"));
-    if (model.vision) capabilities.push(badge("vision", "Comprend les images"));
-    if (model.tool_call === false) capabilities.push(badge("sans outils", "Le catalogue indique qu'il n'appelle pas d'outils", "warn"));
-    if (!model.in_catalog) capabilities.push(badge("hors catalogue", "Le fournisseur l'autorise mais sa liste ne le décrit pas"));
+    if (model.reasoning) capabilities.push(badge(t("models.cap.reasoning"), t("models.cap.reasoningHint")));
+    if (model.vision) capabilities.push(badge(t("models.cap.vision"), t("models.cap.visionHint")));
+    if (model.tool_call === false) capabilities.push(badge(t("models.cap.noTools"), t("models.cap.noToolsHint"), "warn"));
+    if (!model.in_catalog) capabilities.push(badge(t("models.cap.uncataloged"), t("models.cap.uncatalogedHint")));
 
     return h(
       "div",
@@ -350,8 +349,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
           "strong",
           {},
           model.name,
-          isMain ? badge("principal", "Modèle utilisé pour le chat et les tâches", "main") : null,
-          isVoice ? badge("vocal", "Modèle utilisé pour les échanges à voix haute", "voice") : null,
+          isMain ? badge(t("models.badge.main"), t("models.badge.mainHint"), "main") : null,
+          isVoice ? badge(t("models.badge.voice"), t("models.badge.voiceHint"), "voice") : null,
         ),
         h("code", {}, model.id),
         model.description ? h("p", { class: "model-desc", title: model.description }, model.description) : null,
@@ -359,8 +358,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
       h(
         "div",
         { class: "model-meta" },
-        h("span", { title: "Fenêtre de contexte" }, `contexte ${formatContext(model.context)}`),
-        h("span", { title: "Prix en dollars par million de jetons (entrée / sortie)" }, formatCost(model)),
+        h("span", { title: t("models.contextHint") }, t("models.context", { ctx: formatContext(model.context) })),
+        h("span", { title: t("models.priceHint") }, formatCost(model)),
         h("div", { class: "badges" }, ...capabilities),
       ),
       status(model),
@@ -369,8 +368,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
         { class: "model-actions" },
         h(
           "button",
-          { class: "ghost small", disabled: busy, onclick: () => void runTest(model.id), title: "Envoie une petite requête de test" },
-          "Tester",
+          { class: "ghost small", disabled: busy, onclick: () => void runTest(model.id), title: t("models.testButtonHint") },
+          t("models.testButton"),
         ),
         onlyRole === "voice"
           ? null
@@ -379,10 +378,10 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
               {
                 class: isMain ? "primary small" : "ghost small",
                 disabled: busy || isMain || broken,
-                title: broken ? "Ce modèle a échoué au test" : "Utiliser pour le chat et les tâches",
+                title: broken ? t("models.brokenHint") : t("models.useForMainHint"),
                 onclick: () => void choose("main", model.id),
               },
-              "Principal",
+              t("models.role.main"),
             ),
         onlyRole === "main"
           ? null
@@ -391,10 +390,10 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
               {
                 class: isVoice ? "primary small" : "ghost small",
                 disabled: busy || isVoice || broken,
-                title: broken ? "Ce modèle a échoué au test" : "Utiliser pour les échanges à voix haute",
+                title: broken ? t("models.brokenHint") : t("models.useForVoiceHint"),
                 onclick: () => void choose("voice", model.id),
               },
-              "Vocal",
+              t("models.role.voice"),
             ),
       ),
     );
@@ -435,7 +434,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
   }
 
   function sorted(items: ModelInfo[]): ModelInfo[] {
-    const byName = (a: ModelInfo, b: ModelInfo) => a.name.localeCompare(b.name, "fr");
+    const byName = (a: ModelInfo, b: ModelInfo) => a.name.localeCompare(b.name, locale());
     const copy = [...items];
     switch (sort) {
       case "name":
@@ -470,8 +469,8 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
         h(
           "div",
           { class: "empty" },
-          h("p", {}, models.length ? "Aucun modèle ne correspond." : "Aucun modèle disponible."),
-          onlyWorking ? h("p", { class: "hint" }, "Lance « Tester tous les modèles » pour savoir lesquels fonctionnent.") : null,
+          h("p", {}, models.length ? t("models.noMatch") : t("models.noneAvailable")),
+          onlyWorking ? h("p", { class: "hint" }, t("models.onlyWorkingHint")) : null,
         ),
       );
       return;
@@ -513,13 +512,11 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
   return h(
     "section",
     { class: "card models-panel" },
-    h("h3", {}, onlyRole === "voice" ? "Modèle vocal — bibliothèque" : "Modèles de langage — bibliothèque"),
+    h("h3", {}, onlyRole === "voice" ? t("models.titleVoice") : t("models.titleMain")),
     h(
       "p",
       { class: "note" },
-      onlyRole === "voice"
-        ? "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimy le fait (puis une avec outils) : un modèle ne peut être choisi comme modèle vocal que s'il répond. Le choix s'applique tout de suite."
-        : "La liste vient du compte du fournisseur sélectionné. « Tester » envoie une petite requête, comme Jimy le fait (puis une avec outils) : un modèle ne peut être choisi que s'il répond. Le choix s'applique tout de suite. La latence varie selon la charge du fournisseur : le test est une indication, pas une garantie.",
+      onlyRole === "voice" ? t("models.noteVoice") : t("models.noteMain"),
     ),
     current,
     h(
@@ -528,7 +525,7 @@ export function modelsPanel(ctx: AppContext, hooks: ModelsPanelHooks, onlyRole?:
       providerSelect,
       searchInput,
       sortSelect,
-      h("label", { class: "toggle" }, workingBox, h("span", {}, "Seulement ceux qui fonctionnent")),
+      h("label", { class: "toggle" }, workingBox, h("span", {}, t("models.onlyWorking"))),
     ),
     h("div", { class: "row" }, batchButton, refreshButton, progress),
     list,

@@ -291,6 +291,7 @@ pub fn run() {
                 commands::session_get,
                 commands::session_rename,
                 commands::session_pin,
+                commands::session_mark_read,
                 commands::session_archive,
                 commands::session_messages,
                 commands::approval_respond,

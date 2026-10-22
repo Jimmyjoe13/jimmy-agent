@@ -489,7 +489,11 @@ mod tests {
     /// Racine temporaire : agent, docs, un gros dossier exclu, un fichier
     /// caché à ne pas montrer, et `src` en profondeur.
     fn racine() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("mentions-{}", std::process::id()));
+        // Un dossier par appel : les tests tournent en parallèle et un dossier
+        // commun était effacé par l'un pendant que l'autre le lisait (flaky).
+        static COMPTEUR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COMPTEUR.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let root = std::env::temp_dir().join(format!("mentions-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src").join("agent")).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();

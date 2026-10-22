@@ -1,7 +1,8 @@
 /** Vues Mémoire, Skills, Skin et Diagnostic. */
 import { api, type DoctorReport, type McpServerStatus, type Memory, type Skill } from "../api";
-import { MEMORY_KIND_LABEL, QUALITY_LABEL, attempt, formatTime, guard, h, mount, stateLabel, toast } from "../ui";
+import { attempt, formatTime, guard, h, memoryKindLabel, mount, qualityLabel, stateLabel, toast } from "../ui";
 import type { AppContext } from "../context";
+import { t, type Key } from "../i18n";
 import { card, toggle } from "./settings";
 
 /** Mémoire : ce que Jimy a retenu, et le droit de l'oublier. */
@@ -10,7 +11,7 @@ export function memoryView(ctx: AppContext): HTMLElement {
   const list = h("div", { class: "list" });
 
   async function reload() {
-    const memories = await guard(() => api.memoryList(), "mémoire");
+    const memories = await guard(() => api.memoryList(), t("guard.memory"));
     if (!memories) return;
     if (memories.length === 0) {
       mount(
@@ -18,8 +19,8 @@ export function memoryView(ctx: AppContext): HTMLElement {
         h(
           "div",
           { class: "empty" },
-          h("p", {}, "La mémoire est vide pour l'instant."),
-          h("p", { class: "hint" }, "Jimy extrait des préférences et des règles au fil des échanges."),
+          h("p", {}, t("memory.empty")),
+          h("p", { class: "hint" }, t("memory.emptyHint")),
         ),
       );
       return;
@@ -33,12 +34,12 @@ export function memoryView(ctx: AppContext): HTMLElement {
           h(
             "div",
             {},
-            h("span", { class: `tag kind-${memory.kind}` }, MEMORY_KIND_LABEL[memory.kind] ?? memory.kind),
+            h("span", { class: `tag kind-${memory.kind}` }, memoryKindLabel(memory.kind)),
             h("p", {}, memory.content),
             h(
               "div",
               { class: "row-meta" },
-              `${formatTime(memory.createdAt)} · importance ${memory.importance.toFixed(2)} · utilisée ${memory.useCount} fois`,
+              t("memory.meta", { date: formatTime(memory.createdAt), importance: memory.importance.toFixed(2), uses: memory.useCount }),
             ),
           ),
           h(
@@ -49,13 +50,13 @@ export function memoryView(ctx: AppContext): HTMLElement {
               {
                 class: "danger",
                 onclick: async () => {
-                  if (!window.confirm("Oublier ce souvenir ? Jimy ne pourra plus s'en servir.")) return;
+                  if (!window.confirm(t("memory.forgetConfirm"))) return;
                   if (!(await attempt(() => api.memoryForget(memory.id), "oubli"))) return;
                   await ctx.refreshStatus();
                   await reload();
                 },
               },
-              "Oublier",
+              t("memory.forget"),
             ),
           ),
         ),
@@ -68,24 +69,24 @@ export function memoryView(ctx: AppContext): HTMLElement {
     h(
       "header",
       { class: "view-header" },
-      h("button", { class: "ghost", onclick: () => void reload() }, "Actualiser"),
+      h("button", { class: "ghost", onclick: () => void reload() }, t("common.refresh")),
     ),
     card(
-      "Mémoire personnelle",
+      t("memory.title"),
       h(
         "p",
         { class: "note" },
-        "Stockée sur cette machine. ",
+        t("memory.stored"),
         ctx.status.memory.semantic_model
-          ? "Recherche par le sens via LM Studio (repli automatique sur la recherche par mots si LM Studio est éteint)."
-          : "Recherche par mots (aucun modèle d'embeddings configuré).",
+          ? t("memory.semantic")
+          : t("memory.keywords"),
       ),
       h(
         "div",
         { class: "stat-row" },
-        stat(String(ctx.status.memory.count), ctx.status.memory.count > 1 ? "souvenirs" : "souvenir"),
-        stat(String(ctx.status.tools.length), "outils"),
-        stat(String(ctx.status.skills), "skills"),
+        stat(String(ctx.status.memory.count), t("memory.stat.memories")),
+        stat(String(ctx.status.tools.length), t("memory.stat.tools")),
+        stat(String(ctx.status.skills), t("memory.stat.skills")),
       ),
       list,
     ),
@@ -99,11 +100,11 @@ function stat(value: string, label: string): HTMLElement {
 }
 
 /** Libellé et classe de l'état d'un serveur MCP. */
-const MCP_STATE: Record<McpServerStatus["state"], { label: string; cls: string }> = {
-  connected: { label: "connecté", cls: "ok" },
-  stopped: { label: "arrêté", cls: "" },
-  busy: { label: "occupé", cls: "warn" },
-  disabled: { label: "désactivé", cls: "" },
+const MCP_STATE: Record<McpServerStatus["state"], { label: Key; cls: string }> = {
+  connected: { label: "tools.mcp.connected", cls: "ok" },
+  stopped: { label: "tools.mcp.stopped", cls: "" },
+  busy: { label: "tools.mcp.busy", cls: "warn" },
+  disabled: { label: "tools.mcp.disabled", cls: "" },
 };
 
 /**
@@ -117,8 +118,8 @@ export function skillsView(): HTMLElement {
   const mcpPane = h("div", {});
   let tab: "skills" | "mcp" = "skills";
   const tabButtons = {
-    skills: h("button", { class: "subtab", role: "tab", onclick: () => select("skills") }, "Skills"),
-    mcp: h("button", { class: "subtab", role: "tab", onclick: () => select("mcp") }, "Serveurs MCP"),
+    skills: h("button", { class: "subtab", role: "tab", onclick: () => select("skills") }, t("tools.tab.skills")),
+    mcp: h("button", { class: "subtab", role: "tab", onclick: () => select("mcp") }, t("tools.tab.mcp")),
   };
 
   function select(next: "skills" | "mcp") {
@@ -138,7 +139,7 @@ export function skillsView(): HTMLElement {
 
   /** Serveurs MCP : état réel, commande (secrets masqués) et outils. */
   async function reloadMcp() {
-    const servers = await guard(() => api.mcpServers(), "serveurs MCP");
+    const servers = await guard(() => api.mcpServers(), t("guard.mcp"));
     if (!servers) return;
     if (servers.length === 0) {
       mount(
@@ -146,15 +147,16 @@ export function skillsView(): HTMLElement {
         h(
           "div",
           { class: "empty" },
-          h("p", {}, "Aucun serveur MCP."),
-          h("p", { class: "hint" }, "Demande à Jimy : « connecte-toi au serveur MCP … ». Il l'ajoutera lui-même."),
+          h("p", {}, t("tools.mcp.none")),
+          h("p", { class: "hint" }, t("tools.mcp.noneHint")),
         ),
       );
       return;
     }
     mount(mcpList);
     for (const server of servers) {
-      const state = MCP_STATE[server.state] ?? { label: server.state, cls: "" };
+      const known = MCP_STATE[server.state];
+      const state = known ? { label: t(known.label), cls: known.cls } : { label: server.state, cls: "" };
       const count = server.tools.length;
       mcpList.append(
         h(
@@ -167,12 +169,12 @@ export function skillsView(): HTMLElement {
             " ",
             h("span", { class: `badge ${state.cls}` }, state.label),
             " ",
-            h("span", { class: "row-meta" }, `${count} outil${count > 1 ? "s" : ""} · ${server.transport}`),
+            h("span", { class: "row-meta" }, t("tools.mcp.toolCount", { count, transport: server.transport })),
           ),
-          h("p", { class: "row-meta" }, "Commande"),
+          h("p", { class: "row-meta" }, t("tools.mcp.command")),
           h("pre", {}, server.launch || "—"),
           server.envKeys.length
-            ? h("p", { class: "row-meta" }, `Variables d'environnement : ${server.envKeys.join(", ")}`)
+            ? h("p", { class: "row-meta" }, t("tools.mcp.env", { keys: server.envKeys.join(", ") }))
             : null,
           count
             ? h(
@@ -182,7 +184,7 @@ export function skillsView(): HTMLElement {
                   h("li", {}, h("code", {}, tool.name), tool.description ? ` — ${tool.description}` : ""),
                 ),
               )
-            : h("p", { class: "note" }, "Aucun outil enregistré (serveur pas encore lancé ou en panne)."),
+            : h("p", { class: "note" }, t("tools.mcp.noTools")),
         ),
       );
     }
@@ -197,11 +199,11 @@ export function skillsView(): HTMLElement {
         h(
           "div",
           { class: "empty" },
-          h("p", {}, "Aucun skill."),
+          h("p", {}, t("tools.skills.none")),
           h(
             "p",
             { class: "hint" },
-            "Dis à Jimy : « la prochaine fois, fais toujours X comme ça ». Il en créera un lui-même.",
+            t("tools.skills.noneHint"),
           ),
         ),
       );
@@ -224,11 +226,11 @@ export function skillsView(): HTMLElement {
   mount(
     skillsPane,
     card(
-      "Répertoire",
+      t("tools.skills.folder"),
       h(
         "p",
         { class: "note" },
-        "Un skill par dossier, avec un fichier SKILL.md. Jimy peut en créer et en améliorer lui-même.",
+        t("tools.skills.folderNote"),
       ),
       list,
     ),
@@ -236,11 +238,11 @@ export function skillsView(): HTMLElement {
   mount(
     mcpPane,
     card(
-      "Serveurs connectés",
+      t("tools.mcp.connectedTitle"),
       h(
         "p",
         { class: "note" },
-        "Les outils de ces serveurs sont proposés à Jimy comme les siens. Les clés présentes dans les commandes sont masquées.",
+        t("tools.mcp.connectedNote"),
       ),
       mcpList,
     ),
@@ -251,7 +253,7 @@ export function skillsView(): HTMLElement {
       "header",
       { class: "view-header" },
       h("div", { class: "subtabs", role: "tablist" }, tabButtons.skills, tabButtons.mcp),
-      h("button", { class: "ghost", onclick: () => void (tab === "skills" ? reload() : reloadMcp()) }, "Actualiser"),
+      h("button", { class: "ghost", onclick: () => void (tab === "skills" ? reload() : reloadMcp()) }, t("common.refresh")),
     ),
     skillsPane,
     mcpPane,
@@ -274,7 +276,7 @@ export function skinView(ctx: AppContext): HTMLElement {
           await ctx.refreshStatus();
           // Re-rendu : le bouton du skin actif doit changer d'apparence.
           ctx.navigate("skin");
-          toast(`Skin « ${skin.label} » appliqué`);
+          toast(t("skin.applied", { label: skin.label }));
         },
       },
       skin.label,
@@ -290,7 +292,7 @@ export function skinView(ctx: AppContext): HTMLElement {
     ...premium.map((skin) =>
       skin.unlocked
         ? skinButton(skin)
-        : h("button", { class: "ghost premium-locked", disabled: true, title: "À débloquer avec une licence" }, `🔒 ${skin.label}`),
+        : h("button", { class: "ghost premium-locked", disabled: true, title: t("skin.locked") }, `🔒 ${skin.label}`),
     ),
   );
   const keyInput = h("input", { class: "field", placeholder: "JIMY-…", spellcheck: "false" }) as HTMLInputElement;
@@ -302,16 +304,16 @@ export function skinView(ctx: AppContext): HTMLElement {
         const key = keyInput.value.trim();
         if (!key) return;
         // Les fichiers du skin sont téléchargés à l'activation (quelques Mo).
-        toast("Activation et téléchargement du skin…");
+        toast(t("skin.activating"));
         const unlocked = await guard(() => api.licenceActivate(key), "licence");
         if (unlocked === undefined) return;
         await ctx.refreshStatus();
         ctx.navigate("skin");
         const label = premium.find((s) => s.id === unlocked)?.label;
-        toast(unlocked === "*" ? "Tous les skins premium sont débloqués" : `Skin « ${label ?? unlocked} » débloqué`);
+        toast(unlocked === "*" ? t("skin.allUnlocked") : t("skin.unlocked", { label: label ?? unlocked }));
       },
     },
-    "Activer",
+    t("skin.activate"),
   );
   const allUnlocked = premium.every((s) => s.unlocked);
 
@@ -324,18 +326,18 @@ export function skinView(ctx: AppContext): HTMLElement {
         {
           class: ctx.status.avatar.quality === level ? "primary" : "ghost",
           onclick: async () => {
-            if (!(await attempt(() => api.avatarQuality(level), "qualité"))) return;
+            if (!(await attempt(() => api.avatarQuality(level), t("guard.quality")))) return;
             await ctx.refreshStatus();
             ctx.navigate("skin");
-            toast(`Qualité « ${QUALITY_LABEL[level]} » appliquée`);
+            toast(t("skin.qualityApplied", { label: qualityLabel(level) }));
           },
         },
-        QUALITY_LABEL[level],
+        qualityLabel(level),
       ),
     ),
   );
 
-  const bubbleInput = h("input", { class: "field", value: "Bonjour, je suis Jimy." }) as HTMLInputElement;
+  const bubbleInput = h("input", { class: "field", value: t("skin.bubbleDefault") }) as HTMLInputElement;
   const dodgeToggle = h("input", { type: "checkbox" }) as HTMLInputElement;
   dodgeToggle.checked = ctx.status.avatar.dodge;
   dodgeToggle.addEventListener("change", async () => {
@@ -345,7 +347,7 @@ export function skinView(ctx: AppContext): HTMLElement {
       return;
     }
     await ctx.refreshStatus();
-    toast(enabled ? "Jimy s'écartera à l'approche de la souris" : "Esquive désactivée");
+    toast(enabled ? t("skin.dodgeOn") : t("skin.dodgeOff"));
   });
 
   return h(
@@ -356,27 +358,25 @@ export function skinView(ctx: AppContext): HTMLElement {
       : h(
           "div",
           { class: "warn-note" },
-          "L'avatar est arrêté : les changements seront appliqués à son prochain démarrage (Paramètres → Avatar).",
+          t("skin.avatarStopped"),
         ),
     card(
-      "Skin actif",
+      t("skin.active"),
       skinButtons,
       h(
         "p",
         { class: "note" },
-        "Jimy est l'identité, le skin n'est qu'une apparence : le changer ne touche ni à la mémoire ni aux réglages.",
+        t("skin.activeNote"),
       ),
     ),
     card(
-      "Skins premium",
+      t("skin.premium"),
       premiumButtons,
       allUnlocked
         ? h(
             "p",
             { class: "note" },
-            "Tous les skins premium sont débloqués sur cette machine. Chacun répond à son nom : " +
-              premium.map((s) => `${s.label} → « ${s.wake_word} »`).join(", ") +
-              ".",
+            t("skin.premiumAll", { list: premium.map((s) => `${s.label} → « ${s.wake_word} »`).join(", ") }),
           )
         : h(
             "div",
@@ -384,7 +384,7 @@ export function skinView(ctx: AppContext): HTMLElement {
             h(
               "p",
               { class: "note" },
-              "Après l'achat, la page de confirmation affiche ta clé de licence : colle-la ici. Elle est vérifiée sur ta machine, sans connexion.",
+              t("skin.licenseHint"),
             ),
             h("div", { class: "row" }, keyInput, activateButton),
             h(
@@ -393,23 +393,23 @@ export function skinView(ctx: AppContext): HTMLElement {
               h(
                 "button",
                 { class: "ghost", onclick: () => attempt(() => api.shopOpen(), "boutique") },
-                "Voir la boutique",
+                t("skin.shop"),
               ),
             ),
           ),
     ),
-    card("Qualité graphique", h("p", { class: "note" }, "Appliquée immédiatement à l'avatar Godot."), qualityButtons),
+    card(t("skin.quality"), h("p", { class: "note" }, t("skin.qualityNote")), qualityButtons),
     card(
-      "Comportement",
+      t("skin.behavior"),
       h(
         "p",
         { class: "note" },
-        "Seul le personnage capte la souris : le reste de sa fenêtre laisse passer les clics vers le bureau. Avec l'esquive, Jimy s'écarte quand le curseur approche et revient à sa place ensuite — va le chercher là où il s'est réfugié pour le cliquer.",
+        t("skin.behaviorNote"),
       ),
-      toggle("S'écarter à l'approche de la souris", dodgeToggle),
+      toggle(t("skin.dodge"), dodgeToggle),
     ),
     card(
-      "États de l'avatar",
+      t("skin.states"),
       h(
         "div",
         { class: "state-grid" },
@@ -420,7 +420,7 @@ export function skinView(ctx: AppContext): HTMLElement {
               {
                 class: "state-chip",
                 onclick: async () => {
-                  await attempt(() => api.avatarState(state as never, ""), "état");
+                  await attempt(() => api.avatarState(state as never, ""), t("guard.state"));
                 },
               },
               stateLabel(state),
@@ -430,11 +430,11 @@ export function skinView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: "note" },
-        "Clique sur un état pour le vérifier immédiatement sur l'avatar.",
+        t("skin.statesNote"),
       ),
     ),
     card(
-      "Test de la bulle",
+      t("skin.bubbleTest"),
       h(
         "div",
         { class: "row" },
@@ -442,7 +442,7 @@ export function skinView(ctx: AppContext): HTMLElement {
         h(
           "button",
           { class: "ghost", onclick: () => void attempt(() => api.avatarSay(bubbleInput.value), "bulle") },
-          "Afficher dans la bulle",
+          t("skin.bubbleShow"),
         ),
       ),
     ),
@@ -459,7 +459,7 @@ export function diagnosticView(ctx: AppContext): HTMLElement {
     const result = await guard(() => api.doctor(), "diagnostic");
     mount(report);
     if (!result) {
-      report.append(h("div", { class: "empty" }, h("p", {}, "Diagnostic impossible.")));
+      report.append(h("div", { class: "empty" }, h("p", {}, t("diag.impossible"))));
       return;
     }
     const typed = result as DoctorReport;
@@ -467,7 +467,7 @@ export function diagnosticView(ctx: AppContext): HTMLElement {
       h(
         "p",
         { class: typed.ok ? "ok-note" : "warn-note" },
-        `${typed.passed} vérification(s) réussie(s) sur ${typed.total}.`,
+        t("diag.summary", { passed: typed.passed, total: typed.total }),
       ),
     );
     for (const check of typed.checks) {
@@ -505,21 +505,21 @@ export function diagnosticView(ctx: AppContext): HTMLElement {
               if (!result) return;
               toast(
                 result.missing.length
-                  ? `Secrets rechargés — manquants : ${result.missing.join(", ")}`
-                  : "Secrets rechargés depuis .env",
+                  ? t("diag.secretsMissing", { missing: result.missing.join(", ") })
+                  : t("diag.secretsReloaded"),
                 result.missing.length ? "error" : "info",
               );
               await ctx.refreshStatus();
               await run();
             },
           },
-          "Recharger .env",
+          t("diag.reloadEnv"),
         ),
-        h("button", { class: "primary", onclick: () => void run() }, "Relancer le diagnostic"),
+        h("button", { class: "primary", onclick: () => void run() }, t("diag.rerun")),
       ),
     ),
-    card("Vérifications", report),
-    card("Fichiers", h("p", { class: "note" }, "Journal : data/logs/jimmy.log"), paths),
+    card(t("diag.checks"), report),
+    card(t("diag.files"), h("p", { class: "note" }, t("diag.log")), paths),
   );
   void run();
   void showPaths();

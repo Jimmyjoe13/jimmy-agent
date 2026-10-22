@@ -10,6 +10,7 @@
  *   cache la fenêtre (Jimy reste vivant), comme l'ancien bouton natif.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { t } from "./i18n";
 import { h, icon } from "./ui";
 
 export function mountTitlebar() {
@@ -17,7 +18,7 @@ export function mountTitlebar() {
 
   const maximize = h(
     "button",
-    { class: "win-btn", title: "Agrandir", "aria-label": "Agrandir", onclick: () => win.toggleMaximize() },
+    { class: "win-btn", title: t("win.maximize"), "aria-label": t("win.maximize"), onclick: () => win.toggleMaximize() },
     icon("winMaximize", 14, 1.5),
   );
 
@@ -25,7 +26,7 @@ export function mountTitlebar() {
   // double-clic sur la bande ou un raccourci Windows (Win+↑).
   const syncMaximized = async () => {
     const maximized = await win.isMaximized();
-    const label = maximized ? "Restaurer" : "Agrandir";
+    const label = maximized ? t("win.restore") : t("win.maximize");
     maximize.title = label;
     maximize.setAttribute("aria-label", label);
     maximize.replaceChildren(icon(maximized ? "winRestore" : "winMaximize", 14, 1.5));
@@ -39,13 +40,13 @@ export function mountTitlebar() {
       { class: "win-controls" },
       h(
         "button",
-        { class: "win-btn", title: "Réduire", "aria-label": "Réduire", onclick: () => win.minimize() },
+        { class: "win-btn", title: t("win.minimize"), "aria-label": t("win.minimize"), onclick: () => win.minimize() },
         icon("winMinimize", 14, 1.5),
       ),
       maximize,
       h(
         "button",
-        { class: "win-btn win-close", title: "Fermer", "aria-label": "Fermer", onclick: () => win.close() },
+        { class: "win-btn win-close", title: t("win.close"), "aria-label": t("win.close"), onclick: () => win.close() },
         icon("winClose", 14, 1.5),
       ),
     ),
