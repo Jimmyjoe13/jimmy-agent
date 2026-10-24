@@ -1074,7 +1074,10 @@ pub fn register_secrets<I: IntoIterator<Item = String>>(values: I) {
     known.sort_by_key(|v| std::cmp::Reverse(v.len()));
 }
 
-/// Remplace toute valeur secrète connue par [`REDACTED`].
+/// Remplace toute valeur secrète connue par [`REDACTED`], puis les jetons aux
+/// motifs de clé ([`KEY_PATTERNS`]) même inconnus : une clé d'un autre service
+/// lue dans un `.env` distant ferait sinon bloquer tout envoi suivant par
+/// `body_contains_secret`.
 pub fn redact_known(text: &str) -> String {
     let known = KNOWN_SECRETS.read().unwrap_or_else(|e| e.into_inner());
     let mut out = text.to_string();
@@ -1083,6 +1086,34 @@ pub fn redact_known(text: &str) -> String {
             out = out.replace(value.as_str(), REDACTED);
         }
     }
+    redact_key_patterns(&out)
+}
+
+/// Masque chaque jeton commençant par un motif de [`KEY_PATTERNS`] (casse
+/// ignorée, comme la garde), jusqu'au premier caractère hors `[A-Za-z0-9-_.]`.
+/// Le reste du texte (retours à la ligne, indentation) est conservé.
+fn redact_key_patterns(text: &str) -> String {
+    // Minuscules ASCII seulement : les positions d'octets restent alignées.
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0;
+    loop {
+        // Prochaine occurrence, tous motifs confondus.
+        let next = KEY_PATTERNS
+            .iter()
+            .filter_map(|pat| lower[pos..].find(pat).map(|i| pos + i))
+            .min();
+        let Some(start) = next else { break };
+        let end = start
+            + text[start..]
+                .bytes()
+                .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                .count();
+        out.push_str(&text[pos..start]);
+        out.push_str(REDACTED);
+        pos = end;
+    }
+    out.push_str(&text[pos..]);
     out
 }
 
@@ -1242,6 +1273,21 @@ mod tests {
         assert!(!masque.contains("cle-agregat-test-0123456789"), "{masque}");
         assert!(masque.contains(&format!("X-API-Key:{REDACTED}\n  suite")), "{masque}");
         assert_eq!(redact_known("un mot court"), "un mot court");
+    }
+
+    /// Cas réel du 24 octobre : un `.env` lu sur le VPS a remonté la clé
+    /// OpenRouter d'un autre service (inconnue de Jimmy). La garde réseau a
+    /// ensuite bloqué tous les appels au modèle du tour (« secret detecte
+    /// dans le corps »). Les motifs de clé doivent être masqués à l'entrée,
+    /// mise en forme conservée.
+    #[test]
+    fn une_cle_etrangere_lue_dans_un_env_ne_bloque_plus_l_envoi() {
+        let sortie = "===ENV===\nOPENROUTER_API_KEY=sk-or-v1-0123456789abcdef\n  groq: \"GSK_AbC123xyz\",\nfin";
+        let masque = redact_known(sortie);
+        let body = json!({"input": masque});
+        assert!(!body_contains_secret(&body, &[]), "{masque}");
+        assert!(masque.contains(&format!("OPENROUTER_API_KEY={REDACTED}\n")), "{masque}");
+        assert!(masque.contains(&format!("  groq: \"{REDACTED}\",\nfin")), "{masque}");
     }
 
     /// Lot 4, tranche 2 : arrêter un processus engage (perte de travail) —
@@ -1852,11 +1898,15 @@ pub fn body_contains_secret(body: &serde_json::Value, secrets: &[String]) -> boo
         }
     }
     let low = body.to_string().to_lowercase();
-    for pat in ["sk-or-", "xoxb-", "ghp_", "gsk_"] {
+    for pat in KEY_PATTERNS {
         if low.contains(pat) { return true; }
     }
     false
 }
+
+/// Motifs évidents de clé (OpenRouter, Slack, GitHub, Groq), en minuscules :
+/// refusés par la garde réseau, masqués à l'entrée par `redact_known`.
+const KEY_PATTERNS: [&str; 4] = ["sk-or-", "xoxb-", "ghp_", "gsk_"];
 
 /// Secrets connus depuis l'environnement (sans toucher a config::Secrets).
 pub fn env_secret_values() -> Vec<String> {
