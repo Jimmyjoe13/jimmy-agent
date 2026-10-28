@@ -58,6 +58,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Permissions | ✅ LECTURE / MODIFICATION / EXÉCUTION / RÉSEAU | 4 tests unitaires |
 | Mémoire locale | ✅ vectorielle (embeddings LM Studio, repli par hachage) + FTS5, apprentissage auto | tests unitaires + `--test memory_semantic` |
 | Skills | ✅ création, lecture, amélioration, suggestion | 3 tests unitaires |
+| Âme (`SOUL.md`) | ✅ caractère et leçons apprises en tête de chaque prompt ; **Jimy la fait évoluer lui-même** (`soul_update`, revue périodique), bornée à 2 500 caractères, sans secret, `.bak` et journal des changements ; Réglages → Âme pour relire, modifier ou annuler | tests `soul`, `growth` + suite d'interface |
 | Vault Obsidian | ✅ lecture plein texte du vault, écriture des souvenirs en notes | recherche réelle sur le vault `C:\Obsidian\Jimmy` |
 | Vault — déclenchement | ✅ **décliné** sur demande courte, sans ré-interroger | 3 tests unitaires |
 | Wake word « Jimy » | ✅ détection locale, variantes ASR gérées | 5 tests unitaires |
@@ -68,7 +69,7 @@ Chaque ligne ci-dessous a été **exécutée et vérifiée** sur la machine cibl
 | Boucle vocale | ✅ wake → STT → agent → voix → avatar | `voice/listener.rs` |
 | Profils graphiques | ✅ `low` / `medium` / `high` appliqués à Godot | logs `[godot/main]` |
 | Diagnostic | ✅ 8 vérifications, chemins, secrets | vue Diagnostic |
-| Interface | ✅ 33 parcours sur la vraie application (Chat, tâches de fond, capture, Voix, Skin, Paramètres, Historique…) | `scripts/test-ui.ps1` |
+| Interface | ✅ 45 parcours sur la vraie application (Chat, tâches de fond, capture, Voix, Skin, Paramètres, Âme, Historique…) | `scripts/test-ui.ps1` |
 
 ### Chiffres mesurés sur cette machine
 
@@ -144,6 +145,7 @@ jimmy-agent-personnel/
 │   │   ├── memory/         vecteurs, apprentissage, recherche, vault Obsidian
 │   │   ├── providers/      LLM, TTS, STT, avatar
 │   │   ├── skills/         création et amélioration de skills
+│   │   ├── soul.rs         âme de Jimy (data/SOUL.md), auto-éditée
 │   │   ├── mcp/            client MCP (stdio)
 │   │   └── voice/          micro, wake word, boucle d'écoute
 │   ├── skills/             skills créés par Jimy
@@ -418,8 +420,8 @@ automatiquement après l'onboarding). Sinon Jimy reste muet : c'est voulu.
 ### Tests automatisés
 
 ```powershell
-.\scripts\with-msvc.ps1 cargo test --workspace   # 151 tests unitaires (6 octobre), 0 avertissement
-.\scripts\test-ui.ps1                            # 26 parcours sur la vraie application
+.\scripts\with-msvc.ps1 cargo test --workspace   # plus de 380 tests (28 octobre), 0 avertissement
+.\scripts\test-ui.ps1                            # 45 parcours sur la vraie application
 ```
 
 Les tests qui consultent de vrais services sont marqués `#[ignore]` et se

@@ -131,13 +131,13 @@ Le prompt système est reconstruit **à chaque tour**, à partir de ce que Jimmy
 sait au moment précis. Ce n'est pas un bloc figé, parce qu'un prompt figé
 devient faux dès qu'un paramètre change. Chaque bloc a un budget, et la
 taille de chacun est écrite au journal à chaque demande
-(`[contexte] système N caractères (identité …, maintenant …, mémoire …)`) :
+(`[contexte] système N caractères (âme …, socle …, maintenant …, mémoire …)`) :
 
 | Bloc | Contenu | Budget |
 |---|---|---|
-| identité (+ voix) | consignes fixes | ~5 600 car. |
+| âme | `data/SOUL.md` : qui est Jimy, ses leçons apprises (voir « Âme ») | 2 500 car. max. |
+| socle (+ voix) | consignes fixes : outils, sécurité, sortie, voix | ~7 000 car. |
 | maintenant | projet, modèle, vault, tâche de fond, date et canal, cartes d'accord en attente, dernière page du navigateur (< 2 h), titre de la fenêtre regardée si `memory.share_window_title` | ~450 car. |
-| amendements | leçons actées avec l'utilisateur | — |
 | outils | noms, serveurs MCP regroupés | ~3 300 car. |
 | chantiers | travaux suivis d'une conversation à l'autre | 5 lignes, 600 car. |
 | plus tôt | résumé des messages sortis de la fenêtre | 1 500 car. |
@@ -147,6 +147,36 @@ taille de chacun est écrite au journal à chaque demande
 L'historique renvoyé au modèle s'arrête aux **20 derniers messages** de
 texte. Une demande courte (moins de 6 mots, « et ensuite ? ») est rappelée
 avec le message précédent, le résumé et la tâche de fond en plus d'elle-même.
+
+### Âme : `SOUL.md`, auto-éditée
+
+`soul.rs`, inspiré du SOUL.md de Hermes Agent. L'identité n'est plus une
+constante du code : `data/SOUL.md` (créé au premier lancement) ouvre le
+prompt, en Fast-Path comme en Tool-Path, avant le socle. Deux étages
+**complémentaires**, sans recouvrement :
+
+- l'**âme** : qui est Jimy (caractère, nom, avatar) et ses **leçons
+  apprises**, une ligne impérative chacune ;
+- le **socle** (`prompt::SOCLE`, `SOCLE_FAST`) : la machine — outils,
+  sécurité, voix, format de sortie validé. Il l'emporte en cas de
+  contradiction.
+
+Jimy fait évoluer son âme **lui-même**, sans carte d'accord :
+
+- l'outil `soul_update` ajoute une leçon (`add`) ou remplace un passage
+  exact (`replace`, vide = supprime) quand l'utilisateur corrige sa façon
+  d'être ou de travailler. Il reste disponible en Fast-Path, à côté de
+  `remember` : une correction de style est souvent une phrase en passant ;
+- la **revue périodique** (`growth.rs`) inscrit ses « Amendement proposé »
+  dans les leçons, après avoir relu l'âme actuelle pour ne pas les doubler.
+
+Garde-fous, communs à Jimy et à l'interface : 2 500 caractères au plus
+(un refus pousse à condenser plutôt qu'à empiler, le coût de chaque appel
+reste borné), aucun secret connu, copie `.bak` avant chaque écriture,
+journal `data/soul_changes.log`. Réglages → Âme permet de relire, modifier,
+annuler la dernière modification ou revenir à l'âme d'origine. Le filet
+`cargo test --test soul -- --ignored` compare, sur des demandes réelles, les
+réponses avec l'âme actuelle et avec l'âme d'origine.
 
 ### Carnet de bord : résumé glissant et chantiers
 

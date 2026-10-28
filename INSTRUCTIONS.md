@@ -141,6 +141,12 @@ om.json`, champ `api_key`) et `${VAR}` dans
   Identité des commits : `Jimmyjoe13 <192435933+Jimmyjoe13@users.noreply.github.com>`
   (l'historique a été réécrit le 6 octobre pour retirer l'adresse
   personnelle : les identifiants de commit d'avant ont changé).
+- État au 28 octobre 2026 : release **v0.2.4** (tag `v0.2.4`, CI
+  installeur) — **âme auto-éditée** : `data/SOUL.md` (module `soul.rs`) ouvre
+  le prompt avant le socle (`SOCLE`, ex-`IDENTITY`), Jimy la fait évoluer
+  lui-même (`soul_update`, revue périodique ; amendements fondus dedans),
+  Réglages → Âme ; « Résume ma journée » en chemin complet ; pièges 143-144.
+  Caractère ou leçon → l'âme ; machine ou règle validée → le socle.
 - État au 22 octobre 2026 : release **v0.2.2** (tag `v0.2.2`, CI
   installeur) — interface « Visière » aux couleurs du logo et version
   anglaise (`desktop/src/i18n`, réglage `ui.language`), sessions (titres,
