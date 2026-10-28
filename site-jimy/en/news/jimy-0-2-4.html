@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jimy 0.2.4: a soul that learns from you</title>
+<meta name="description" content="Jimy 0.2.4: the Windows desktop AI agent now has a soul it evolves on its own when you correct it. Plus: 4 voice engines, a conversation list, tasks that survive a restart.">
+<link rel="canonical" href="https://jimy-agent.me/en/news/jimy-0-2-4.html">
+<link rel="alternate" hreflang="fr" href="https://jimy-agent.me/nouveautes/jimy-0-2-4.html">
+<link rel="alternate" hreflang="en" href="https://jimy-agent.me/en/news/jimy-0-2-4.html">
+<link rel="alternate" hreflang="x-default" href="https://jimy-agent.me/nouveautes/jimy-0-2-4.html">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM";</script>
+<link rel="stylesheet" href="/assets/site.css">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://jimy-agent.me/en/news/jimy-0-2-4.html">
+<meta property="og:title" content="Jimy 0.2.4: a soul that learns from you">
+<meta property="og:description" content="The open source Windows desktop AI agent now evolves its own character and work habits when you correct it.">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Jimy 0.2.4: a soul that learns from you",
+  "description": "What's new in Jimy 0.2.3 and 0.2.4, the open source desktop AI agent for Windows.",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "inLanguage": "en",
+  "datePublished": "2026-10-28T18:00:00+01:00",
+  "dateModified": "2026-10-28T18:00:00+01:00",
+  "author": { "@type": "Person", "name": "Jimmyjoe13", "url": "https://github.com/Jimmyjoe13" },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Jimy Agent",
+    "url": "https://jimy-agent.me",
+    "logo": { "@type": "ImageObject", "url": "https://jimy-agent.me/assets/logo/icon-256.png" }
+  },
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "https://jimy-agent.me/en/news/jimy-0-2-4.html" }
+}
+</script>
+
+<style>
+.doc .wrap { max-width: 880px; }
+.badge-tech { display: inline-block; background: rgba(255, 106, 77, 0.12); color: var(--coral); border: 1px solid rgba(255, 106, 77, 0.3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 99px; margin-bottom: 14px; }
+.meta-article { color: var(--ink-mute); font-size: 14px; margin-bottom: 32px; font-family: var(--mono); }
+.tldr { background: var(--night-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; margin: 30px 0 40px; }
+.tldr h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); margin: 0 0 14px; }
+.tldr ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.tldr li { color: var(--ink); line-height: 1.55; }
+.section-block { margin: 44px 0; }
+.section-block h2 { font-size: 26px; color: var(--ink); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.section-block h3 { font-size: 19px; color: var(--ink); margin: 24px 0 12px; }
+.section-block p, .section-block li { font-size: 16px; line-height: 1.7; color: var(--ink-dim); }
+.section-block ul, .section-block ol { padding-left: 22px; margin: 16px 0; }
+.section-block li { margin-bottom: 8px; }
+.callout { background: rgba(255, 106, 77, 0.06); border-left: 3px solid var(--coral); padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 24px 0; }
+.callout p { margin: 0; font-size: 15px; color: var(--ink-dim); }
+.callout strong { color: var(--ink); }
+.cta-box { background: linear-gradient(135deg, rgba(255, 106, 77, 0.1) 0%, rgba(20, 24, 40, 0.95) 100%); border: 1px solid rgba(255, 106, 77, 0.35); border-radius: var(--radius); padding: 36px 32px; text-align: center; margin: 50px 0 30px; }
+.cta-box h3 { font-size: 24px; margin-bottom: 12px; color: var(--ink); }
+.cta-box p { font-size: 16px; color: var(--ink-dim); max-width: 600px; margin: 0 auto 24px; }
+</style>
+</head>
+<body class="doc">
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/en/" aria-label="Jimy, Home"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></a>
+    <nav aria-label="Main Navigation">
+      <a href="/en/#how-it-works">How It Works</a>
+      <a href="/en/#features">Features</a>
+      <a href="/en/news/jimy-0-2-4.html" class="active">What's new</a>
+      <a class="btn btn-main btn-sm" href="/en/#download">Download</a>
+      <a href="/nouveautes/jimy-0-2-4.html" class="lang-switch" title="Lire en français" style="font-family:var(--mono);font-size:12px;color:var(--ink-mute);text-decoration:none;border:1px solid var(--line-2);padding:4px 8px;border-radius:6px;margin-left:6px">FR</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <span class="badge-tech">New release</span>
+    <h1>Jimy 0.2.4: a soul that learns from you</h1>
+    <p class="meta-article">Published October 28, 2026 · By Jimmyjoe13 · 4 min read · <a href="/nouveautes/jimy-0-2-4.html">Lire en français</a></p>
+
+    <p class="lead">
+      Jimy is an open source desktop AI agent for Windows that you drive by voice or text. Until now, its personality was written once and for all in its code: when you corrected it, you had to say it again next time. With 0.2.4, Jimy has a soul, and it evolves it on its own.
+    </p>
+
+    <div class="tldr">
+      <h2>In short</h2>
+      <ul>
+        <li><strong>A soul that learns</strong>: when you correct how Jimy answers or works, it draws a lesson and keeps it for every conversation that follows.</li>
+        <li><strong>You stay in control</strong>: Settings › Soul to review what it learned, edit it or undo it.</li>
+        <li><strong>"Summarize my day" works</strong>: Jimy finds your actual conversations of the day instead of improvising.</li>
+        <li><strong>Since 0.2.2</strong>: a conversation list next to the Chat, four voice engines including a free offline one, a complete English translation, tasks that survive a restart.</li>
+      </ul>
+    </div>
+
+    <section class="section-block" id="soul">
+      <h2>A soul Jimy evolves on its own</h2>
+      <p>
+        The idea comes from the SOUL.md file popularized by the open source agent Hermes: a short text that says who the agent is and how it likes to work, read at every exchange. Jimy's contains its character and a list of <strong>learned lessons</strong>, one sentence each.
+      </p>
+      <ul>
+        <li><strong>You correct it, it remembers.</strong> "Give me the number before the explanation", "stop asking me to confirm that": Jimy writes the lesson into its soul, tells you in one sentence, then sticks to it everywhere, in text and by voice.</li>
+        <li><strong>It also learns from its failures.</strong> Its periodic review goes over its tool errors; when a work habit emerges, it joins the lessons.</li>
+        <li><strong>A short soul, on purpose.</strong> It is read with every message, so it is capped at 2,500 characters. Rather than piling up, Jimy has to condense or replace a lesson. The cost of each exchange stays almost the same.</li>
+      </ul>
+      <div class="callout">
+        <p><strong>What the soul cannot change:</strong> Jimy's safety rules (your approval before writing a sensitive file, sending a message, shutting down the PC…) stay in its core, written in the code. In case of conflict, the core always wins. The soul can't hold a key or a password either.</p>
+      </div>
+      <h3>Everything stays visible and reversible</h3>
+      <p>
+        In <strong>Settings › Soul</strong>, you read Jimy's soul as it sees it, with its recent changes: who made them, when, and why. You can rewrite it yourself, undo its last change or go back to the original soul. A copy of the previous version is kept before every change.
+      </p>
+    </section>
+
+    <section class="section-block" id="day">
+      <h2>"Summarize my day" no longer makes things up</h2>
+      <p>
+        The home screen suggestion "Summarize what we did today" went through the light mode, with no history and no tools: Jimy answered with unrelated old memories. These requests now take the full path, and Jimy lists your recent conversations with their date before answering. Same fix for "Analyze this folder".
+      </p>
+    </section>
+
+    <section class="section-block" id="since-022">
+      <h2>Also since 0.2.2</h2>
+      <p>Version 0.2.3, released on October 22, delivered what the previous article promised:</p>
+      <ul>
+        <li><strong>The conversation list next to the Chat</strong>, with unread messages, and a side menu that folds away when the window is small.</li>
+        <li><strong>The voice of your choice</strong>: Fish Audio (through OpenRouter), Windows voices (free and offline, no key), an OpenAI-compatible service such as a local Kokoro, or ElevenLabs.</li>
+        <li><strong>"One brain for everything"</strong>: a switch to use the same AI model everywhere, and a card showing what Jimy thinks with.</li>
+        <li><strong>The complete English translation</strong>, down to Jimy's spoken answers and status sounds.</li>
+        <li><strong>Tasks that no longer get lost</strong>: a background task interrupted by a restart is picked up again, and the home screen offers to resume your open work.</li>
+        <li><strong>Real projects</strong>: Jimy can attach a conversation to a project and then reads its instructions (<code class="mono">AGENTS.md</code>). Say "new conversation" out loud to change the subject.</li>
+        <li><strong>More security</strong>: another service's key showing up in a tool result is masked before it reaches the model.</li>
+      </ul>
+    </section>
+
+    <section class="section-block" id="update">
+      <h2>How to update</h2>
+      <ul>
+        <li><strong>You already have Jimy</strong>: run the new installer over the old one. Conversations, settings and memories are kept; your soul is created on first launch, identical to the character Jimy had so far.</li>
+        <li><strong>First install</strong>: download the installer below. Jimy is free and open source, and your data stays on your PC.</li>
+      </ul>
+    </section>
+
+    <div class="cta-box">
+      <h3>Try Jimy 0.2.4</h3>
+      <p>An AI agent that lives on your Windows desktop, that you drive by voice, that learns from your corrections and keeps your data at home.</p>
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="20" height="20"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Download Jimy for Windows (free)
+      </a>
+      <p style="margin-top:14px;font-size:13px;color:var(--ink-mute)">
+        Free, open source installer · <a href="https://github.com/Jimmyjoe13/jimmy-agent/releases/tag/v0.2.4" style="color:var(--coral)">Release notes on GitHub</a> · <a href="/en/news/jimy-0-2-2.html" style="color:var(--coral)">What's new in 0.2.2</a>
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Jimy Agent"></span><strong>Jimy</strong></span>
+    <span>Jimy, with a single M · jimy-agent.me</span>
+    <nav aria-label="Footer Links">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Privacy</a>
+      <a href="/code-signing.html">Code Signing Policy</a>
+      <a href="/comparatif/agent-ia-windows-vs-copilot.html">Copilot Comparison</a>
+      <a href="/guides/serveurs-mcp-windows-local.html">MCP Guide</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js" defer></script>
+</body>
+</html>
