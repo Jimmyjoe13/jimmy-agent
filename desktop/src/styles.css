@@ -3776,3 +3776,28 @@ button.icon-only {
 .sidebar.collapsed .sidebar-status .uptodate-badge {
   display: none;
 }
+
+/* Réglages → Âme (`views/soul.ts`) : l'éditeur du SOUL.md de Jimy. */
+.soul-editor {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.soul-count {
+  margin-right: auto;
+}
+
+.soul-count.over {
+  color: var(--ko);
+}
+
+.soul-changes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-dim);
+}

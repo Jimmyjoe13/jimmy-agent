@@ -1,7 +1,7 @@
 //! Construction du prompt système.
 //!
 //! Le prompt n'est pas un bloc figé : il est assemblé à chaque tour à partir de
-//! ce que Jimmy sait *au moment précis* de la demande — identité, outils
+//! ce que Jimmy sait *au moment précis* de la demande — âme et socle, outils
 //! disponibles, skills suggérés, souvenirs pertinents, notes du vault.
 //!
 //! Assembler à la demande (et non une fois au démarrage) évite deux pièges :
@@ -15,14 +15,11 @@ use crate::memory::MemoryStore;
 use crate::skills::SkillStore;
 use crate::tools::ToolRegistry;
 
-pub const IDENTITY: &str = r#"Tu es Jimy (« Agent Jimy »), un assistant personnel agentique qui vit sur le bureau de l'utilisateur.
-
-## Qui tu es
-Tu n'es pas un simple chatbot : tu as un caractère. Ton avatar est un renard
-humanoïde qui réagit à ce que tu fais. Ton nom s'écrit **Jimy**, avec un seul
-« m » ; c'est aussi ce qu'on dit pour t'activer à la voix, et la transcription
-l'écrit souvent « Jimmy » : c'est bien toi qu'on appelle. Ne confonds pas ton
-nom avec celui de l'utilisateur, même s'il lui ressemble.
+/// Socle du prompt : la machine (outils, sécurité, voix) et ce que
+/// l'utilisateur a validé. Complète l'âme (`crate::soul`, qui dit qui est
+/// Jimy et ses leçons apprises) sans la répéter, et l'emporte sur elle.
+pub const SOCLE: &str = r#"## Socle
+Ces règles décrivent ta machine et ce que l'utilisateur a validé ; ton âme, plus haut, dit qui tu es et ce que tu as appris. En cas de contradiction, le socle l'emporte.
 
 ## Ce que tu sais de toi
 Tu tournes en local sur la machine de l'utilisateur. Tu as accès à ses fichiers,
@@ -99,6 +96,10 @@ n'existe : c'est un programme personnel.
   « partagée » vient de l'utilisateur ou d'un autre agent : ne dis jamais
   « j'ai fait » ou « je me souviens » pour ce qu'elle raconte ; dis d'où vient
   l'information (« d'après une note de ton vault… »).
+- Ton âme est à toi : quand l'utilisateur corrige ta façon d'être ou de
+  travailler, ou qu'un échec t'apprend une règle durable, ajuste-la avec
+  `soul_update` (une ligne impérative, en condensant plutôt qu'en empilant),
+  puis dis-le en une phrase. Un fait sur l'utilisateur va dans `remember`.
 - Si un même besoin revient, crée un skill avec `create_skill` : c'est mieux
   qu'une longue conversation.
 - Un skill ne te donne aucun droit supplémentaire : les permissions de
@@ -128,13 +129,14 @@ d'identifiant technique ni de sortie de programme dans la prose : dis l'idée
 (« j'ai modifié le script d'envoi »), pas l'implémentation.
 "#;
 
-pub const IDENTITY_FAST: &str = r#"Tu es Jimy (« Agent Jimy »), un assistant personnel agentique qui vit sur le bureau de l'utilisateur, incarné par un renard humanoïde 3D. Ton nom s'écrit **Jimy** (souvent transcrit « Jimmy »).
-
-## Sortie : courte, nette, précise
+/// Socle du Fast-Path (conversation simple, sans outils système) : l'âme
+/// passe avant, ce bloc ne garde que la sortie et les deux outils permis.
+pub const SOCLE_FAST: &str = r#"## Sortie : courte, nette, précise
 Réponds en français, sauf indication contraire. Va droit au but : une à trois phrases suffisent par défaut.
 - Commence par la réponse, sans préambule ni reformulation de la question.
 - La prose est lue à voix haute telle quelle : une seule idée par phrase, pas de symboles, pas de tableau, pas de code ni de chemin de fichier dans la prose.
-- Si l'utilisateur apprend ou corrige un fait stable sur lui-même, enregistre-le avec `remember`."#;
+- Si l'utilisateur apprend ou corrige un fait stable sur lui-même, enregistre-le avec `remember`.
+- S'il corrige ta façon d'être ou de répondre, ajuste ton âme avec `soul_update` et dis-le en une phrase."#;
 
 /// Mots ou fragments qui signalent une action, un fichier, un système, le web
 /// ou un connecteur MCP : la demande prend alors le chemin complet (Tool-Path).
@@ -167,8 +169,6 @@ const ACTION_MARKERS: &[&str] = &[
     "continue", "continuer", "vas-y", "go", "fais-le", "applique", "confirme", "confirmé",
     "autorise", "toujours autoriser", "tache", "tâche", "chantier", "projet", "rapport",
     "dashboard", "audit",
-];
-
     // Rappel du passé : il faut l'historique et `search_sessions`, absents du
     // Fast-Path (sinon Jimy invente à partir de vieux souvenirs, piège 143).
     // « aujourd » couvre l'apostrophe typographique (« aujourd’hui » est coupé).
@@ -177,6 +177,8 @@ const ACTION_MARKERS: &[&str] = &[
     "conversation", "conversations", "historique",
     // Équivalents anglais des suggestions de l'accueil (interface EN).
     "summarize", "summary", "today", "yesterday", "history", "analyze", "folder",
+];
+
 /// Détecte en < 1 ms (zéro appel réseau, zéro LLM) si la demande est une
 /// discussion simple ou une question directe qui n'a besoin ni des ~25 outils
 /// système/MCP ni du prompt complet de 15 000 caractères (Fast-Path).
@@ -231,11 +233,12 @@ pub fn is_conversational_fast_path(request: &str, has_images: bool, prev_used_to
 }
 
 /// Prompt système allégé pour le Fast-Path conversationnel (~1 800 caractères
-/// au lieu de ~15 500). Garde l'identité, la date/heure, le mode vocal et les
+/// au lieu de ~15 500). Garde l'âme, la date/heure, le mode vocal et les
 /// souvenirs de l'utilisateur ; omet le catalogue d'outils, les guides MCP/webcam,
 /// les chantiers et les carnets de tâches.
 pub fn system_parts_fast(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
-    let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY_FAST.to_string())];
+    // L'âme d'abord (qui parle), puis le socle (comment).
+    let mut parts: Vec<(&'static str, String)> = vec![("âme", soul_text(ctx)), ("socle", SOCLE_FAST.to_string())];
     if let Some(dir) = crate::i18n::system_output_directive(ctx.settings.lang()) {
         parts.push(("langue", dir.to_string()));
     }
@@ -248,9 +251,6 @@ pub fn system_parts_fast(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)>
         now.push_str(line);
     }
     parts.push(("maintenant", now));
-    if let Some(amendments) = &ctx.amendments {
-        parts.push(("amendements", format!("## Amendements\n{amendments}")));
-    }
     if let Some(block) = &ctx.memory_block {
         if !block.trim().is_empty() {
             parts.push(("mémoire", block.clone()));
@@ -276,10 +276,9 @@ pub struct PromptContext<'a> {
     /// Carnet de travail de cette conversation (`notes::work_notes_block`) :
     /// les acquis vérifiés des tours outillés précédents.
     pub work_notes: Option<String>,
-    /// Amendements du prompt (lot « croissance ») : des instructions
-    /// additionnelles actées avec l'utilisateur, lues dans
-    /// `data/growth_amendments.md`. Absent ou vide : prompt inchangé.
-    pub amendments: Option<String>,
+    /// Âme de Jimy (`crate::soul::read_for_prompt`, `data/SOUL.md`) : son
+    /// caractère et ses leçons apprises. `None` : l'âme d'origine.
+    pub soul: Option<String>,
     /// Tâche de fond en cours (`Tasks::prompt_block`) : Jimmy répond en
     /// parallèle en le sachant. Ligne du bloc « Maintenant ».
     pub background_task: Option<String>,
@@ -362,6 +361,14 @@ pub fn tools_summary(names: &[String]) -> String {
     out
 }
 
+/// Texte de l'âme du contexte, ou l'âme d'origine.
+fn soul_text(ctx: &PromptContext<'_>) -> String {
+    ctx.soul
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| crate::soul::DEFAULT_SOUL.trim().to_string())
+}
+
 pub fn build_system(ctx: &PromptContext<'_>) -> String {
     join_parts(&system_parts(ctx))
 }
@@ -386,7 +393,9 @@ pub fn sizes(parts: &[(&'static str, String)]) -> String {
 
 /// Les blocs du prompt système, étiquetés (voir [`sizes`]).
 pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
-    let mut parts: Vec<(&'static str, String)> = vec![("identité", IDENTITY.to_string())];
+    // L'âme d'abord (qui parle), puis le socle (comment) : deux étages
+    // complémentaires, le socle tranche en cas de contradiction.
+    let mut parts: Vec<(&'static str, String)> = vec![("âme", soul_text(ctx)), ("socle", SOCLE.to_string())];
     if let Some(dir) = crate::i18n::system_output_directive(ctx.settings.lang()) {
         parts.push(("langue", dir.to_string()));
     }
@@ -412,17 +421,6 @@ pub fn system_parts(ctx: &PromptContext<'_>) -> Vec<(&'static str, String)> {
         now.push_str(line);
     }
     parts.push(("maintenant", now));
-
-    if let Some(amendments) = &ctx.amendments {
-        parts.push((
-            "amendements",
-            format!(
-                "## Amendements (leçons actées)\nCes consignes complètent tes instructions ; chacune vient d'une leçon actée \
-                 avec l'utilisateur. Pour en ajouter ou en retirer : garde une sauvegarde `.bak` du fichier avant de \
-                 l'écrire, et fais rejouer le test d'amendement après la modification.\n{amendments}"
-            ),
-        ));
-    }
 
     // Lot B : consignes propres au projet de la conversation (`AGENTS.md` à la
     // racine du dossier de travail, bornées à 1 500 caractères).
@@ -658,7 +656,7 @@ mod tests {
             earlier: None,
             chantiers: None,
             work_notes: None,
-            amendments: None,
+            soul: None,
             background_task: None,
             situation: Vec::new(),
             voice: false,
@@ -697,7 +695,7 @@ mod tests {
             chantiers: None,
             // Carnet de travail (14 octobre) : les acquis du tour précédent.
             work_notes: crate::core::notes::work_notes_block(Some("- API Emile sur 127.0.0.1:18001")),
-            amendments: Some("Ne jamais reformuler la question avant de répondre.".into()),
+            soul: Some("# Âme de Jimy\nTu es Jimy.\n\n## Leçons apprises\n- Ne jamais reformuler la question avant de répondre.".into()),
             // La tâche de fond rejoint le prompt (réponse en parallèle).
             background_task: Some("- Tâche en arrière-plan : « écris notify.py »".into()),
             situation: vec!["- Carte d'accord en attente de la réponse de l'utilisateur : « .env »".into()],
@@ -709,16 +707,28 @@ mod tests {
         assert!(now.contains("« écris notify.py »") && now.contains("« .env »"), "{system}");
         assert!(!system.contains("## Contexte de la session"), "{system}");
         assert!(system.contains("## Carnet de travail de cette conversation") && system.contains("127.0.0.1:18001"), "{system}");
-        assert!(system.contains("## Amendements"), "{system}");
+        // L'âme ouvre le prompt, le socle suit ; plus de bloc « Amendements »
+        // (fondu dans les leçons de l'âme).
+        assert!(system.starts_with("# Âme de Jimy\nTu es Jimy."), "{system}");
         assert!(system.contains("Ne jamais reformuler"), "{system}");
-        assert!(system.contains(".bak"), "{system}");
+        assert!(system.find("## Leçons apprises").unwrap() < system.find("## Socle").unwrap(), "{system}");
+        assert!(!system.contains("## Amendements"), "{system}");
 
-        // Sans amendement : pas de section.
+        // Sans âme fournie : l'âme d'origine, et rien de l'identité n'est
+        // répété dans le socle (deux étages complémentaires).
         let system = build_system(&PromptContext {
-            amendments: None,
+            soul: None,
             ..common_context(&settings, &memory, &skills, &registry)
         });
-        assert!(!system.contains("## Amendements"), "{system}");
+        assert!(system.starts_with(crate::soul::DEFAULT_SOUL.trim()), "{system}");
+        assert_eq!(system.matches("Tu es Jimy").count(), 1, "identité répétée : {system}");
+        assert_eq!(SOCLE.matches("Tu es Jimy").count(), 0);
+        assert!(SOCLE.contains("soul_update") && SOCLE_FAST.contains("soul_update"));
+
+        // Fast-Path : l'âme aussi, avant le socle de sortie.
+        let fast = join_parts(&system_parts_fast(&common_context(&settings, &memory, &skills, &registry)));
+        assert!(fast.starts_with(crate::soul::DEFAULT_SOUL.trim()), "{fast}");
+        assert_eq!(fast.matches("Tu es Jimy").count(), 1, "{fast}");
     }
 
     /// Le relevé du journal nomme chaque bloc présent avec sa taille, et le
@@ -739,7 +749,7 @@ mod tests {
         let report = sizes(&parts);
         let memoire = parts.iter().find(|(l, _)| *l == "mémoire").unwrap().1.chars().count();
         assert!(report.contains(&format!("mémoire {memoire}")), "{report}");
-        assert!(report.contains("identité ") && !report.contains("vault"), "{report}");
+        assert!(report.contains("âme ") && report.contains("socle ") && !report.contains("vault"), "{report}");
     }
 
     /// « Et ensuite ? » seul ne dit rien du sujet : la requête du rappel
@@ -782,16 +792,6 @@ mod tests {
         assert!(!is_conversational_fast_path("Cherche dans le vault Obsidian", false, false));
         assert!(!is_conversational_fast_path("ok go continue", false, false));
         assert!(!is_conversational_fast_path("Que contient @README.md ?", false, false));
-        // Image jointe ou tour précédent outillé → Tool-Path conservé.
-        assert!(!is_conversational_fast_path("Salut !", true, false));
-        assert!(!is_conversational_fast_path("Et maintenant ?", false, true));
-    }
-
-    #[test]
-    fn le_prompt_fast_path_est_allege() {
-        let settings = Settings::default();
-        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().expect("db")));
-        let memory = MemoryStore::new(db);
         // Rappel du passé (journée, sessions) : il faut l'historique et
         // `search_sessions`, absents du Fast-Path. Cas réel du 22 octobre : la
         // suggestion « Résumer ma journée » d'une nouvelle session partait en
@@ -804,6 +804,16 @@ mod tests {
         assert!(!is_conversational_fast_path("Analyze this folder and explain what you find.", false, false));
         assert!(!is_conversational_fast_path("Search my Obsidian vault: ", false, false));
         assert!(!is_conversational_fast_path("Analyse ce dossier et explique-moi ce que tu trouves.", false, false));
+        // Image jointe ou tour précédent outillé → Tool-Path conservé.
+        assert!(!is_conversational_fast_path("Salut !", true, false));
+        assert!(!is_conversational_fast_path("Et maintenant ?", false, true));
+    }
+
+    #[test]
+    fn le_prompt_fast_path_est_allege() {
+        let settings = Settings::default();
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().expect("db")));
+        let memory = MemoryStore::new(db);
         let skills = crate::skills::SkillStore::new(std::env::temp_dir().join("prompt-test-skills")).unwrap();
         let registry = ToolRegistry::new();
         registry.register_defaults(&crate::tools::ToolDeps { http: reqwest::Client::new() });
@@ -833,7 +843,7 @@ mod tests {
             earlier: None,
             chantiers: None,
             work_notes: None,
-            amendments: None,
+            soul: None,
             background_task: None,
             situation: Vec::new(),
             voice: false,

@@ -46,6 +46,9 @@ pub struct ToolContext {
     /// images) puis les oublie. Jamais sur disque, jamais dans l'historique —
     /// nettoyage automatique à chaque tour.
     pub pending_images: Arc<std::sync::Mutex<Vec<crate::core::types::Image>>>,
+    /// Dossier de données (`data/`), pour l'âme (`soul_update`). `None` :
+    /// contexte de test sans dossier, l'outil refuse.
+    pub data_dir: Option<PathBuf>,
 }
 
 impl ToolContext {
@@ -66,7 +69,13 @@ impl ToolContext {
             history: None,
             session_id: None,
             pending_images: Arc::new(std::sync::Mutex::new(Vec::new())),
+            data_dir: None,
         }
+    }
+
+    pub fn with_data_dir(mut self, data_dir: PathBuf) -> Self {
+        self.data_dir = Some(data_dir);
+        self
     }
 
     pub fn with_session(
@@ -206,6 +215,7 @@ impl ToolRegistry {
         self.register(Arc::new(net::OpenBrowser));
         self.register(Arc::new(knowledge::SearchMemory));
         self.register(Arc::new(knowledge::Remember));
+        self.register(Arc::new(knowledge::SoulUpdate));
         self.register(Arc::new(knowledge::VaultSearch));
         self.register(Arc::new(knowledge::VaultRead));
         self.register(Arc::new(knowledge::VaultWrite));

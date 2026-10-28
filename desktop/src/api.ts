@@ -104,6 +104,16 @@ export interface ChantierInfo {
   updatedAt: string;
 }
 
+/** Âme de Jimy (`soul_get`) : `data/SOUL.md`, qu'il fait évoluer lui-même. */
+export interface SoulInfo {
+  content: string;
+  /** Taille maximale en caractères (au-delà, l'enregistrement est refusé). */
+  max: number;
+  /** Derniers changements, du plus récent : « date | auteur | raison ». */
+  changes: string[];
+  canUndo: boolean;
+}
+
 /** État réel de l'écoute, lu côté Rust (`voice_status`). */
 export interface VoiceStatus {
   running: boolean;
@@ -583,6 +593,10 @@ export const api = {
   agentStop: () => invoke<boolean>("agent_stop"),
   tasksList: () => invoke<TaskInfo[]>("tasks_list"),
   chantiersList: (project?: string | null) => invoke<ChantierInfo[]>("chantiers_list", { project: project ?? null }),
+  soulGet: () => invoke<SoulInfo>("soul_get"),
+  soulSave: (content: string) => invoke<void>("soul_save", { content }),
+  soulUndo: () => invoke<void>("soul_undo"),
+  soulReset: () => invoke<void>("soul_reset"),
   taskStop: (id: string) => invoke<boolean>("task_stop", { id }),
   ttsVoices: () => invoke<{ current: string; presets: VoiceInfo[]; library: VoiceInfo[] }>("tts_voices"),
   ttsSearchVoices: (query: string) => invoke<VoiceInfo[]>("tts_search_voices", { query }),

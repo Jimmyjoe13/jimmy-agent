@@ -965,6 +965,37 @@ pub async fn tasks_list(state: State<'_, AppState>) -> std::result::Result<Vec<j
     Ok(state.app.tasks.list())
 }
 
+/// Âme de Jimy (Réglages → Âme) : texte courant, borne, derniers changements
+/// (qui l'a modifiée et pourquoi) et présence d'une version précédente.
+#[tauri::command]
+pub async fn soul_get(state: State<'_, AppState>) -> std::result::Result<serde_json::Value, String> {
+    let data = &state.app.paths.data;
+    Ok(serde_json::json!({
+        "content": jimmy_agent::soul::read_raw(data),
+        "max": jimmy_agent::soul::MAX_CHARS,
+        "changes": jimmy_agent::soul::changes(data, 8),
+        "canUndo": data.join(jimmy_agent::soul::BACKUP_FILE).exists(),
+    }))
+}
+
+/// Enregistre l'âme éditée par l'utilisateur (mêmes garde-fous que Jimy).
+#[tauri::command]
+pub async fn soul_save(state: State<'_, AppState>, content: String) -> std::result::Result<(), String> {
+    jimmy_agent::soul::write(&state.app.paths.data, &content, "utilisateur", "modification dans Réglages").map_err(err)
+}
+
+/// Annule la dernière modification de l'âme (restaure la version précédente).
+#[tauri::command]
+pub async fn soul_undo(state: State<'_, AppState>) -> std::result::Result<(), String> {
+    jimmy_agent::soul::undo(&state.app.paths.data).map_err(err)
+}
+
+/// Revient à l'âme d'origine (la version courante reste annulable).
+#[tauri::command]
+pub async fn soul_reset(state: State<'_, AppState>) -> std::result::Result<(), String> {
+    jimmy_agent::soul::reset(&state.app.paths.data).map_err(err)
+}
+
 /// Chantiers ouverts (suivis d'une conversation à l'autre, filtrés par projet
 /// si demandé), pour le tableau de bord d'accueil du Chat.
 #[tauri::command]

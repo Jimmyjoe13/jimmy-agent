@@ -81,8 +81,14 @@ async fn rejouer_une_reponse_degeneree() {
         earlier: app.history.recap(&session).ok().as_ref().and_then(jimmy_agent::core::recap::summary_block),
         chantiers: None,
         work_notes: None,
-        // `JIMMY_AMENDMENT` : teste un amendement candidat sur cette requête.
-        amendments: std::env::var("JIMMY_AMENDMENT").ok().filter(|a| !a.trim().is_empty()),
+        // L'âme réelle, ou `JIMMY_SOUL` : une âme candidate (texte complet)
+        // à essayer sur cette requête.
+        soul: Some(
+            std::env::var("JIMMY_SOUL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| jimmy_agent::soul::read_for_prompt(&app.paths.data)),
+        ),
         background_task: None,
         situation: Vec::new(),
         voice: false,

@@ -6,9 +6,10 @@
 //! propositions : nouvelle skill, skill à aiguiser, outil qui manque.
 //!
 //! La revue ne passe PAS par la boucle d'agent : un appel unique de
-//! rédaction, aucun outil. Elle ne peut donc rien appliquer — l'utilisateur
-//! lit la session, puis décide (il peut demander l'application dans une
-//! conversation ordinaire, où les permissions s'appliquent).
+//! rédaction, aucun outil. Skills et outils restent des propositions que
+//! l'utilisateur lit puis décide ; seuls les « Amendement proposé » sont
+//! appliqués, inscrits dans les leçons de l'âme (`crate::soul`, garde-fous
+//! compris) — l'auto-amélioration voulue par l'utilisateur (28 octobre).
 //!
 //! Déclenchement : un cycle de 30 minutes vérifie si la revue est due
 //! (fenêtre `growth.review_days`, 0 = jamais) **et** s'il y a des leçons
@@ -29,11 +30,29 @@ Tu reçois tes leçons récentes (tirées de tes échecs d'outils) et la liste d
 - un skill à aiguiser : son nom exact et ce qui lui manque ;
 - un outil ou serveur MCP qui manque : le besoin observé, sans solution commerciale précise.
 
-Si les leçons montrent une instruction qui te manque dans ta façon de travailler, ajoute une rubrique :
-« Amendement proposé : » suivi d'UNE phrase impérative, prête à rejoindre tes instructions, avec la leçon qui la motive.
+Si les leçons montrent une habitude de travail qui te manque, ajoute une ligne :
+« Amendement proposé : » suivi d'UNE phrase impérative, sur la même ligne, puis la leçon qui la motive à la ligne suivante. Elle sera inscrite telle quelle dans les leçons de ton âme : seulement si elle est généralisable, et jamais déjà présente dans ton âme ci-dessous.
 
 Chaque proposition cite la leçon ou l'observation qui la motive. Rien de décoratif : si les leçons ne montrent rien de généralisable, réponds simplement « Rien à proposer cette fois. »
-Tu ne modifies aucun fichier : des propositions seulement, l'utilisateur décide."#;
+Les skills et outils restent des propositions : l'utilisateur décide."#;
+
+/// Extrait les amendements d'une revue (« Amendement proposé : … », ou sa
+/// version anglaise quand la revue est rédigée en anglais), nettoyés du
+/// Markdown et des guillemets.
+fn proposed_amendments(review: &str) -> Vec<String> {
+    review
+        .lines()
+        .filter_map(|line| {
+            let plain = line.replace("**", "");
+            let lower = plain.to_lowercase();
+            let at = lower.find("amendement proposé").or_else(|| lower.find("proposed amendment"))?;
+            // `get` : un indice décalé par la mise en minuscules ne panique pas.
+            let rest = plain.get(at..)?.split_once(':')?.1;
+            let text = rest.trim().trim_matches(['«', '»', '"', '“', '”', ' ', '\u{a0}']).trim();
+            (!text.is_empty()).then(|| text.to_string())
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct GrowthState {
@@ -102,6 +121,10 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
     if skills.is_empty() {
         context.push_str("- (aucun)\n");
     }
+    // L'âme actuelle : pour ne pas reproposer une leçon déjà acquise.
+    context.push_str("\nTon âme actuelle :\n");
+    context.push_str(&crate::soul::read_for_prompt(&app.paths.data));
+    context.push('\n');
 
     let messages = vec![
         Message::system(crate::i18n::with_background_lang(REVIEW, settings.lang())),
@@ -113,18 +136,29 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
         .await?;
     let proposals = proposals.trim().to_string();
 
-    // Pied de session quand la revue a proposé un amendement : la procédure
-    // d'application — l'utilisateur décide, le filet de rejeu décide encore.
-    let proposals = if proposals.contains("Amendement proposé") {
-        format!(
-            "{proposals}\n\n---\n**Application d'un amendement (sécurisée).** Dans une conversation, demande à Jimy \
-             d'ajouter la phrase proposée à `data/growth_amendments.md` (sauvegarde `.bak` d'abord), puis lance le \
-             filet de rejeu :\n`scripts\\with-msvc.ps1 cargo test --test amendment '--' --ignored`\n\
-             L'amendement n'est réellement acté que si le filet passe."
-        )
-    } else {
-        proposals
-    };
+    // Auto-amélioration : chaque amendement rejoint les leçons de l'âme
+    // (garde-fous de `soul` : taille bornée, sans doublon, `.bak`, journal).
+    // Le pied de session dit ce qui a été inscrit, et comment revenir dessus.
+    let mut applied = Vec::new();
+    let mut refused = Vec::new();
+    for amendment in proposed_amendments(&proposals) {
+        match crate::soul::add_lesson(&app.paths.data, &amendment, "jimy", "revue périodique") {
+            Ok(true) => applied.push(amendment),
+            Ok(false) => {}
+            Err(error) => refused.push(format!("{amendment} ({error})")),
+        }
+    }
+    let mut proposals = proposals;
+    if !applied.is_empty() || !refused.is_empty() {
+        proposals.push_str("\n\n---\n");
+        for lesson in &applied {
+            proposals.push_str(&format!("Inscrit dans mon âme : {lesson}\n"));
+        }
+        for lesson in &refused {
+            proposals.push_str(&format!("Non inscrit : {lesson}\n"));
+        }
+        proposals.push_str("Réglages → Âme pour relire, modifier ou annuler.");
+    }
 
     let session = app.history.create_session("Revue")?;
     app.history
@@ -140,14 +174,6 @@ pub async fn review(app: &crate::App) -> Result<Option<String>> {
     );
     log::info!("[growth] revue écrite ({} leçons relues)", lessons.len());
     Ok(Some(proposals))
-}
-
-/// Lit les amendements actés (le fichier peut ne pas exister : aucun).
-pub fn read_amendments(data_dir: &std::path::Path) -> Option<String> {
-    std::fs::read_to_string(data_dir.join("growth_amendments.md"))
-        .ok()
-        .map(|raw| raw.trim().to_string())
-        .filter(|raw| !raw.is_empty())
 }
 
 /// Boucle de fond : vérifie toutes les 30 minutes si une revue est due.
@@ -208,6 +234,23 @@ mod tests {
     #[test]
     fn regle_desactivee() {
         assert!(!due(0, &state(None, 0), 5));
+    }
+
+    #[test]
+    fn amendements_extraits_de_la_revue() {
+        let review = "- Skill à aiguiser : deploy-vps\n\
+                      **Amendement proposé :** « Lis le journal d'erreur avant de relancer une commande. »\n\
+                      Leçon : trois relances à l'aveugle.\n\
+                      Proposed amendment: Check the port before starting a server.\n\
+                      Amendement proposé :\n";
+        assert_eq!(
+            proposed_amendments(review),
+            vec![
+                "Lis le journal d'erreur avant de relancer une commande.".to_string(),
+                "Check the port before starting a server.".to_string(),
+            ]
+        );
+        assert!(proposed_amendments("Rien à proposer cette fois.").is_empty());
     }
 
     #[test]

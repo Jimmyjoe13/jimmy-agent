@@ -1,11 +1,13 @@
-/** Vue Paramètres : deux sous-onglets — Général (voix, écoute, avatar…) et
- *  LLM (fournisseurs, modèles, réglages du modèle de langage). */
+/** Vue Paramètres : trois sous-onglets — Général (voix, écoute, avatar…),
+ *  LLM (fournisseurs, modèles, réglages du modèle de langage) et Âme
+ *  (le SOUL.md de Jimy, `soul.ts`). */
 import { api, type Settings, type StartupMode } from "../api";
 import { attempt, guard, h, mount, qualityLabel, toast } from "../ui";
 import type { AppContext } from "../context";
 import { setLanguage, t, type Key } from "../i18n";
 import { modelsPanel } from "./models";
 import { providersPanel } from "./providers";
+import { soulPanel } from "./soul";
 
 export function settingsView(ctx: AppContext): HTMLElement {
   const container = h("section", { class: "view" });
@@ -164,17 +166,21 @@ export function settingsView(ctx: AppContext): HTMLElement {
     await persist();
   }
 
-  // Deux sous-onglets, comme Skills → Serveurs MCP : tout ce qui touche au
-  // modèle de langage (fournisseurs, modèles, budget) est dans « LLM ».
+  // Trois sous-onglets, comme Skills → Serveurs MCP : tout ce qui touche au
+  // modèle de langage (fournisseurs, modèles, budget) est dans « LLM » ;
+  // « Âme » montre le SOUL.md de Jimy, qu'il fait évoluer lui-même. Son
+  // panneau s'enregistre seul (indépendant du bouton « Enregistrer » du haut).
   const generalPane = h("div", {});
   const llmPane = h("div", {});
-  let tab: "general" | "llm" = "general";
+  const soulPane = soulPanel();
+  let tab: "general" | "llm" | "soul" = "general";
   const tabButtons = {
     general: h("button", { class: "subtab", role: "tab", onclick: () => select("general") }, t("settings.tab.general")),
     llm: h("button", { class: "subtab", role: "tab", onclick: () => select("llm") }, t("settings.tab.llm")),
+    soul: h("button", { class: "subtab", role: "tab", onclick: () => select("soul") }, t("settings.tab.soul")),
   };
 
-  function select(next: "general" | "llm") {
+  function select(next: "general" | "llm" | "soul") {
     tab = next;
     for (const [key, button] of Object.entries(tabButtons)) {
       const active = key === tab;
@@ -183,6 +189,7 @@ export function settingsView(ctx: AppContext): HTMLElement {
     }
     generalPane.hidden = tab !== "general";
     llmPane.hidden = tab !== "llm";
+    soulPane.hidden = tab !== "soul";
   }
 
   function render() {
@@ -200,9 +207,10 @@ export function settingsView(ctx: AppContext): HTMLElement {
         ),
       ),
       languageCard(),
-      h("div", { class: "subtabs", role: "tablist" }, tabButtons.general, tabButtons.llm),
+      h("div", { class: "subtabs", role: "tablist" }, tabButtons.general, tabButtons.llm, tabButtons.soul),
       generalPane,
       llmPane,
+      soulPane,
     );
     mount(
       generalPane,

@@ -104,6 +104,67 @@ impl Tool for Remember {
     }
 }
 
+/// Auto-amélioration : Jimy fait évoluer son âme (`data/SOUL.md`, voir
+/// `crate::soul`) sans carte d'accord — garde-fous côté module (taille
+/// bornée, aucun secret, `.bak`, journal des changements visible dans
+/// Réglages → Âme). Description courte : le schéma part à chaque appel,
+/// Fast-Path compris.
+pub struct SoulUpdate;
+
+impl Tool for SoulUpdate {
+    fn name(&self) -> &str {
+        "soul_update"
+    }
+    fn description(&self) -> &str {
+        "Fait évoluer ton âme (caractère, leçons apprises). « add » ajoute une leçon impérative d'une ligne ; « replace » remplace un passage exact de ton âme (« new » vide = supprime)."
+    }
+    fn parameters(&self) -> serde_json::Value {
+        schema(
+            serde_json::json!({
+                "action": {"type": "string", "description": "add | replace"},
+                "text": {"type": "string", "description": "add : la leçon, ex. « Donne le chiffre avant l'explication. »"},
+                "old": {"type": "string", "description": "replace : passage exact à remplacer."},
+                "new": {"type": "string", "description": "replace : nouveau texte."},
+                "reason": {"type": "string", "description": "Ce qui motive le changement, en une phrase."}
+            }),
+            &["action", "reason"],
+        )
+    }
+    fn capability(&self) -> Capability {
+        Capability::Write
+    }
+    fn call<'a>(
+        &'a self,
+        args: &'a serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            // Fichier interne de Jimy : seule la capacité compte, comme `remember`.
+            ctx.check_granted(Capability::Write, "âme")?;
+            let data_dir = ctx.data_dir.as_ref().ok_or_else(|| Error::Tool("âme indisponible".into()))?;
+            let reason = arg_str(args, "reason").ok_or_else(|| Error::Tool("« reason » manquant".into()))?;
+            match arg_str(args, "action").as_deref() {
+                Some("add") => {
+                    let text = arg_str(args, "text").ok_or_else(|| Error::Tool("« text » manquant".into()))?;
+                    if crate::soul::add_lesson(data_dir, &text, "jimy", &reason)? {
+                        Ok("âme mise à jour (leçon ajoutée) ; dis-le à l'utilisateur en une phrase".into())
+                    } else {
+                        Ok("leçon déjà présente dans ton âme".into())
+                    }
+                }
+                Some("replace") => {
+                    let old = arg_str(args, "old").ok_or_else(|| Error::Tool("« old » manquant".into()))?;
+                    // `new` absent = suppression du passage.
+                    let new = args.get("new").and_then(|v| v.as_str()).unwrap_or("");
+                    crate::soul::replace(data_dir, &old, new, "jimy", &reason)?;
+                    Ok("âme mise à jour ; dis-le à l'utilisateur en une phrase".into())
+                }
+                _ => Err(Error::Tool("« action » : add ou replace".into())),
+            }
+        })
+    }
+}
+
 // ── Vault Obsidian ───────────────────────────────────────────────────────────
 
 fn require_vault(ctx: &ToolContext) -> Result<&std::sync::Arc<crate::memory::vault::Vault>> {
@@ -482,6 +543,11 @@ mod tests {
             .unwrap();
         assert!(found.contains("Relance des leads Maxence"), "{found}");
 
+        // Sans mot-clé : les conversations les plus récentes (résumer une
+        // journée, piège 143) au lieu d'une erreur « query manquant ».
+        let recent = SearchSessions.call(&serde_json::json!({}), &ctx).await.unwrap();
+        assert!(recent.contains("Relance des leads Maxence") && recent.contains("Session vocale"), "{recent}");
+
         let switched = SetProject
             .call(&serde_json::json!({"project": "maxence"}), &ctx)
             .await
@@ -493,8 +559,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&racine);
     }
 }
-        // Sans mot-clé : les conversations les plus récentes (résumer une
-        // journée, piège 143) au lieu d'une erreur « query manquant ».
-        let recent = SearchSessions.call(&serde_json::json!({}), &ctx).await.unwrap();
-        assert!(recent.contains("Relance des leads Maxence") && recent.contains("Session vocale"), "{recent}");
-

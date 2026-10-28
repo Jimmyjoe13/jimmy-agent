@@ -956,6 +956,40 @@ let stepPage = null;
     return `${before} fournisseurs, ajout/retrait OK`;
   });
 
+  await step("Paramètres : âme (lecture, enregistrement, borne, annulation)", async () => {
+    const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args]);
+    // Relevé de l'âme réelle : elle est restaurée à la fin (piège 61).
+    const avant = await invoke("soul_get");
+    await nav("Réglages");
+    await p.locator(".subtab", { hasText: "Âme" }).click();
+    const editor = p.locator(".soul-editor");
+    await p.waitForFunction((attendu) => document.querySelector(".soul-editor")?.value === attendu, avant.content, { timeout: 20000 });
+    try {
+      // Enregistrement : la leçon ajoutée à la main arrive sur le disque.
+      await editor.fill(`${avant.content.trimEnd()}\n- Leçon de la suite UI.\n`);
+      await p.locator("button", { hasText: "Enregistrer l'âme" }).click();
+      await p.waitForSelector(".toast:not(.error) >> text=Âme enregistrée", { timeout: 10000 });
+      const apres = await invoke("soul_get");
+      expect(apres.content.includes("- Leçon de la suite UI."), "leçon absente du fichier après enregistrement");
+      expect(apres.changes[0]?.includes("utilisateur"), `changement non journalisé : ${apres.changes[0]}`);
+      // Borne : le compteur passe en alerte et Rust refuse.
+      await editor.fill("x".repeat(avant.max + 1));
+      expect(await p.locator(".soul-count.over").count() === 1, "compteur pas en alerte au-delà de la borne");
+      await p.locator("button", { hasText: "Enregistrer l'âme" }).click();
+      await p.waitForSelector(".toast.error", { timeout: 10000 });
+      expect((await invoke("soul_get")).content === apres.content, "âme trop longue écrite malgré la borne");
+      // Annulation : retour exact à l'âme d'avant le test.
+      await p.locator("button", { hasText: "Annuler le dernier changement" }).click();
+      await p.waitForSelector(".toast:not(.error) >> text=Dernier changement annulé", { timeout: 10000 });
+    } finally {
+      const fin = await invoke("soul_get");
+      if (fin.content !== avant.content) await invoke("soul_save", { content: avant.content });
+    }
+    const restauree = await invoke("soul_get");
+    expect(restauree.content === avant.content, "âme non restaurée");
+    return `âme de ${[...avant.content].length}/${avant.max} car., enregistrement, borne et annulation OK`;
+  });
+
   await step("Voix : bibliothèque de voix (liste, recherche, choix)", async () => {
     const invoke = (cmd, args) => p.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [cmd, args]);
     const before = await invoke("tts_voices", {});

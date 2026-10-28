@@ -24,6 +24,7 @@ pub mod providers;
 pub mod screen;
 pub mod sensitive;
 pub mod skills;
+pub mod soul;
 pub mod tasks;
 pub mod tools;
 pub mod update;
@@ -380,6 +381,11 @@ impl App {
         // Avant tout usage des permissions : une installation existante sans
         // `permissions.json` garde ses accès (piège 104).
         permissions::ensure_file(&paths.data.join("permissions.json"), settings.ui.first_run_done);
+        // Âme de Jimy : créée au premier lancement (anciens amendements
+        // migrés). Un échec n'empêche pas de démarrer : l'âme d'origine sert.
+        if let Err(error) = soul::ensure(&paths.data) {
+            log::warn!("[âme] {error}");
+        }
         let db: Shared<Db> = Arc::new(std::sync::Mutex::new(Db::open(&paths.db_file())?));
         let history = Arc::new(History::new(db.clone()));
         let memory = Arc::new(MemoryStore::with_semantic(
@@ -1608,6 +1614,7 @@ impl App {
             self.skills.clone(),
             self.vault.clone(),
         )
+        .with_data_dir(self.paths.data.clone())
     }
 
     pub fn deps(&self) -> Arc<core::agent::AgentDeps> {

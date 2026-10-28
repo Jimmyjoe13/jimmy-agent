@@ -82,6 +82,7 @@ impl AgentDeps {
             self.skills.clone(),
             self.vault.clone(),
         )
+        .with_data_dir(self.data_dir.clone())
     }
 }
 
@@ -246,9 +247,10 @@ pub async fn run_with_images(
         } else {
             crate::core::notes::work_notes_block(deps.history.work_notes(&session_id).ok().flatten().as_deref())
         },
-        // Amendements (lot « croissance ») : des instructions additionnelles
-        // actées avec l'utilisateur. Absente ou vide : prompt inchangé.
-        amendments: crate::growth::read_amendments(&deps.data_dir),
+        // Âme (`data/SOUL.md`) : caractère et leçons apprises, que Jimy fait
+        // évoluer lui-même ; relue à chaque tour (une modification vaut dès
+        // le tour suivant).
+        soul: Some(crate::soul::read_for_prompt(&deps.data_dir)),
         background_task: deps.tasks.prompt_block(&session_id),
         situation,
         voice: deps.voice,
@@ -301,10 +303,11 @@ pub async fn run_with_images(
     }
     let full_specs = specs.clone();
     if fast_path {
-        // En Fast-Path, seul `remember` reste disponible (si l'utilisateur
-        // partage un fait sur lui) : les ~25 schémas d'outils système/fichiers/MCP
+        // En Fast-Path, seuls `remember` (un fait sur l'utilisateur) et
+        // `soul_update` (une correction de style, souvent dite en passant)
+        // restent : les ~25 schémas d'outils système/fichiers/MCP
         // (~3 500 jetons) ne sont pas envoyés.
-        specs.retain(|spec| spec.name == "remember");
+        specs.retain(|spec| matches!(spec.name.as_str(), "remember" | "soul_update"));
     }
     let foreground_iterations = if deps.voice {
         settings.llm.max_iterations.clamp(1, VOICE_MAX_ITERATIONS)
