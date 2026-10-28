@@ -66,13 +66,19 @@
   </url>
   <url>
     <loc>https://jimy-agent.me/comparatif/agent-ia-windows-vs-copilot.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <lastmod>2026-10-22</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://jimy-agent.me/comparatif/alternatives-copilot-windows-11.html</loc>
+    <lastmod>2026-10-22</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://jimy-agent.me/guides/serveurs-mcp-windows-local.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <lastmod>2026-10-22</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

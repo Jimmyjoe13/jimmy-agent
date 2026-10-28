@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jimy — Agent IA Autonome sur Bureau Windows | Vocal & Open Source</title>
-<meta name="description" content="L'agent IA 3D qui vit sur ton bureau Windows. Parle-lui, il agit sur tes fichiers et ton PC à voix haute. 100% gratuit, privé et open source. Télécharge-le !">
+<title>Jimy — Agent IA Windows Autonome, Vocal & Open Source</title>
+<meta name="description" content="L'agent IA 3D autonome pour Windows. Parle-lui à voix haute : il agit sur ton PC en local. 100% gratuit, privé et open source. Télécharge Jimy !">
 <meta name="theme-color" content="#0a0e1c">
 <link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
@@ -18,8 +18,8 @@
 <!-- Partage (Open Graph / X) -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://jimy-agent.me/">
-<meta property="og:title" content="Jimy — Agent IA Autonome sur Bureau Windows | Vocal & Open Source">
-<meta property="og:description" content="L'agent IA 3D qui vit sur ton bureau Windows. Parle-lui, il agit sur tes fichiers et ton PC à voix haute. 100% gratuit, privé et open source. Télécharge-le !">
+<meta property="og:title" content="Jimy — Agent IA Windows Autonome, Vocal & Open Source">
+<meta property="og:description" content="L'agent IA 3D autonome pour Windows. Parle-lui à voix haute : il agit sur ton PC en local. 100% gratuit, privé et open source. Télécharge Jimy !">
 <meta property="og:image" content="https://jimy-agent.me/assets/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <!-- Données structurées Schema.org : Logiciel Windows -->
@@ -31,7 +31,7 @@
   "alternateName": "Jimy Agent",
   "operatingSystem": "Windows 10, Windows 11 (64-bit)",
   "applicationCategory": "UtilitiesApplication",
-  "softwareVersion": "0.2.0",
+  "softwareVersion": "0.2.2",
   "description": "Agent IA autonome incarné par un personnage 3D sur le bureau Windows. Reconnaissance vocale Whisper 100% locale, manipulation de fichiers et automatisation par protocoles MCP.",
   "url": "https://jimy-agent.me/",
   "downloadUrl": "https://github.com/Jimmyjoe13/jimmy-agent/releases/latest",
@@ -159,15 +159,15 @@
         <div class="desk-task" id="task" aria-hidden="true"></div>
         <div class="said off" id="said" aria-hidden="true"><span class="wave"><i></i><i></i><i></i><i></i></span><span id="said-text"></span></div>
         <div class="bubble off" id="bubble" aria-hidden="true"></div>
-        <img class="avatar" id="avatar" src="/assets/skins/renard.webp" alt="" width="770" height="960">
+        <img class="avatar" id="avatar" src="/assets/skins/renard.webp" alt="Avatar 3D Jimy animé sur le bureau Windows" width="770" height="960">
         <div class="taskbar" aria-hidden="true"><span></span><span></span><span class="jimy"></span><span></span><time id="clock">21:42</time></div>
       </div>
       <div class="picker" role="group" aria-label="Changer le skin de la démo">
         <span class="label mono">Skin :</span>
-        <button class="chip" type="button" data-skin="renard" aria-pressed="true"><span class="ph"><img src="/assets/skins/renard.webp" alt=""></span>Renard</button>
-        <button class="chip" type="button" data-skin="neon" aria-pressed="false"><span class="ph"><img src="/assets/skins/neon.webp" alt=""></span>Néon</button>
-        <button class="chip" type="button" data-skin="jeva" aria-pressed="false"><span class="ph"><img src="/assets/skins/jeva.webp" alt=""></span>JEVA</button>
-        <button class="chip" type="button" data-skin="ark" aria-pressed="false"><span class="ph"><img src="/assets/skins/ark.webp" alt=""></span>ARK</button>
+        <button class="chip" type="button" data-skin="renard" aria-pressed="true"><span class="ph"><img src="/assets/skins/renard.webp" alt="Skin Renard" width="30" height="30"></span>Renard</button>
+        <button class="chip" type="button" data-skin="neon" aria-pressed="false"><span class="ph"><img src="/assets/skins/neon.webp" alt="Skin Néon" width="30" height="30"></span>Néon</button>
+        <button class="chip" type="button" data-skin="jeva" aria-pressed="false"><span class="ph"><img src="/assets/skins/jeva.webp" alt="Skin JEVA" width="30" height="30"></span>JEVA</button>
+        <button class="chip" type="button" data-skin="ark" aria-pressed="false"><span class="ph"><img src="/assets/skins/ark.webp" alt="Skin ARK" width="30" height="30"></span>ARK</button>
       </div>
     </div>
   </div>
@@ -276,16 +276,16 @@
           <dt>Prix</dt><dd id="skin-price">Offert</dd>
         </dl>
         <div class="thumbs" role="group" aria-label="Skins">
-          <button class="thumb" type="button" data-show="renard" aria-pressed="true"><img src="/assets/skins/renard.webp" alt="" loading="lazy"><span class="n">Renard</span></button>
-          <button class="thumb" type="button" data-show="arctique" aria-pressed="false"><img src="/assets/skins/arctique.webp" alt="" loading="lazy"><span class="n">Arctique</span></button>
-          <button class="thumb" type="button" data-show="fennec" aria-pressed="false"><img src="/assets/skins/fennec.webp" alt="" loading="lazy"><span class="n">Fennec</span></button>
-          <button class="thumb" type="button" data-show="ours" aria-pressed="false"><img src="/assets/skins/ours.webp" alt="" loading="lazy"><span class="n">Ours</span></button>
-          <button class="thumb" type="button" data-show="robot" aria-pressed="false"><img src="/assets/skins/robot.webp" alt="" loading="lazy"><span class="n">Robot</span></button>
-          <button class="thumb" type="button" data-show="neon" aria-pressed="false"><i class="p"></i><img src="/assets/skins/neon.webp" alt="" loading="lazy"><span class="n">Néon</span></button>
-          <button class="thumb" type="button" data-show="jeva" aria-pressed="false"><i class="p"></i><img src="/assets/skins/jeva.webp" alt="" loading="lazy"><span class="n">JEVA</span></button>
-          <button class="thumb" type="button" data-show="ark" aria-pressed="false"><i class="p"></i><img src="/assets/skins/ark.webp" alt="" loading="lazy"><span class="n">ARK</span></button>
+          <button class="thumb" type="button" data-show="renard" aria-pressed="true"><img src="/assets/skins/renard.webp" alt="Avatar Jimy Renard" width="80" height="80" loading="lazy"><span class="n">Renard</span></button>
+          <button class="thumb" type="button" data-show="arctique" aria-pressed="false"><img src="/assets/skins/arctique.webp" alt="Avatar Jimy Arctique" width="80" height="80" loading="lazy"><span class="n">Arctique</span></button>
+          <button class="thumb" type="button" data-show="fennec" aria-pressed="false"><img src="/assets/skins/fennec.webp" alt="Avatar Jimy Fennec" width="80" height="80" loading="lazy"><span class="n">Fennec</span></button>
+          <button class="thumb" type="button" data-show="ours" aria-pressed="false"><img src="/assets/skins/ours.webp" alt="Avatar Jimy Ours" width="80" height="80" loading="lazy"><span class="n">Ours</span></button>
+          <button class="thumb" type="button" data-show="robot" aria-pressed="false"><img src="/assets/skins/robot.webp" alt="Avatar Jimy Robot" width="80" height="80" loading="lazy"><span class="n">Robot</span></button>
+          <button class="thumb" type="button" data-show="neon" aria-pressed="false"><i class="p"></i><img src="/assets/skins/neon.webp" alt="Avatar Jimy Néon" width="80" height="80" loading="lazy"><span class="n">Néon</span></button>
+          <button class="thumb" type="button" data-show="jeva" aria-pressed="false"><i class="p"></i><img src="/assets/skins/jeva.webp" alt="Avatar Jimy JEVA" width="80" height="80" loading="lazy"><span class="n">JEVA</span></button>
+          <button class="thumb" type="button" data-show="ark" aria-pressed="false"><i class="p"></i><img src="/assets/skins/ark.webp" alt="Avatar Jimy ARK" width="80" height="80" loading="lazy"><span class="n">ARK</span></button>
         </div>
-        <div class="next"><img src="/assets/skins/jeva.webp" alt="" loading="lazy"><span><b>JEVA OMEGA</b> est en préparation : plus massive, huit pattes, et des mini-JEVA comme compagnons.</span></div>
+        <div class="next"><img src="/assets/skins/jeva.webp" alt="Aperçu JEVA OMEGA" width="46" height="46" loading="lazy"><span><b>JEVA OMEGA</b> est en préparation : plus massive, huit pattes, et des mini-JEVA comme compagnons.</span></div>
         <p class="shop-note">La boutique ouvre bientôt : aucun paiement n'est possible pour l'instant. Les skins premium s'activeront avec une clé de licence, dans l'onglet Skin de l'appli.</p>
       </div>
     </div>
