@@ -246,15 +246,16 @@ impl Tool for SearchSessions {
         "search_sessions"
     }
     fn description(&self) -> &str {
-        "Cherche dans les conversations passées de Jimy (titres, projets, résumés et texte des échanges) pour retrouver ce qui a été dit ou fait sur un sujet."
+        "Cherche dans les conversations passées de Jimy (titres, projets, résumés et texte des échanges) pour retrouver ce qui a été dit ou fait sur un sujet. Sans « query » : les conversations les plus récentes avec leur date, pour résumer une journée."
     }
     fn parameters(&self) -> serde_json::Value {
         schema(
             serde_json::json!({
-                "query": {"type": "string", "description": "Mots-clés ou sujet à chercher dans les conversations."},
+                "query": {"type": "string", "description": "Mots-clés ou sujet à chercher. Vide ou absent : conversations les plus récentes."},
                 "limit": {"type": "integer", "description": "Nombre maximal de conversations (défaut 5)."}
             }),
-            &["query"],
+            // `query` facultatif : un résumé de journée n'a pas de mot-clé (piège 143).
+            &[],
         )
     }
     fn capability(&self) -> Capability {
@@ -271,9 +272,10 @@ impl Tool for SearchSessions {
                 .history
                 .as_ref()
                 .ok_or_else(|| Error::Tool("historique indisponible".into()))?;
-            let query = arg_str(args, "query").ok_or_else(|| Error::Tool("« query » manquant".into()))?;
+            // Sans mot-clé, `search_sessions` liste par date de mise à jour.
+            let query = arg_str(args, "query");
             let limit = arg_u64(args, "limit", 5).min(15) as usize;
-            let found = history.search_sessions(Some(&query), false, limit)?;
+            let found = history.search_sessions(query.as_deref(), false, limit)?;
             if found.is_empty() {
                 return Ok("Aucune conversation trouvée pour cette recherche.".into());
             }
@@ -491,3 +493,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&racine);
     }
 }
+        // Sans mot-clé : les conversations les plus récentes (résumer une
+        // journée, piège 143) au lieu d'une erreur « query manquant ».
+        let recent = SearchSessions.call(&serde_json::json!({}), &ctx).await.unwrap();
+        assert!(recent.contains("Relance des leads Maxence") && recent.contains("Session vocale"), "{recent}");
+

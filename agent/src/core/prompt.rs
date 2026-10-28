@@ -169,6 +169,14 @@ const ACTION_MARKERS: &[&str] = &[
     "dashboard", "audit",
 ];
 
+    // Rappel du passé : il faut l'historique et `search_sessions`, absents du
+    // Fast-Path (sinon Jimy invente à partir de vieux souvenirs, piège 143).
+    // « aujourd » couvre l'apostrophe typographique (« aujourd’hui » est coupé).
+    "résume", "resume", "résumer", "résumé", "récap", "recap", "récapitule",
+    "aujourd'hui", "aujourd", "hier", "journée", "journee", "session", "sessions",
+    "conversation", "conversations", "historique",
+    // Équivalents anglais des suggestions de l'accueil (interface EN).
+    "summarize", "summary", "today", "yesterday", "history", "analyze", "folder",
 /// Détecte en < 1 ms (zéro appel réseau, zéro LLM) si la demande est une
 /// discussion simple ou une question directe qui n'a besoin ni des ~25 outils
 /// système/MCP ni du prompt complet de 15 000 caractères (Fast-Path).
@@ -784,6 +792,18 @@ mod tests {
         let settings = Settings::default();
         let db = std::sync::Arc::new(std::sync::Mutex::new(crate::db::Db::open_in_memory().expect("db")));
         let memory = MemoryStore::new(db);
+        // Rappel du passé (journée, sessions) : il faut l'historique et
+        // `search_sessions`, absents du Fast-Path. Cas réel du 22 octobre : la
+        // suggestion « Résumer ma journée » d'une nouvelle session partait en
+        // Fast-Path (0 historique, 0 outil) et Jimy inventait à partir de
+        // vieux souvenirs. Les suggestions FR et EN de l'accueil y passent toutes.
+        assert!(!is_conversational_fast_path("Résume ce que nous avons fait aujourd'hui.", false, false));
+        assert!(!is_conversational_fast_path("Résume ce que nous avons fait aujourd’hui.", false, false));
+        assert!(!is_conversational_fast_path("Qu'est-ce qu'on a fait hier ?", false, false));
+        assert!(!is_conversational_fast_path("Summarize what we did today.", false, false));
+        assert!(!is_conversational_fast_path("Analyze this folder and explain what you find.", false, false));
+        assert!(!is_conversational_fast_path("Search my Obsidian vault: ", false, false));
+        assert!(!is_conversational_fast_path("Analyse ce dossier et explique-moi ce que tu trouves.", false, false));
         let skills = crate::skills::SkillStore::new(std::env::temp_dir().join("prompt-test-skills")).unwrap();
         let registry = ToolRegistry::new();
         registry.register_defaults(&crate::tools::ToolDeps { http: reqwest::Client::new() });
