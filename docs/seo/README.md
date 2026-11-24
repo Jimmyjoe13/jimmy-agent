@@ -25,7 +25,17 @@ GitHub fait foi : Vercel publie automatiquement ce qui arrive sur `main` dans `s
 Tu ne publies plus avec `vercel --prod` ; tu pousses sur `main`, après un `git pull`
 (le bot y pousse aussi).
 
-## Tes commandes Telegram
+## Tes commandes Telegram (bot Richard)
+
+Dans le menu « / » de ta conversation avec Richard :
+
+| Commande | Effet |
+|---|---|
+| `/seo` | État du bot SEO ; suivi d'un mot : `/seo ok S03`, `/seo corrige S03 …`, `/seo pause`… |
+| `/seo_rapport` | Rapport d'audit Search Console + GA4 sur 28 jours (immédiat) |
+| `/seo_derniere` | Dernière tâche SEO terminée, dernière entrée du journal, prochaine tâche |
+
+Les messages texte complets marchent aussi :
 
 | Message | Effet |
 |---|---|

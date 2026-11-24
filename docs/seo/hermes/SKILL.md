@@ -23,6 +23,14 @@ version fasse foi :
 3. Appliquer la procédure correspondant au déclencheur (tableau « Selon ce qui t'a lancé »
    de `AGENTS.md`). Un message de Jimmy commençant par `SEO` → procédure P2.
 
+## Commande Telegram `/seo` (raccourci vers ce skill)
+
+`/seo` est un alias de ce skill. Le texte qui suit `/seo` est une commande P2 **sans le mot
+SEO** : `/seo ok S01` = `SEO OK S01`, `/seo corrige S01 raccourcis l'intro` =
+`SEO CORRIGE S01 : raccourcis l'intro`, `/seo abandon S01`, `/seo pause`, etc.
+`/seo` **seul** = `SEO ETAT` (message M8).
+`/seo_rapport` et `/seo_derniere` sont des scripts lancés directement par Hermes, sans toi.
+
 ## Rappels qui ne doivent jamais être oubliés
 
 - Rien n'est mis en ligne sans « SEO OK <ID> » de Jimmy.

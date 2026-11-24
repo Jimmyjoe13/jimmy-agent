@@ -5,6 +5,7 @@ Usage :
   python3 calendrier.py etat                       tableau de toutes les tâches
   python3 calendrier.py prochaine                  prochaine tâche de contenu à produire (ou rien)
   python3 calendrier.py dues                       tâches hors site et mesures dues aujourd'hui
+  python3 calendrier.py derniere                   dernière tâche terminée + dernière entrée du journal (/seo_derniere)
   python3 calendrier.py statut <ID> <STATUT> [--date AAAA-MM-JJ] [--note "texte"]
 
 Ne jamais éditer calendrier.yaml à la main : passer par ce script (format et statuts garantis).
@@ -104,6 +105,29 @@ def dues():
     if rien: print("RIEN")
 
 
+def derniere():
+    """Dernière tâche terminée (publiée, mesurée, faite ou abandonnée) + dernière entrée du journal."""
+    finies = [t for t in taches() if t.get("publie_le") or t.get("clos_le")]
+    if not finies:
+        print("Aucune tâche SEO terminée pour l'instant.")
+    else:
+        t = max(finies, key=lambda x: str(x.get("clos_le") or x.get("publie_le")))
+        quand = t.get("clos_le") or t.get("publie_le")
+        print(f"Dernière tâche SEO : {t['id']} — {t['titre']}")
+        print(f"Statut : {t['statut']} (le {quand})")
+        for u in t.get("urls", []): print(f"- {u}")
+        for n in t.get("notes", [])[-2:]: print(f"Note : {n}")
+    # Dernière entrée du journal (bloc commençant par « ### »)
+    journal = os.path.join(os.path.dirname(FICHIER), "journal.md")
+    if os.path.isfile(journal):
+        blocs = open(journal, encoding="utf-8").read().split("\n### ")
+        if len(blocs) > 1:
+            print("\nJournal : ### " + blocs[-1].strip())
+    prochaine_tache = next((t for t in taches() if t["statut"] == "a_faire" and t["type"] in ("contenu", "revue")), None)
+    if prochaine_tache:
+        print(f"\nProchaine : {prochaine_tache['id']} — {prochaine_tache['titre']} (à partir du {prochaine_tache['date']})")
+
+
 def statut(ident, nouveau, jour_=None, note=None):
     entete, data = charger()
     t = next((x for x in data["taches"] if x["id"] == ident), None)
@@ -129,5 +153,6 @@ if __name__ == "__main__":
     if a[:1] == ["etat"]: etat()
     elif a[:1] == ["prochaine"]: prochaine()
     elif a[:1] == ["dues"]: dues()
+    elif a[:1] == ["derniere"]: derniere()
     elif a[:1] == ["statut"] and len(a) == 3: statut(a[1], a[2], d, n)
     else: print(__doc__); sys.exit(2)

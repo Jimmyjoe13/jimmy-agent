@@ -106,6 +106,11 @@ git pull --ff-only origin main
 Les messages Telegram commençant par `SEO` sont des commandes. Insensible à la casse ;
 `<ID>` = identifiant du calendrier (S01, H02…).
 
+Raccourcis du menu Telegram de Richard (installés par `hermes/installation.md` §6 bis) :
+- `/seo <reste>` = `SEO <reste>` (ex. `/seo ok S01`, `/seo corrige S01 …`) ; `/seo` seul = `SEO ETAT`.
+- `/seo_rapport` : script direct `seo_data.py rapport --jours 28` (pas de procédure à appliquer).
+- `/seo_derniere` : script direct `calendrier.py derniere` (pas de procédure à appliquer).
+
 | Message | Action |
 |---|---|
 | `SEO OK <ID>` | Tâche de contenu ou revue : **P3**. Tâche hors site : P6 étape 4. |

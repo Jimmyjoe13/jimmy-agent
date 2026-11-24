@@ -93,6 +93,33 @@ modèle, le champ `"model"` de la tâche est posé directement dans `~/.hermes/c
 (sauvegarde `jobs.json.bak_jimy_seo_*` avant modification ; `provider` et `base_url` restent
 vides). Vérif : `grep kimi-k3.1-pro ~/.hermes/logs/agent.log` après un `hermes cron run`.
 
+## 6 bis. Commandes rapides dans le menu Telegram de Richard
+
+Dans `~/.hermes/config.yaml` (sauvegarde avant), clé `quick_commands` :
+```yaml
+quick_commands:
+  seo:
+    type: alias
+    target: /jimy-seo
+  seo_rapport:
+    type: exec
+    command: cd /home/jimmy/jimy-seo/jimmy-agent && HOME=/home/jimmy git pull -q --ff-only origin main >/dev/null 2>&1; HOME=/home/jimmy JIMY_SEO_GOOGLE_KEY=/home/jimmy/.secrets/jimy_seo_google.json /usr/bin/python3 docs/seo/outils/seo_data.py rapport --jours 28 2>/dev/null
+  seo_derniere:
+    type: exec
+    command: cd /home/jimmy/jimy-seo/jimmy-agent && HOME=/home/jimmy git pull -q --ff-only origin main >/dev/null 2>&1; /usr/bin/python3 docs/seo/outils/calendrier.py derniere 2>/dev/null
+```
+Les commandes `exec` tournent sans modèle de langage, 30 s maximum (le rapport en prend ~7).
+Redémarrer la passerelle (après avoir vérifié qu'aucune tâche ne tourne) pour les charger.
+
+Menu : Hermes ne met pas les commandes rapides dans le menu « / » et réécrit le menu général
+à chaque démarrage. On pose donc un menu propre à la conversation de Jimmy (prioritaire,
+jamais réécrit par Hermes) :
+```bash
+/usr/bin/python3 /home/jimmy/jimy-seo/jimmy-agent/docs/seo/hermes/menu_telegram.py <chat_id de Jimmy>
+```
+(chat_id : champ `origin.chat_id` des tâches de `~/.hermes/cron/jobs.json`.) À relancer après
+une mise à jour de Hermes qui change ses commandes.
+
 ## 7. Contenu de départ (Claude Code)
 
 - [x] Hubs `site-jimy/guides/index.html` et `site-jimy/en/guides/index.html` (liste des guides,
