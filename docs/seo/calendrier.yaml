@@ -9,16 +9,22 @@ taches:
 - id: S00
   type: manuel
   date: '2026-11-25'
-  statut: a_faire
+  statut: fait
   titre: Mise en place (Vercel relié à GitHub, clone VPS, clé de déploiement, skill, tâches planifiées, hubs /guides/)
   responsable: Claude Code + Jimmy
+  clos_le: '2026-11-24'
+  notes:
+  - '2026-11-24 : installation faite par Claude Code (Vercel relié, clone VPS, clé de déploiement, clé Google, skill, 4 crons, hubs)'
 - id: S01
   type: contenu
   date: '2026-11-30'
   statut: a_faire
   titre: Assistant IA comme Jarvis sur PC
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/en/guides/jarvis-ai-assistant-for-pc.html, https://jimy-agent.me/guides/assistant-ia-comme-jarvis-pc.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/en/guides/jarvis-ai-assistant-for-pc.html
+  - https://jimy-agent.me/guides/assistant-ia-comme-jarvis-pc.html
 - id: H01
   type: hors_site
   date: '2026-11-30'
@@ -29,8 +35,11 @@ taches:
   date: '2026-12-07'
   statut: a_faire
   titre: Assistant vocal Windows 11 et remplaçant de Cortana
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/guides/assistant-vocal-windows-11.html, https://jimy-agent.me/en/guides/voice-assistant-windows-11.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/guides/assistant-vocal-windows-11.html
+  - https://jimy-agent.me/en/guides/voice-assistant-windows-11.html
 - id: H02
   type: hors_site
   date: '2026-12-07'
@@ -41,8 +50,11 @@ taches:
   date: '2026-12-14'
   statut: a_faire
   titre: Compagnon IA de bureau (AI desktop pet)
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/en/guides/ai-desktop-pet-windows.html, https://jimy-agent.me/guides/compagnon-ia-bureau-windows.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/en/guides/ai-desktop-pet-windows.html
+  - https://jimy-agent.me/guides/compagnon-ia-bureau-windows.html
 - id: H03
   type: hors_site
   date: '2026-12-14'
@@ -53,63 +65,88 @@ taches:
   date: '2026-12-21'
   statut: a_faire
   titre: Fusion des deux comparatifs Copilot + version anglaise
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/comparatif/alternatives-copilot-windows-11.html, https://jimy-agent.me/en/compare/copilot-alternatives-windows-11.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/comparatif/alternatives-copilot-windows-11.html
+  - https://jimy-agent.me/en/compare/copilot-alternatives-windows-11.html
 - id: S05
   type: contenu
   date: '2026-12-28'
   statut: a_faire
   titre: Quelle IA installer sur son PC
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/guides/quelle-ia-pour-pc.html, https://jimy-agent.me/en/guides/best-free-ai-assistant-for-pc.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/guides/quelle-ia-pour-pc.html
+  - https://jimy-agent.me/en/guides/best-free-ai-assistant-for-pc.html
 - id: S06
   type: contenu
   date: '2027-01-04'
   statut: a_faire
   titre: Agent IA qui contrôle le PC
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/guides/agent-ia-controle-pc.html, https://jimy-agent.me/en/guides/ai-that-controls-your-computer.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/guides/agent-ia-controle-pc.html
+  - https://jimy-agent.me/en/guides/ai-that-controls-your-computer.html
 - id: S07
   type: contenu
   date: '2027-01-11'
   statut: a_faire
   titre: IA locale gratuite avec LM Studio
-  depend_de: [S00]
-  urls: [https://jimy-agent.me/guides/ia-locale-gratuite-pc-lm-studio.html, https://jimy-agent.me/en/guides/free-local-ai-assistant-pc.html]
+  depend_de:
+  - S00
+  urls:
+  - https://jimy-agent.me/guides/ia-locale-gratuite-pc-lm-studio.html
+  - https://jimy-agent.me/en/guides/free-local-ai-assistant-pc.html
 - id: S08
   type: contenu
   date: '2027-01-18'
   statut: a_faire
   titre: Désactiver Copilot sur Windows 11
-  depend_de: [S04]
-  urls: [https://jimy-agent.me/guides/desactiver-copilot-windows-11.html, https://jimy-agent.me/en/guides/disable-copilot-windows-11.html]
+  depend_de:
+  - S04
+  urls:
+  - https://jimy-agent.me/guides/desactiver-copilot-windows-11.html
+  - https://jimy-agent.me/en/guides/disable-copilot-windows-11.html
 - id: H04
   type: hors_site
   date: '2027-01-18'
   statut: a_faire
   titre: Post Reddit r/LocalLLaMA (Jimy + LM Studio)
-  depend_de: [S07]
+  depend_de:
+  - S07
 - id: S09
   type: contenu
   date: '2027-01-25'
   statut: a_faire
   titre: Clippy IA
-  depend_de: [S03]
-  urls: [https://jimy-agent.me/en/guides/clippy-ai.html, https://jimy-agent.me/guides/clippy-ia.html]
+  depend_de:
+  - S03
+  urls:
+  - https://jimy-agent.me/en/guides/clippy-ai.html
+  - https://jimy-agent.me/guides/clippy-ia.html
 - id: S10
   type: contenu
   date: '2027-02-01'
   statut: a_faire
   titre: Mode vocal ChatGPT sur PC
-  depend_de: [S05]
-  urls: [https://jimy-agent.me/guides/mode-vocal-chatgpt-pc.html, https://jimy-agent.me/en/guides/chatgpt-voice-on-pc.html]
+  depend_de:
+  - S05
+  urls:
+  - https://jimy-agent.me/guides/mode-vocal-chatgpt-pc.html
+  - https://jimy-agent.me/en/guides/chatgpt-voice-on-pc.html
 - id: S11
   type: contenu
   date: '2027-02-08'
   statut: a_faire
   titre: Une IA qui range les fichiers
-  depend_de: [S06]
-  urls: [https://jimy-agent.me/en/guides/ai-that-organizes-files.html, https://jimy-agent.me/guides/ia-qui-range-mes-fichiers.html]
+  depend_de:
+  - S06
+  urls:
+  - https://jimy-agent.me/en/guides/ai-that-organizes-files.html
+  - https://jimy-agent.me/guides/ia-qui-range-mes-fichiers.html
 - id: H05
   type: hors_site
   date: '2027-02-08'

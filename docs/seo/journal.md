@@ -105,3 +105,8 @@ format défini dans `04-procedures.md` § Journal). Remplace `site-jimy/JOURNAL_
   10 URL sur 11 indexées ; comparatif pilier « Explorée, actuellement non indexée »
   (indexation redemandée par Jimmy le 24/11).
 - Suite : tâche S00 (installation, `hermes/installation.md`), puis S01 le 30/11.
+
+### 2026-11-24 — S00 Installation du bot SEO
+- Fait : Vercel relié au dépôt GitHub (racine `site-jimy`, production `main`, aperçu de branche testé) ; clé de déploiement `jimy-seo-bot` (écriture) ; clone partiel sur le VPS `/home/jimmy/jimy-seo/jimmy-agent` ; clé Google `~/.secrets/jimy_seo_google.json` ; skill Hermes `jimy-seo` ; tâches planifiées jimy-seo-rapport (lun. 07:00 UTC), jimy-seo-production (lun. 08:00), jimy-seo-suivi (jeu. 08:00), jimy-seo-mensuel (1er, 07:00) ; hubs `/guides/` et `/en/guides/` + lien « Guides » sur les accueils.
+- Résultat : outils testés sur le VPS (Search Console, calendrier, vérificateur, suggestions, périmètre).
+- Suite : test Telegram `SEO ETAT` par Jimmy ; S01 produite le lundi 30/11 à 08:00 UTC.

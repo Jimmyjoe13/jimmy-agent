@@ -5,18 +5,18 @@ ne passer à la suivante que si elle est verte. Cocher dans ce fichier au fur et
 
 ## 1. Dépôt GitHub à jour (PC de Jimmy)
 
-- [ ] Pousser `main` (commits du site du 24/11 + dossier `docs/seo/`).
+- [x] Pousser `main` (commits du site du 24/11 + dossier `docs/seo/`).
 - Vérif : `git ls-remote origin main` = `git rev-parse main`.
 
-## 2. Vercel relié au dépôt (Jimmy, tableau de bord Vercel)
+## 2. Vercel relié au dépôt (fait le 24/11 par Claude Code via le CLI : `vercel api` PATCH rootDirectory + `vercel git connect`)
 
 Projet `jimy-agent-site` :
-- [ ] Settings → Git → Connect Git Repository → `Jimmyjoe13/jimmy-agent` (installer l'app
+- [x] Settings → Git → Connect Git Repository → `Jimmyjoe13/jimmy-agent` (installer l'app
       Vercel sur ce dépôt si demandé). Branche de production : `main`.
-- [ ] Settings → Build and Deployment → Root Directory : `site-jimy`.
+- [x] Settings → Build and Deployment → Root Directory : `site-jimy`.
 - [x] `site-jimy/vercel.json` contient `"ignoreCommand": "git diff --quiet HEAD^ HEAD -- ."` (ajouté le 24/11) :
       un commit qui ne touche pas `site-jimy/` (appli Rust, `docs/`) ne redéploie pas le site.
-- [ ] Deployment Protection : laisser « Vercel Authentication » sur les aperçus ; Jimmy doit
+- [x] Deployment Protection : laisser « Vercel Authentication » sur les aperçus ; Jimmy doit
       être connecté à Vercel sur son téléphone pour ouvrir les liens d'aperçu.
 - Vérif : pousser une branche de test qui modifie un commentaire HTML → un aperçu apparaît
   (`python3 docs/seo/outils/apercu_vercel.py <branche>` renvoie une URL) ; supprimer la branche.
@@ -88,7 +88,7 @@ $H cron list
 
 ## 7. Contenu de départ (Claude Code)
 
-- [ ] Hubs `site-jimy/guides/index.html` et `site-jimy/en/guides/index.html` (liste des guides,
+- [x] Hubs `site-jimy/guides/index.html` et `site-jimy/en/guides/index.html` (liste des guides,
       sitemap, lien « Guides » dans la navigation et le pied de page des accueils).
 - Vérif : `python3 docs/seo/outils/verifier.py site` sans ALERTE « hub absent ».
 
