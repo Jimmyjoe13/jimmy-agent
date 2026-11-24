@@ -86,6 +86,13 @@ $H cron list
 ```
 - Vérif : `hermes cron run <id de jimy-seo-rapport>` → rapport M3 reçu sur Telegram.
 
+**Modèle de la rédaction** (décision de Jimmy du 24/11) : `jimy-seo-production` tourne avec
+`kimi-k3.1-pro` (OpenCode Go, via le proxy de `config.yaml` → `model.base_url`) ; les trois
+autres tâches gardent le modèle par défaut de Hermes. `hermes cron edit` n'ayant pas d'option
+modèle, le champ `"model"` de la tâche est posé directement dans `~/.hermes/cron/jobs.json`
+(sauvegarde `jobs.json.bak_jimy_seo_*` avant modification ; `provider` et `base_url` restent
+vides). Vérif : `grep kimi-k3.1-pro ~/.hermes/logs/agent.log` après un `hermes cron run`.
+
 ## 7. Contenu de départ (Claude Code)
 
 - [x] Hubs `site-jimy/guides/index.html` et `site-jimy/en/guides/index.html` (liste des guides,
