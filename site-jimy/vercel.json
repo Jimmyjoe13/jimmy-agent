@@ -1,5 +1,6 @@
 {
   "cleanUrls": false,
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- .",
   "redirects": [
     { "source": "/((?!api/).*)", "has": [{ "type": "host", "value": "www.jimy-agent.me" }], "destination": "https://jimy-agent.me/$1", "permanent": true },
     { "source": "/((?!api/).*)", "has": [{ "type": "host", "value": "jimy-agent-site.vercel.app" }], "destination": "https://jimy-agent.me/$1", "permanent": true },

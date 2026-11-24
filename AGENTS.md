@@ -20,3 +20,8 @@ Les quatre règles qui évitent le plus de régressions :
 Réponses en français, courtes. Aucun secret dans un prompt ni dans un commit.
 Rien n'est poussé sur le dépôt distant sans demande explicite. Fin de run
 autonome : bloc `Fait / Restant / Bloqué` (voir `CONTRIBUTION.md` §9).
+
+Exception : le site (`site-jimy/`) et le SEO (`docs/seo/`) suivent `docs/seo/AGENTS.md`.
+Un bot SEO (Hermes, VPS) y pousse sur `main` après validation de Jimmy sur Telegram, et
+Vercel publie automatiquement `main` : faire `git pull` avant de toucher au site, et ne plus
+publier avec `vercel --prod`.

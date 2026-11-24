@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<!--
+  GABARIT GUIDE FR — bot SEO jimy-agent.me (voir 03-charte-redactionnelle.md et 04-procedures.md P1).
+  1. Copier ce fichier vers site-jimy/<chemin du brief>.html.
+  2. Remplacer TOUS les {{…}} (verifier.py refuse la page s'il en reste un).
+  3. Garder la structure : chapeau, sommaire, sections « question », tableau, FAQ, appel à l'action.
+  4. Chaque H2 en question est suivi IMMÉDIATEMENT d'un <p class="reponse"> de 40 à 60 mots
+     (35 à 70 tolérés) qui répond seul à la question ; le détail vient après.
+  5. Supprimer ces commentaires de gabarit (ceux en MAJUSCULES) avant publication.
+-->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE_FR}}</title>
+<meta name="description" content="{{META_FR}}">
+<link rel="canonical" href="{{URL_FR}}">
+<link rel="alternate" hreflang="fr" href="{{URL_FR}}">
+<link rel="alternate" hreflang="en" href="{{URL_EN}}">
+<link rel="alternate" hreflang="x-default" href="{{URL_EN}}">
+<meta name="theme-color" content="#0a0e1c">
+<link rel="icon" href="/assets/logo/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/assets/logo/icon-256.png">
+<script>window.JIMY_GA4_ID = "G-FK2NSSHQWM";</script>
+<link rel="stylesheet" href="/assets/site.css">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{URL_FR}}">
+<meta property="og:title" content="{{TITLE_FR}}">
+<meta property="og:description" content="{{META_FR}}">
+<meta property="og:image" content="https://jimy-agent.me/assets/og.png">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "{{H1_FR}}",
+  "description": "{{META_FR}}",
+  "inLanguage": "fr",
+  "image": "https://jimy-agent.me/assets/og.png",
+  "datePublished": "{{DATE_ISO}}",
+  "dateModified": "{{DATE_ISO}}",
+  "author": { "@type": "Person", "name": "Jimmyjoe13", "url": "https://github.com/Jimmyjoe13" },
+  "publisher": { "@type": "Organization", "name": "Jimy Agent", "url": "https://jimy-agent.me",
+    "logo": { "@type": "ImageObject", "url": "https://jimy-agent.me/assets/logo/icon-256.png" } },
+  "mainEntityOfPage": { "@type": "WebPage", "@id": "{{URL_FR}}" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Accueil", "item": "https://jimy-agent.me/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://jimy-agent.me/guides/" },
+    { "@type": "ListItem", "position": 3, "name": "{{FIL_ARIANE_FR}}", "item": "{{URL_FR}}" }
+  ]
+}
+</script>
+<!-- FAQPAGE : MÊMES QUESTIONS ET MÊMES RÉPONSES QUE LA SECTION FAQ VISIBLE (3 À 5), TEXTE BRUT SANS HTML -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "{{FAQ_Q1}}", "acceptedAnswer": { "@type": "Answer", "text": "{{FAQ_R1}}" } },
+    { "@type": "Question", "name": "{{FAQ_Q2}}", "acceptedAnswer": { "@type": "Answer", "text": "{{FAQ_R2}}" } },
+    { "@type": "Question", "name": "{{FAQ_Q3}}", "acceptedAnswer": { "@type": "Answer", "text": "{{FAQ_R3}}" } }
+  ]
+}
+</script>
+
+<style>
+.doc .wrap { max-width: 880px; }
+.breadcrumb { font-size: 13px; color: var(--ink-mute); margin-bottom: 24px; font-family: var(--mono); }
+.breadcrumb a { color: var(--ink-dim); text-decoration: none; }
+.breadcrumb a:hover { color: var(--coral); }
+.badge-tech { display: inline-block; background: rgba(255, 106, 77, 0.12); color: var(--coral); border: 1px solid rgba(255, 106, 77, 0.3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 99px; margin-bottom: 14px; }
+.meta-article { color: var(--ink-mute); font-size: 14px; margin-bottom: 32px; font-family: var(--mono); }
+.guide-toc { background: var(--night-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; margin: 30px 0 40px; }
+.guide-toc .toc-title { font-size: 16px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); margin-bottom: 14px; font-weight: 700; }
+.guide-toc ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; font-size: 14.5px; }
+.guide-toc a { color: var(--ink); text-decoration: none; }
+.guide-toc a:hover { color: var(--coral); }
+.section-block { margin: 44px 0; }
+.section-block h2 { font-size: 26px; color: var(--ink); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.section-block h3 { font-size: 19px; color: var(--ink); margin: 24px 0 12px; }
+.section-block p, .section-block li { font-size: 16px; line-height: 1.7; color: var(--ink-dim); }
+.section-block ul, .section-block ol { padding-left: 22px; margin: 16px 0; }
+.section-block li { margin-bottom: 8px; }
+.reponse { background: rgba(255, 106, 77, 0.07); border-left: 4px solid var(--coral); padding: 16px 20px; border-radius: 0 var(--radius) var(--radius) 0; color: var(--ink) !important; }
+.comp-table-wrap { overflow-x: auto; margin: 24px 0 34px; border-radius: var(--radius); border: 1px solid var(--line); }
+.comp-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14.5px; background: var(--night-2); }
+.comp-table th, .comp-table td { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.comp-table th { background: rgba(255, 255, 255, 0.03); color: var(--ink); font-weight: 700; }
+.comp-table .highlight { background: rgba(255, 106, 77, 0.05); }
+.callout { background: rgba(255, 106, 77, 0.06); border-left: 3px solid var(--coral); padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 24px 0; }
+.callout p { margin: 0; font-size: 15px; color: var(--ink-dim); }
+.cta-box { background: linear-gradient(135deg, rgba(255, 106, 77, 0.1) 0%, rgba(20, 24, 40, 0.95) 100%); border: 1px solid rgba(255, 106, 77, 0.35); border-radius: var(--radius); padding: 36px 32px; text-align: center; margin: 50px 0 30px; }
+.cta-box h2 { font-size: 24px; margin-bottom: 12px; color: var(--ink); border: 0; }
+.cta-box p { font-size: 16px; color: var(--ink-dim); max-width: 600px; margin: 0 auto 24px; }
+.liens-connexes { margin: 30px 0; }
+</style>
+</head>
+<body class="doc">
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Jimy, accueil"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></a>
+    <nav aria-label="Navigation principale">
+      <a href="/#comment">Comment ça marche</a>
+      <a href="/#fonctions">Fonctions</a>
+      <a href="/guides/" class="active">Guides</a>
+      <a class="btn btn-main btn-sm" href="/#telecharger">Télécharger</a>
+      <a href="{{URL_EN}}" class="lang-switch" title="Read in English" style="font-family:var(--mono);font-size:12px;color:var(--ink-mute);text-decoration:none;border:1px solid var(--line-2);padding:4px 8px;border-radius:6px;margin-left:6px">EN</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <nav class="breadcrumb" aria-label="Fil d'ariane">
+      <a href="/">Accueil</a> &gt; <a href="/guides/">Guides</a> &gt; <span>{{FIL_ARIANE_FR}}</span>
+    </nav>
+
+    <span class="badge-tech">{{BADGE_FR}}</span>
+    <h1>{{H1_FR}}</h1>
+    <p class="meta-article">Mis à jour le {{DATE_TEXTE_FR}} · Par Jimmyjoe13 · Temps de lecture : {{MINUTES}} min</p>
+
+    <!-- CHAPEAU : 2 À 4 PHRASES, MOT-CLÉ PRINCIPAL DANS LA PREMIÈRE PHRASE, PROMESSE DE LA PAGE -->
+    <p class="lead">{{CHAPEAU_FR}}</p>
+
+    <div class="guide-toc">
+      <p class="toc-title">Sommaire</p>
+      <ul>
+        <!-- UNE LIGNE PAR H2, MÊME TEXTE QUE LE H2 -->
+        <li><a href="#{{ANCRE_1}}">{{QUESTION_1}}</a></li>
+        <li><a href="#{{ANCRE_2}}">{{QUESTION_2}}</a></li>
+        <li><a href="#comparatif">{{TITRE_TABLEAU_FR}}</a></li>
+        <li><a href="#{{ANCRE_3}}">{{QUESTION_3}}</a></li>
+        <li><a href="#{{ANCRE_4}}">{{QUESTION_4}}</a></li>
+        <li><a href="#faq">Questions fréquentes</a></li>
+      </ul>
+    </div>
+
+    <!-- SECTION QUESTION (RÉPÉTER CE BLOC POUR CHAQUE QUESTION DU BRIEF, 4 MINIMUM) -->
+    <section class="section-block" id="{{ANCRE_1}}">
+      <h2>{{QUESTION_1}}</h2>
+      <p class="reponse">{{REPONSE_DIRECTE_1}}</p>
+      <p>{{DETAIL_1}}</p>
+    </section>
+
+    <section class="section-block" id="{{ANCRE_2}}">
+      <h2>{{QUESTION_2}}</h2>
+      <p class="reponse">{{REPONSE_DIRECTE_2}}</p>
+      <p>{{DETAIL_2}}</p>
+    </section>
+
+    <!-- TABLEAU COMPARATIF : COLONNES DU BRIEF ; JIMY EN CLASSE highlight ; AUCUN FAIT CONCURRENT SANS SOURCE (CHARTE §5) -->
+    <section class="section-block" id="comparatif">
+      <h2>{{TITRE_TABLEAU_FR}}</h2>
+      <div class="comp-table-wrap">
+        <table class="comp-table">
+          <thead><tr><th>{{COL_1}}</th><th class="highlight">Jimy</th><th>{{COL_3}}</th><th>{{COL_4}}</th></tr></thead>
+          <tbody>
+            <tr><td>{{CRITERE_1}}</td><td class="highlight">{{VAL}}</td><td>{{VAL}}</td><td>{{VAL}}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>{{LECTURE_DU_TABLEAU_FR}}</p>
+    </section>
+
+    <section class="section-block" id="{{ANCRE_3}}">
+      <h2>{{QUESTION_3}}</h2>
+      <p class="reponse">{{REPONSE_DIRECTE_3}}</p>
+      <p>{{DETAIL_3}}</p>
+    </section>
+
+    <section class="section-block" id="{{ANCRE_4}}">
+      <h2>{{QUESTION_4}}</h2>
+      <p class="reponse">{{REPONSE_DIRECTE_4}}</p>
+      <!-- POUR UN PAS-À-PAS : <ol> AVEC DES ÉTAPES COURTES ET VÉRIFIÉES (CHARTE §3) -->
+      <p>{{DETAIL_4}}</p>
+    </section>
+
+    <section class="section-block" id="faq">
+      <h2>Questions fréquentes</h2>
+      <!-- 3 À 5 QUESTIONS EN H3, IDENTIQUES AU BLOC FAQPAGE DU <head> -->
+      <h3>{{FAQ_Q1}}</h3>
+      <p>{{FAQ_R1}}</p>
+      <h3>{{FAQ_Q2}}</h3>
+      <p>{{FAQ_R2}}</p>
+      <h3>{{FAQ_Q3}}</h3>
+      <p>{{FAQ_R3}}</p>
+    </section>
+
+    <!-- LIENS CONNEXES : LES PAGES DU BRIEF (MAILLAGE SORTANT), AVEC DES ANCRES DESCRIPTIVES -->
+    <section class="section-block liens-connexes">
+      <h2>À lire aussi</h2>
+      <ul>
+        <li><a href="{{LIEN_CONNEXE_1}}">{{ANCRE_CONNEXE_1}}</a></li>
+        <li><a href="{{LIEN_CONNEXE_2}}">{{ANCRE_CONNEXE_2}}</a></li>
+        <li><a href="/guides/">Tous les guides Jimy</a></li>
+      </ul>
+    </section>
+
+    <div class="cta-box">
+      <h2>{{TITRE_CTA_FR}}</h2>
+      <p>{{TEXTE_CTA_FR}}</p>
+      <a class="btn btn-main" href="https://github.com/Jimmyjoe13/jimmy-agent/releases/latest/download/Jimy-setup.exe" data-track="download">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="20" height="20"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+        Télécharger Jimy pour Windows (gratuit)
+      </a>
+      <p style="margin-top:14px;font-size:13px;color:var(--ink-mute)">
+        Windows 10 / 11 · Open source · <a href="/#defender" style="color:var(--coral)">Windows bloque l'installeur ?</a>
+      </p>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="brand"><span class="brand-mark" role="img" aria-label="Agent Jimy"></span><strong>Jimy</strong></span>
+    <span>Jimy, avec un seul M · jimy-agent.me</span>
+    <nav aria-label="Liens du pied de page">
+      <a href="https://github.com/Jimmyjoe13/jimmy-agent">GitHub</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/code-signing.html">Code signing policy</a>
+      <a href="/guides/">Guides</a>
+      <a href="/comparatif/alternatives-copilot-windows-11.html">Alternatives à Copilot</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/tracking.js?v=2" defer></script>
+</body>
+</html>
