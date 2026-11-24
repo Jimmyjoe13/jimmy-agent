@@ -18,7 +18,22 @@
   s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id);
   document.head.appendChild(s);
   window.gtag('js', new Date());
-  window.gtag('config', id);
+
+  // Trafic interne (Jimmy) : IP variable (partage de connexion), donc marquage par navigateur.
+  // ?interne=1 marque ce navigateur, ?interne=0 le démarque ; le filtre de données GA4
+  // « Internal Traffic » exclut ensuite tout ce qui porte traffic_type=internal.
+  var interne = false;
+  try {
+    var flag = new URLSearchParams(location.search).get('interne');
+    if (flag === '1') localStorage.setItem('jimy_interne', '1');
+    if (flag === '0') localStorage.removeItem('jimy_interne');
+    interne = localStorage.getItem('jimy_interne') === '1';
+    // Retire le paramètre de l'URL affichée (évite de le recopier en partageant le lien).
+    if (flag !== null && history.replaceState) {
+      history.replaceState(null, '', location.pathname + location.hash);
+    }
+  } catch (err) { /* stockage bloqué : on mesure normalement */ }
+  window.gtag('config', id, interne ? { traffic_type: 'internal' } : {});
 
   // Téléchargement de l'installeur.
   document.addEventListener('click', function (e) {
