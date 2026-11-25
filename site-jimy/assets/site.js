@@ -6,9 +6,11 @@
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const wait = (ms) => new Promise((ok) => setTimeout(ok, calm ? Math.min(ms, 400) : ms));
+  // Langue de la page (<html lang="en"> sur /en/) : choisit les textes FR ou EN ci-dessous.
+  const EN = document.documentElement.lang.startsWith("en");
 
   // ── Fiche de chaque skin (nom d'appel, compagnon, lueur de la scène) ──────
-  const SKINS = {
+  const SKINS_FR = {
     renard:   { nom: "Renard",   wake: "Jimy", buddy: "le lapin", prix: "Offert", badge: "free", glow: "rgba(255,106,77,.32)",
                 desc: "Le Jimy d'origine : pelage roux, écharpe dorée." },
     arctique: { nom: "Arctique", wake: "Jimy", buddy: "le lapin", prix: "Offert", badge: "free", glow: "rgba(42,212,247,.26)",
@@ -26,6 +28,32 @@
     ark:      { nom: "ARK",      wake: "ARK", buddy: "la sonde ARK", prix: "Bientôt", badge: "premium", glow: "rgba(110,255,120,.3)",
                 desc: "Sphère mécanique à l'œil vert fendu, douze tentacules à pinces animés par ressorts." },
   };
+  // Mêmes fiches en anglais (les lueurs et badges sont repris des fiches FR).
+  const SKINS_EN = {
+    renard:   { nom: "Fox",    buddy: "the rabbit",      prix: "Free",
+                desc: "The original Jimy: red fur, golden scarf." },
+    arctique: { nom: "Arctic", buddy: "the rabbit",      prix: "Free",
+                desc: "White fur and turquoise scarf, for minimalist desktops." },
+    fennec:   { nom: "Fennec", buddy: "the rabbit",      prix: "Free",
+                desc: "Big ears and sand-colored fur." },
+    ours:     { nom: "Bear",   buddy: "the rabbit",      prix: "Free",
+                desc: "Stockier, small round ears, brown fur." },
+    robot:    { nom: "Robot",  buddy: "the rabbit",      prix: "Free",
+                desc: "Metal grey, not a single hair." },
+    neon:     { nom: "Neon",   buddy: "the neon rabbit", prix: "€4.90 · soon",
+                desc: "Dark body, thick orange outline: it stands out on any wallpaper." },
+    jeva:     { nom: "JEVA",   buddy: "the probe",       prix: "Soon",
+                desc: "Floating chrome android with a single eye, surrounded by glowing cables." },
+    ark:      { nom: "ARK",    buddy: "the ARK probe",   prix: "Soon",
+                desc: "Mechanical sphere with a slit green eye and twelve spring-animated claw tentacles." },
+  };
+  const SKINS = EN
+    ? Object.fromEntries(Object.entries(SKINS_FR).map(([k, v]) => [k, { ...v, ...SKINS_EN[k] }]))
+    : SKINS_FR;
+  // Petits textes d'interface selon la langue.
+  const T = EN
+    ? { yes: "Yes?", free: "Free", locale: "en-GB", quote: (w) => `“${w}”` }
+    : { yes: "Oui ?", free: "Offert", locale: "fr-FR", quote: (w) => `« ${w} »` };
   const src = (k) => `/assets/skins/${k}.webp`;
 
   // Change une image avec un court fondu (classe .swap posée par le CSS).
@@ -40,7 +68,18 @@
 
   // ── Hero : scénarios joués en boucle sur le faux bureau ───────────────────
   // {W} = nom d'appel du skin courant (« Jimy », « JEVA »…).
-  const SCENES = [
+  const SCENES_EN = [
+    { said: "{W}, tidy up my downloads.",
+      task: ["› list Downloads: 142 files", "› create Images, PDF, Archives", ["ok", "✓ 34 files moved"]],
+      reply: "Done: 34 files sorted by type. I didn't delete anything." },
+    { said: "{W}, look at my screen: why does it crash?",
+      task: ["› capture active window", "› read app.py, line 42", ["ok", "✓ cause found"]],
+      reply: "Your script looks for config.json in the wrong folder. Shall I fix it?" },
+    { said: "{W}, find me a train to Lyon on Friday morning.",
+      task: ["› browser: searching timetables", "› 3 trains before 10 am", ["wait", "⏸ booking: waiting for your OK"]],
+      reply: "I found three before 10 am. Shall I book the 7:56?" },
+  ];
+  const SCENES_FR = [
     { said: "{W}, range mes téléchargements.",
       task: ["› liste Téléchargements : 142 fichiers", "› crée Images, PDF, Archives", ["ok", "✓ 34 fichiers déplacés"]],
       reply: "C'est fait : 34 fichiers rangés par type. Je n'ai rien supprimé." },
@@ -51,6 +90,7 @@
       task: ["› navigateur : recherche des horaires", "› 3 trains avant 10 h", ["wait", "⏸ réservation : j'attends ton accord"]],
       reply: "J'en ai trois avant 10 h. Je réserve celui de 7 h 56 ?" },
   ];
+  const SCENES = EN ? SCENES_EN : SCENES_FR;
   let heroSkin = "renard";
 
   const bubble = $("#bubble"), said = $("#said"), saidText = $("#said-text"), task = $("#task");
@@ -75,7 +115,7 @@
       said.classList.remove("off");
       await wait(1300);
       // 2. Jimy répond « Oui ? » puis travaille (fenêtre de tâche).
-      bubble.textContent = "Oui ?";
+      bubble.textContent = T.yes;
       bubble.classList.remove("off");
       await wait(900);
       bubble.classList.add("off");
@@ -108,7 +148,7 @@
 
   // Horloge de la barre des tâches : l'heure réelle du visiteur.
   const clock = $("#clock");
-  const tick = () => { if (clock) clock.textContent = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
+  const tick = () => { if (clock) clock.textContent = new Date().toLocaleTimeString(T.locale, { hour: "2-digit", minute: "2-digit" }); };
   tick(); setInterval(tick, 30000);
 
   // ── Collection : fiche du skin sélectionné ────────────────────────────────
@@ -120,10 +160,10 @@
     $("#stage").style.setProperty("--glow", k.glow);
     const badge = $("#stage-badge");
     badge.className = `badge ${k.badge}`;
-    badge.textContent = k.badge === "free" ? "Offert" : "Premium";
+    badge.textContent = k.badge === "free" ? T.free : "Premium";
     $("#skin-name").textContent = k.nom;
     $("#skin-desc").textContent = k.desc;
-    $("#skin-wake").textContent = `« ${k.wake} »`;
+    $("#skin-wake").textContent = T.quote(k.wake);
     $("#skin-buddy").textContent = k.buddy;
     $("#skin-price").textContent = k.prix;
   }

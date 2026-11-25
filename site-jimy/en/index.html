@@ -245,53 +245,38 @@
   </div>
 </section>
 
-<!-- Skins Section -->
-<section id="skins" aria-labelledby="t-skins">
+<!-- Skins Section (same showcase as the FR page, driven by assets/site.js) -->
+<section id="skins" class="collection" aria-labelledby="t-skins">
   <div class="wrap">
-    <p class="kicker reveal">Appearance</p>
-    <h2 id="t-skins" class="section-title reveal">Eight 3D companions. Pick the one that fits your workspace.</h2>
-    <p class="section-lead reveal">Five included for free right away. Three premium skins with unique animations to support ongoing development.</p>
+    <p class="kicker reveal">The collection</p>
+    <h2 id="t-skins" class="section-title reveal">Choose what your Jimy looks like.</h2>
+    <p class="section-lead reveal">Five free base skins. Premium skins, each with its own wake word and its own background-task companion.</p>
 
-    <div class="skins-grid">
-      <div class="skin-card reveal">
-        <div class="preview"><img src="/assets/skins/renard.webp" alt="Fox Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Fox</strong> <span class="tag mono free">Free</span></div>
-        <p>The original Jimy: warm orange fur and golden scarf.</p>
+    <div class="showcase">
+      <div class="stage reveal" id="stage">
+        <span class="badge free" id="stage-badge">Free</span>
+        <img id="stage-img" src="/assets/skins/renard.webp" alt="Skin Fox" width="770" height="960" loading="lazy">
       </div>
-      <div class="skin-card reveal">
-        <div class="preview"><img src="/assets/skins/arctique.webp" alt="Arctic Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Arctic</strong> <span class="tag mono free">Free</span></div>
-        <p>Pure white fur and turquoise scarf for minimalist setups.</p>
-      </div>
-      <div class="skin-card reveal">
-        <div class="preview"><img src="/assets/skins/fennec.webp" alt="Fennec Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Fennec</strong> <span class="tag mono free">Free</span></div>
-        <p>Large expressive ears and sand-colored fur, reactive to voice.</p>
-      </div>
-      <div class="skin-card reveal">
-        <div class="preview"><img src="/assets/skins/ours.webp" alt="Bear Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Bear</strong> <span class="tag mono free">Free</span></div>
-        <p>A calm brown bear with cozy small round ears.</p>
-      </div>
-      <div class="skin-card reveal">
-        <div class="preview"><img src="/assets/skins/robot.webp" alt="Robot Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Robot</strong> <span class="tag mono free">Free</span></div>
-        <p>Metallic grey futuristic chassis for tech automation.</p>
-      </div>
-      <div class="skin-card premium reveal">
-        <div class="preview"><img src="/assets/skins/neon.webp" alt="Neon Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>Neon</strong> <span class="tag mono paid">Premium</span></div>
-        <p>Stealth dark body with bright glowing orange outlines.</p>
-      </div>
-      <div class="skin-card premium reveal">
-        <div class="preview"><img src="/assets/skins/jeva.webp" alt="JEVA Android Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>JEVA</strong> <span class="tag mono paid">Premium</span></div>
-        <p>Chrome floating android with a single illuminated eye.</p>
-      </div>
-      <div class="skin-card premium reveal">
-        <div class="preview"><img src="/assets/skins/ark.webp" alt="ARK Sphere Skin" width="770" height="960" loading="lazy"></div>
-        <div class="meta"><strong>ARK</strong> <span class="tag mono paid">Premium</span></div>
-        <p>Mechanical sphere with a green eye and 12 articulated tentacles.</p>
+      <div class="info reveal">
+        <h3 id="skin-name">Fox</h3>
+        <p class="desc" id="skin-desc">The original Jimy: red fur, golden scarf.</p>
+        <dl class="specs">
+          <dt>Wake word</dt><dd id="skin-wake">“Jimy”</dd>
+          <dt>Companion</dt><dd id="skin-buddy">the rabbit</dd>
+          <dt>Price</dt><dd id="skin-price">Free</dd>
+        </dl>
+        <div class="thumbs" role="group" aria-label="Skins">
+          <button class="thumb" type="button" data-show="renard" aria-pressed="true"><img src="/assets/skins/renard.webp" alt="Jimy Fox avatar" width="80" height="80" loading="lazy"><span class="n">Fox</span></button>
+          <button class="thumb" type="button" data-show="arctique" aria-pressed="false"><img src="/assets/skins/arctique.webp" alt="Jimy Arctic avatar" width="80" height="80" loading="lazy"><span class="n">Arctic</span></button>
+          <button class="thumb" type="button" data-show="fennec" aria-pressed="false"><img src="/assets/skins/fennec.webp" alt="Jimy Fennec avatar" width="80" height="80" loading="lazy"><span class="n">Fennec</span></button>
+          <button class="thumb" type="button" data-show="ours" aria-pressed="false"><img src="/assets/skins/ours.webp" alt="Jimy Bear avatar" width="80" height="80" loading="lazy"><span class="n">Bear</span></button>
+          <button class="thumb" type="button" data-show="robot" aria-pressed="false"><img src="/assets/skins/robot.webp" alt="Jimy Robot avatar" width="80" height="80" loading="lazy"><span class="n">Robot</span></button>
+          <button class="thumb" type="button" data-show="neon" aria-pressed="false"><i class="p"></i><img src="/assets/skins/neon.webp" alt="Jimy Neon avatar" width="80" height="80" loading="lazy"><span class="n">Neon</span></button>
+          <button class="thumb" type="button" data-show="jeva" aria-pressed="false"><i class="p"></i><img src="/assets/skins/jeva.webp" alt="Jimy JEVA avatar" width="80" height="80" loading="lazy"><span class="n">JEVA</span></button>
+          <button class="thumb" type="button" data-show="ark" aria-pressed="false"><i class="p"></i><img src="/assets/skins/ark.webp" alt="Jimy ARK avatar" width="80" height="80" loading="lazy"><span class="n">ARK</span></button>
+        </div>
+        <div class="next"><img src="/assets/skins/jeva.webp" alt="JEVA OMEGA preview" width="46" height="46" loading="lazy"><span><b>JEVA OMEGA</b> is in the works: bigger, eight legs, and mini-JEVAs as companions.</span></div>
+        <p class="shop-note">The store opens soon: no payment is possible yet. Premium skins will be activated with a license key, in the app's Skin tab.</p>
       </div>
     </div>
   </div>
@@ -404,6 +389,6 @@
 </footer>
 
 <script src="/assets/tracking.js?v=2" defer></script>
-<script src="/assets/site.js" defer></script>
+<script src="/assets/site.js?v=2" defer></script>
 </body>
 </html>
