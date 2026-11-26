@@ -11,6 +11,7 @@ réponds `SEO OK`, puis mesure ses résultats et te fait un rapport.
 ## Comment ça marche
 
 ```
+Veille 19:00 UTC rappel de ce que le bot fera demain (rien s'il n'y a rien) → Telegram
 Lundi 07:00 UTC  rapport hebdo (Search Console + GA4)            → Telegram
 Lundi 08:00 UTC  prochaine tâche du calendrier :
                  branche seo/<ID> → pages FR+EN → vérifications → push

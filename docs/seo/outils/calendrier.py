@@ -7,6 +7,8 @@ Usage :
   python3 calendrier.py dues                       tâches hors site et mesures dues aujourd'hui
   python3 calendrier.py derniere                   dernière tâche terminée + dernière entrée du journal (/seo_derniere)
   python3 calendrier.py statut <ID> <STATUT> [--date AAAA-MM-JJ] [--note "texte"]
+  python3 calendrier.py rappel [--date AAAA-MM-JJ]  ce que le bot fera demain (ou la date donnée), vide si rien
+                                                   (tâche Hermes jimy-seo-rappel, sans modèle de langage)
 
 Ne jamais éditer calendrier.yaml à la main : passer par ce script (format et statuts garantis).
 L'état « en_redaction » / « en_validation » d'une tâche de contenu se lit aussi dans git :
@@ -128,6 +130,53 @@ def derniere():
         print(f"\nProchaine : {prochaine_tache['id']} — {prochaine_tache['titre']} (à partir du {prochaine_tache['date']})")
 
 
+def rappel(demain=None):
+    """Rappel de la veille (tâche Hermes jimy-seo-rappel, sans modèle de langage).
+    Affiche ce que le bot fera demain d'après les heures des tâches planifiées ;
+    n'affiche RIEN s'il n'y a rien demain (sortie vide = Hermes n'envoie aucun message)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    demain = demain or date.today() + timedelta(days=1)
+    # Heure de Paris d'une tâche planifiée en UTC (gère l'heure d'été).
+    paris = lambda h: datetime(demain.year, demain.month, demain.day, h, tzinfo=timezone.utc) \
+        .astimezone(ZoneInfo("Europe/Paris")).hour.__format__("d") + " h"
+    ts = taches(); par_id = {t["id"]: t for t in ts}
+    br = branches_ouvertes()
+    pret = lambda t: all(faite(par_id[d]) for d in t.get("depend_de", []))
+    lignes = []
+    # Rapport mensuel (1er du mois, 07:00 UTC) et hebdo (lundi, 07:00 UTC).
+    if demain.day == 1: lignes.append(f"• {paris(7)} : rapport mensuel Search Console + GA4")
+    if demain.weekday() == 0:
+        lignes.append(f"• {paris(7)} : rapport hebdo Search Console + GA4")
+        # Rédaction (lundi, 08:00 UTC) : même règle que prochaine(), évaluée pour demain.
+        ouvertes = [t for t in ts if t["type"] == "contenu" and (t["statut"] in OUVERTS or t["id"] in br)]
+        t = next((t for t in ts if t["id"] not in br and t["type"] in ("contenu", "revue")
+                  and t["statut"] == "a_faire" and jour(t["date"]) <= demain), None)
+        if len(ouvertes) >= MAX_OUVERTES:
+            lignes.append(f"• {paris(8)} : pas de rédaction, {len(ouvertes)} pages attendent déjà ta validation")
+        elif t and pret(t):
+            lignes.append(f"• {paris(8)} : rédaction de {t['id']} « {t['titre']} » (FR + EN). "
+                          f"Tu recevras l'aperçu : /seo ok {t['id']} pour publier, /seo corrige {t['id']} … sinon")
+    # Suivi (jeudi, 08:00 UTC) : on ne prévient que s'il y a quelque chose à faire.
+    if demain.weekday() == 3:
+        suivi = []
+        for t in ts:
+            if t["type"] == "hors_site" and t["statut"] == "a_faire" and pret(t) \
+                    and jour(t["date"]) <= demain and t["id"] not in br:
+                suivi.append(f"brouillon {t['id']} « {t['titre']} » (c'est toi qui publies)")
+            if t["type"] == "contenu" and t["statut"] == "publie" and t.get("publie_le"):
+                age = (demain - jour(t["publie_le"])).days
+                if age >= 28: suivi.append(f"bilan à 28 jours de {t['id']}")
+                elif age >= 14 and not t.get("controle_j14"): suivi.append(f"contrôle d'indexation de {t['id']}")
+        if suivi: lignes.append(f"• {paris(8)} : suivi : " + " ; ".join(suivi))
+    if not lignes: return  # rien demain : silence
+    jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    print(f"🔔 Bot SEO, demain {jours[demain.weekday()]} {demain:%d/%m} :")
+    print("\n".join(lignes))
+    attente = sorted(br)
+    if attente: print(f"En attente de ta validation : {', '.join(attente)}")
+
+
 def statut(ident, nouveau, jour_=None, note=None):
     entete, data = charger()
     t = next((x for x in data["taches"] if x["id"] == ident), None)
@@ -154,5 +203,6 @@ if __name__ == "__main__":
     elif a[:1] == ["prochaine"]: prochaine()
     elif a[:1] == ["dues"]: dues()
     elif a[:1] == ["derniere"]: derniere()
+    elif a[:1] == ["rappel"]: rappel(date.fromisoformat(d) if d else None)
     elif a[:1] == ["statut"] and len(a) == 3: statut(a[1], a[2], d, n)
     else: print(__doc__); sys.exit(2)

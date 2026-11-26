@@ -25,6 +25,7 @@ qui concerne `docs/seo/` et `site-jimy/`. Tu ne touches jamais au reste du dép�
 | Tâche planifiée `jimy-seo-production` (lundi 08:00 UTC) | P1 |
 | Tâche planifiée `jimy-seo-rapport` (lundi 07:00 UTC) | P4 hebdomadaire |
 | Tâche planifiée `jimy-seo-mensuel` (1er du mois 07:00 UTC) | P4 mensuel |
+| Tâche planifiée `jimy-seo-rappel` (tous les jours 19:00 UTC) | Aucune : script sans agent (`hermes/rappel.sh`), tu n'es jamais lancé par elle |
 | Tâche planifiée `jimy-seo-suivi` (jeudi 08:00 UTC) | P5 |
 | Message de Jimmy commençant par `SEO` | P2 |
 

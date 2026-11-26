@@ -82,8 +82,14 @@ $H cron create "0 7 * * 1" "$P la procédure P4, rapport hebdomadaire (--jours 7
 $H cron create "0 8 * * 1" "$P la procédure P1 (produire la prochaine tâche de contenu)." --name jimy-seo-production --deliver telegram --skill jimy-seo --workdir $W
 $H cron create "0 8 * * 4" "$P la procédure P5 (suivi : J+14, J+28, hors site, relances)." --name jimy-seo-suivi --deliver telegram --skill jimy-seo --workdir $W
 $H cron create "0 7 1 * *" "$P la procédure P4, rapport mensuel (--jours 28)." --name jimy-seo-mensuel --deliver telegram --skill jimy-seo --workdir $W
+# Rappel de la veille : script sans modèle de langage, muet s'il n'y a rien le lendemain.
+cp $W/hermes/rappel.sh ~/.hermes/scripts/jimy_seo_rappel.sh && chmod +x ~/.hermes/scripts/jimy_seo_rappel.sh
+$H cron create "0 19 * * *" --name jimy-seo-rappel --deliver telegram --script jimy_seo_rappel.sh --no-agent
 $H cron list
 ```
+Rappel : vérif `bash ~/.hermes/scripts/jimy_seo_rappel.sh` (vide sauf veille d'une action) et
+`python3 docs/seo/outils/calendrier.py rappel --date 2026-11-30` (simule la veille du 30/11).
+Si `hermes/rappel.sh` change dans le dépôt, le recopier.
 - Vérif : `hermes cron run <id de jimy-seo-rapport>` → rapport M3 reçu sur Telegram.
 
 **Modèle de la rédaction** (décision de Jimmy du 24/11) : `jimy-seo-production` tourne avec
